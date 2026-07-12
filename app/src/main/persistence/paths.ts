@@ -12,6 +12,7 @@ export function projectPaths(projectRoot: string) {
     codexDir: join(projectRoot, 'codex'),
     summariesDir: join(projectRoot, 'summaries'),
     revisionsDir: join(projectRoot, 'revisions'),
+    sessionsDir: join(projectRoot, 'sessions'),
     capabilitiesDir: join(projectRoot, 'capabilities'),
     agentRunsDir: join(projectRoot, 'agent-runs'),
     exportsDir: join(projectRoot, 'exports'),

@@ -321,6 +321,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
       if (prose.includes(payload.before)) {
         const nextProse = prose.replace(payload.before, payload.after)
+        await window.atlas.snapshots.create(suggestion.targetSceneId, prose, 'Before suggestion accepted')
         await window.atlas.scenes.write(suggestion.targetSceneId, { prose: nextProse })
         set((s) => ({ sceneProseVersion: s.sceneProseVersion + 1 }))
       }

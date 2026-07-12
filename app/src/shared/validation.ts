@@ -12,6 +12,7 @@ import { z } from 'zod'
 import type { AgentGoal, ModelRef } from './schema/agent'
 import type { CodexEntry, CodexEntryType, CodexVersion, CodexRelationship, FactStatus, ManuscriptLink } from './schema/codex'
 import type { ProjectManifest } from './schema/project'
+import type { SessionGoal } from './schema/session'
 import type { SceneWritePatch } from './ipc'
 
 // ---------------------------------------------------------------------------
@@ -197,6 +198,19 @@ const _agentGoalCheck: _AgentGoalCheck = true
 void _agentGoalCheck
 
 // ---------------------------------------------------------------------------
+// Session goal
+// ---------------------------------------------------------------------------
+
+export const SessionGoalSchema = z.object({
+  wordCount: z.number().optional(),
+  minutes: z.number().optional()
+})
+
+type _SessionGoalCheck = z.infer<typeof SessionGoalSchema> extends SessionGoal ? true : never
+const _sessionGoalCheck: _SessionGoalCheck = true
+void _sessionGoalCheck
+
+// ---------------------------------------------------------------------------
 // Project manifest seed (Partial<ProjectManifest>)
 // ---------------------------------------------------------------------------
 
@@ -216,7 +230,8 @@ export const ProjectManifestSeedSchema = z.object({
   activeSceneId: z.string().optional(),
   advancedMode: z.boolean().optional(),
   theme: ThemeSchema.optional(),
-  writerDisplayName: z.string().optional()
+  writerDisplayName: z.string().optional(),
+  sessionGoal: SessionGoalSchema.optional()
 })
 
 type _ProjectManifestSeedCheck = z.infer<typeof ProjectManifestSeedSchema> extends Partial<ProjectManifest>

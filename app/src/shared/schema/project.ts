@@ -1,3 +1,5 @@
+import type { SessionGoal } from './session'
+
 export type Theme = 'paper' | 'night' | 'typewriter'
 
 export interface ProjectManifest {
@@ -16,4 +18,7 @@ export interface ProjectManifest {
   // ("Good afternoon, {name}'s Writing Desk"). Editable later in Settings;
   // left unset the greeting just reads "Good afternoon".
   writerDisplayName?: string
+  // Daily writing goal shown/tracked on the Dashboard's "Today's session"
+  // card. Unset means no goal has been configured yet.
+  sessionGoal?: SessionGoal
 }

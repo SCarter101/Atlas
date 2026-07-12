@@ -5,16 +5,25 @@ import { IpcChannel, type FoundationsCodexDraft } from '@shared/ipc'
 import type { AgentGoal, PermissionDecision } from '@shared/schema/agent'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
-import { AgentGoalSchema, CodexEntrySchema, ProjectManifestSeedSchema, SceneWritePatchSchema } from '@shared/validation'
+import type { SessionGoal } from '@shared/schema/session'
+import {
+  AgentGoalSchema,
+  CodexEntrySchema,
+  ProjectManifestSeedSchema,
+  SceneWritePatchSchema,
+  SessionGoalSchema as SessionGoalValidationSchema
+} from '@shared/validation'
 import { listAgentRuns, loadAgentRun } from '../persistence/agentRunStore'
 import { listCapabilityManifests } from '../persistence/capabilityStore'
 import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persistence/codexStore'
 import { createProjectFromFoundations, slugify } from '../persistence/createProjectFromFoundations'
 import { findSceneLocation } from '../persistence/db'
 import { readManuscriptTree } from '../persistence/manuscriptStore'
-import { createProject, deleteProject, listProjects, openProject, sampleProjectRoot } from '../persistence/projectStore'
+import { createProject, deleteProject, listProjects, openProject, sampleProjectRoot, updateProjectManifest } from '../persistence/projectStore'
+import { createSnapshot, diffSnapshots, getSnapshot, listSnapshots } from '../persistence/revisionStore'
 import { readScene, writeScene } from '../persistence/sceneStore'
 import { seedCottonmouthProject } from '../persistence/seedSampleProject'
+import { getSessionSummary, logSessionActivity } from '../persistence/sessionStore'
 import { getCurrentProjectSession, ProjectSession, setCurrentProjectSession } from '../projectSession'
 
 export function registerIpcHandlers(getWebContents: () => WebContents): void {
@@ -91,7 +100,23 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
       const session = getCurrentProjectSession()
       const location = findSceneLocation(session.db, sceneId)
       if (!location) throw new Error(`Scene ${sceneId} is not in the project index`)
+
+      // Word-count delta for session tracking: read the scene's word count
+      // before and after the write (sceneStore.ts isn't owned by this wave,
+      // so we don't touch it — readScene(), already imported above, gives
+      // us the same before/after numbers without needing to modify it).
+      const before =
+        validatedPatch.prose !== undefined
+          ? await readScene(session.projectRoot, session.db, sceneId).catch(() => null)
+          : null
+
       await writeScene(session.projectRoot, session.db, sceneId, validatedPatch, location.relativeDir, location.slug)
+
+      if (validatedPatch.prose !== undefined) {
+        const after = await readScene(session.projectRoot, session.db, sceneId)
+        const delta = after.meta.wordCount - (before?.meta.wordCount ?? 0)
+        if (delta !== 0) await logSessionActivity(session.projectRoot, delta)
+      }
     }
   )
 
@@ -152,5 +177,49 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.AgentRunGet, async (_evt, runId: string) => {
     const session = getCurrentProjectSession()
     return loadAgentRun(session.projectRoot, runId)
+  })
+
+  ipcMain.handle(IpcChannel.SessionsLogActivity, async (_evt, wordsDelta: number) => {
+    const session = getCurrentProjectSession()
+    await logSessionActivity(session.projectRoot, wordsDelta)
+  })
+
+  ipcMain.handle(IpcChannel.SessionsSummary, async () => {
+    const session = getCurrentProjectSession()
+    const manifest = await openProject(session.projectRoot)
+    return getSessionSummary(session.projectRoot, manifest.sessionGoal)
+  })
+
+  ipcMain.handle(IpcChannel.SessionsSetGoal, async (_evt, goal: SessionGoal) => {
+    const validatedGoal = SessionGoalValidationSchema.parse(goal)
+    const session = getCurrentProjectSession()
+    await updateProjectManifest(session.projectRoot, { sessionGoal: validatedGoal })
+  })
+
+  ipcMain.handle(IpcChannel.SnapshotsList, async (_evt, sceneId: string) => {
+    const session = getCurrentProjectSession()
+    return listSnapshots(session.projectRoot, sceneId)
+  })
+
+  ipcMain.handle(IpcChannel.SnapshotsCreate, async (_evt, sceneId: string, prose: string, label?: string) => {
+    const session = getCurrentProjectSession()
+    const { meta } = await readScene(session.projectRoot, session.db, sceneId)
+    return createSnapshot(session.projectRoot, sceneId, prose, meta, label)
+  })
+
+  // 'current' is a sentinel id (not a real snapshotId) meaning "the scene's
+  // live prose on disk right now" — lets the renderer diff a saved snapshot
+  // against the current draft without a separate IPC shape.
+  ipcMain.handle(IpcChannel.SnapshotsDiff, async (_evt, sceneId: string, snapshotIdA: string, snapshotIdB: string) => {
+    const session = getCurrentProjectSession()
+    const [proseA, proseB] = await Promise.all([
+      snapshotIdA === 'current'
+        ? readScene(session.projectRoot, session.db, sceneId).then((r) => r.prose)
+        : getSnapshot(session.projectRoot, sceneId, snapshotIdA).then((s) => s.prose),
+      snapshotIdB === 'current'
+        ? readScene(session.projectRoot, session.db, sceneId).then((r) => r.prose)
+        : getSnapshot(session.projectRoot, sceneId, snapshotIdB).then((s) => s.prose)
+    ])
+    return diffSnapshots(proseA, proseB)
   })
 }
