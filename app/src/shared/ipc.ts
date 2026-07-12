@@ -4,6 +4,8 @@ import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { ProjectManifest } from './schema/project'
 import type { ManuscriptTree, SceneMeta } from './schema/manuscript'
 import type { ChapterSummary, ContextWarning, RetrievalResult, SceneSummary } from './schema/retrieval'
+import type { SessionGoal, SessionSummary } from './schema/session'
+import type { SnapshotDiffRun } from './schema/revision'
 
 // Channel names shared between preload's contextBridge exposure and main's
 // ipcMain handlers, so a typo can't silently create two different strings.
@@ -35,7 +37,13 @@ export const IpcChannel = {
   RetrievalSearch: 'retrieval:search',
   SummariesGetChapter: 'summaries:get-chapter',
   SummariesGetScene: 'summaries:get-scene',
-  ContextWarnings: 'context:warnings'
+  ContextWarnings: 'context:warnings',
+  SessionsLogActivity: 'sessions:log-activity',
+  SessionsSummary: 'sessions:summary',
+  SessionsSetGoal: 'sessions:set-goal',
+  SnapshotsList: 'snapshots:list',
+  SnapshotsCreate: 'snapshots:create',
+  SnapshotsDiff: 'snapshots:diff'
 } as const
 
 export interface SceneReadResult {
@@ -121,5 +129,15 @@ export interface AtlasBridge {
   }
   context: {
     warnings(goal: AgentGoal): Promise<ContextWarning[]>
+  }
+  sessions: {
+    logActivity(wordsDelta: number): Promise<void>
+    summary(): Promise<SessionSummary>
+    setGoal(goal: SessionGoal): Promise<void>
+  }
+  snapshots: {
+    list(sceneId: string): Promise<{ snapshotId: string; label?: string; createdAt: string }[]>
+    create(sceneId: string, prose: string, label?: string): Promise<{ snapshotId: string }>
+    diff(sceneId: string, snapshotIdA: string, snapshotIdB: string): Promise<SnapshotDiffRun[]>
   }
 }

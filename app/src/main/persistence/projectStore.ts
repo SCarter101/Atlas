@@ -63,6 +63,7 @@ export async function createProject(
       paths.codexDir,
       paths.summariesDir,
       paths.revisionsDir,
+      paths.sessionsDir,
       paths.capabilitiesDir,
       paths.agentRunsDir,
       paths.exportsDir,
@@ -88,4 +89,17 @@ export async function createProject(
 
   await writeFile(paths.manifest, JSON.stringify(manifest, null, 2), 'utf-8')
   return manifest
+}
+
+// Small, generic manifest patcher for callers (e.g. the sessions:set-goal
+// IPC handler) that need to persist one or two fields without re-deriving
+// the whole creation flow above.
+export async function updateProjectManifest(
+  projectRoot: string,
+  patch: Partial<ProjectManifest>
+): Promise<ProjectManifest> {
+  const current = await openProject(projectRoot)
+  const next: ProjectManifest = { ...current, ...patch, updatedAt: new Date().toISOString() }
+  await writeFile(projectPaths(projectRoot).manifest, JSON.stringify(next, null, 2), 'utf-8')
+  return next
 }

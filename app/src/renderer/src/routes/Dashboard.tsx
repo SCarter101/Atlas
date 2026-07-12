@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CodexEntry } from '@shared/schema/codex'
+import type { SessionSummary } from '@shared/schema/session'
 import { CHAPTER_STATUS_LABEL, deriveChapterStatus } from '@shared/deriveChapterStatus'
 import { useAtlasStore } from '../state/store'
 
@@ -36,9 +37,14 @@ export function Dashboard(): JSX.Element {
   const navigate = useNavigate()
   const [streakOpen, setStreakOpen] = useState(false)
   const [codexEntries, setCodexEntries] = useState<CodexEntry[]>([])
+  const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null)
 
   useEffect(() => {
     void window.atlas.codex.list().then(setCodexEntries)
+  }, [])
+
+  useEffect(() => {
+    void window.atlas.sessions.summary().then(setSessionSummary)
   }, [])
 
   const book = tree?.books[0]
@@ -209,13 +215,23 @@ export function Dashboard(): JSX.Element {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: isNewProject ? '1fr' : '1fr 1fr', gap: 16, marginBottom: 20 }}>
-        {/* Today's session — mocked; real session tracking is a Phase 3 concern */}
+        {/* Today's session — real data from window.atlas.sessions.summary() */}
         <div style={{ border: '1px solid var(--c-border)', borderRadius: 12, padding: '18px 20px', background: 'var(--c-surface-raised)' }}>
           <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 10 }}>
             Today's session
           </div>
-          <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--c-ink-faint)', marginBottom: 6 }}>
-            Not tracked yet
+          <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--c-ink)', marginBottom: 4 }}>
+            {sessionSummary ? `${sessionSummary.today.wordsWritten.toLocaleString()} words today` : 'Loading…'}
+          </div>
+          {sessionSummary?.goal?.wordCount !== undefined && (
+            <div style={{ fontSize: 12, color: sessionSummary.goalMet ? 'var(--c-green)' : 'var(--c-ink-faint)', marginBottom: 4 }}>
+              {sessionSummary.goalMet ? 'Goal met' : `Goal: ${sessionSummary.goal.wordCount.toLocaleString()} words`}
+            </div>
+          )}
+          <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>
+            {sessionSummary && sessionSummary.streakDays > 0
+              ? `${sessionSummary.streakDays} day${sessionSummary.streakDays === 1 ? '' : 's'} streak`
+              : 'No streak yet'}
           </div>
           <button
             onClick={() => setStreakOpen((v) => !v)}
@@ -223,9 +239,24 @@ export function Dashboard(): JSX.Element {
           >
             {streakOpen ? 'Hide details' : 'Show details'}
           </button>
-          {streakOpen && (
-            <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--c-ink-soft)' }}>
-              Writing streaks and session goals will be tracked once Phase 3's session data lands.
+          {streakOpen && sessionSummary && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, color: 'var(--c-ink-faint)', marginBottom: 6 }}>Last 30 days</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 3, maxWidth: 150 }}>
+                {sessionSummary.heatmap.map((day) => (
+                  <div
+                    key={day.date}
+                    title={`${day.date}: ${day.wordsWritten.toLocaleString()} words`}
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: 2,
+                      background: day.wordsWritten > 0 ? 'var(--c-green)' : 'var(--c-border)',
+                      opacity: day.wordsWritten > 0 ? Math.min(1, 0.3 + day.wordsWritten / 1000) : 1
+                    }}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </div>
