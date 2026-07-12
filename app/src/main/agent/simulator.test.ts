@@ -23,7 +23,12 @@ describe('AgentRunManager — Line Editor simulated flow', () => {
     return {
       runId: 'run-1',
       agentRole: 'Line-Editor',
-      modelRef: { provider: 'openrouter', modelId: 'gpt-4.1', viaOpenRouter: true },
+      // 'anthropic' (not 'openrouter'/'lm-studio') so this still exercises
+      // the simulated flow via SimulatorAdapter — those two providers now
+      // route to real-but-unconfigured adapters that throw (see
+      // agent/providers/), matching what every real AgentGoal construction
+      // site in the app actually sends today.
+      modelRef: { provider: 'anthropic', modelId: 'gpt-4.1', viaOpenRouter: false },
       userIntent: 'Send selected text to Line Editor',
       scope: { sceneIds: ['scene-002'], selectionText },
       constraints: {

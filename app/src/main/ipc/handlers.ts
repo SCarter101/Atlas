@@ -3,18 +3,20 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { IpcChannel, type FoundationsCodexDraft } from '@shared/ipc'
 import type { AgentGoal, PermissionDecision } from '@shared/schema/agent'
+import type { CapabilityManifest, LifecycleState } from '@shared/schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
 import type { SessionGoal } from '@shared/schema/session'
 import {
   AgentGoalSchema,
+  CapabilityManifestSchema,
   CodexEntrySchema,
   ProjectManifestSeedSchema,
   SceneWritePatchSchema,
   SessionGoalSchema as SessionGoalValidationSchema
 } from '@shared/validation'
+import { createCapability, listCapabilities, setLifecycleState, updateCapability } from '../capabilities/registry'
 import { listAgentRuns, loadAgentRun } from '../persistence/agentRunStore'
-import { listCapabilityManifests } from '../persistence/capabilityStore'
 import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persistence/codexStore'
 import { createProjectFromFoundations, slugify } from '../persistence/createProjectFromFoundations'
 import { findSceneLocation } from '../persistence/db'
@@ -144,7 +146,34 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
 
   ipcMain.handle(IpcChannel.CapabilitiesList, async () => {
     const session = getCurrentProjectSession()
-    return listCapabilityManifests(session.projectRoot)
+    return listCapabilities(session.projectRoot)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesCreate, async (_evt, manifest: CapabilityManifest) => {
+    const validatedManifest = CapabilityManifestSchema.parse(manifest)
+    const session = getCurrentProjectSession()
+    await createCapability(session.projectRoot, validatedManifest)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesUpdate, async (_evt, manifest: CapabilityManifest) => {
+    const validatedManifest = CapabilityManifestSchema.parse(manifest)
+    const session = getCurrentProjectSession()
+    await updateCapability(session.projectRoot, validatedManifest)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesSetLifecycleState, async (_evt, id: string, state: LifecycleState) => {
+    const session = getCurrentProjectSession()
+    await setLifecycleState(session.projectRoot, id, state)
+  })
+
+  ipcMain.handle(IpcChannel.PermissionsList, async () => {
+    const session = getCurrentProjectSession()
+    return session.approvals.listApprovals()
+  })
+
+  ipcMain.handle(IpcChannel.PermissionsRevoke, async (_evt, id: string) => {
+    const session = getCurrentProjectSession()
+    session.approvals.revokeApproval(id)
   })
 
   ipcMain.handle(IpcChannel.AgentRunStart, async (_evt, goal: AgentGoal) => {

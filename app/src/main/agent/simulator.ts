@@ -5,6 +5,7 @@ import type {
   AgentRunRecord,
   AgentStep,
   ModelCallSummary,
+  ModelRef,
   PermissionDecision,
   PermissionRequest,
   SuggestionRef,
@@ -12,24 +13,73 @@ import type {
 } from '@shared/schema/agent'
 import type { AtlasDb } from '../persistence/db'
 import { saveAgentRun } from '../persistence/agentRunStore'
+import { listCodexEntries } from '../persistence/codexStore'
 import { configuredMcpServers } from '@shared/mcp'
+import { listCapabilities } from '../capabilities/registry'
+import { runSandboxed } from '../capabilities/sandbox'
+import { getSeedTool } from '../capabilities/seedTools'
+import { buildSessionApproval, SessionApprovalStore } from '../permissions/sessionApprovals'
+import { LmStudioAdapter } from './providers/lmStudioAdapter'
+import { OpenRouterAdapter } from './providers/openRouterAdapter'
+import { SimulatorAdapter } from './providers/simulatorAdapter'
+import type { ProviderAdapter } from './providers/types'
 
 // Phase 2 scope (data-contracts §6): the AgentGoal -> AgentStep[] ->
 // AgentRunRecord pipeline, and the permission/session-approval flow, are
-// real. Only the model-call step is answered by a canned simulator instead
-// of a live OpenRouter/LM Studio request. Swapping in a real provider call
-// in Phase 3 means replacing runModelCallSimulated() below — nothing about
-// the schema, IPC contract, or UI needs to change.
+// real. Phase 3 makes the provider *architecture* real and swappable — see
+// providers/ — while keeping the model call itself simulated (a confirmed
+// product decision, not revisited here): selectAdapter() below tries a real
+// OpenRouter/LM Studio adapter first and falls back to SimulatorAdapter,
+// which is the only one ever actually reached today since nothing
+// constructs an AgentGoal with those providers. Phase 3 also adds enforced
+// budgets/duplicate-action detection and a real capability registry +
+// sandbox (see ../capabilities) — Dev-Editor's run now folds one real data
+// point (a live Codex contradiction check) into its otherwise-simulated
+// findings.
+
+const adapters: ProviderAdapter[] = [new OpenRouterAdapter(), new LmStudioAdapter(), new SimulatorAdapter()]
+
+export function selectAdapter(modelRef: ModelRef): ProviderAdapter {
+  for (const adapter of adapters) {
+    if (adapter.supports(modelRef)) return adapter
+  }
+  return adapters[adapters.length - 1]
+}
+
+function toolSignature(toolId: string, input: unknown): string {
+  return `${toolId}:${JSON.stringify(input)}`
+}
+
+// Risk 4 ("detect repeated or circular actions, stop runaway loops"): true
+// once `newSignature` would be the threshold-th occurrence among
+// `recentSignatures`. Every current run<Role>() method only ever makes one
+// tool call per run (they're single-shot, not iterative loops), so this
+// never actually fires on a real run path today — it's exercised directly
+// by simulator.budget.test.ts as a pure function instead.
+export function detectDuplicateAction(recentSignatures: string[], newSignature: string, threshold = 3): boolean {
+  const occurrences = recentSignatures.filter((s) => s === newSignature).length
+  return occurrences >= threshold - 1
+}
 
 interface PendingPermission {
   requestId: string
   resolve: (decision: PermissionDecision) => void
 }
 
+interface RunBudget {
+  turnsUsed: number
+  toolCallsUsed: number
+  tokensUsed: number
+  costUsdUsed: number
+  startedAtMs: number
+  recentSignatures: string[]
+}
+
 interface RunState {
   record: AgentRunRecord
   pendingPermission?: PendingPermission
   listeners: Set<(step: AgentStep) => void>
+  budget: RunBudget
 }
 
 export class AgentRunManager {
@@ -37,7 +87,8 @@ export class AgentRunManager {
 
   constructor(
     private readonly projectRoot: string,
-    private readonly db: AtlasDb
+    private readonly db: AtlasDb,
+    private readonly approvals: SessionApprovalStore = new SessionApprovalStore()
   ) {}
 
   start(goal: AgentGoal): { runId: string } {
@@ -48,7 +99,11 @@ export class AgentRunManager {
       status: 'running',
       startedAt: new Date().toISOString()
     }
-    this.runs.set(goal.runId, { record, listeners: new Set() })
+    this.runs.set(goal.runId, {
+      record,
+      listeners: new Set(),
+      budget: { turnsUsed: 0, toolCallsUsed: 0, tokensUsed: 0, costUsdUsed: 0, startedAtMs: Date.now(), recentSignatures: [] }
+    })
 
     // Fire and forget — the renderer subscribes to steps via onStep().
     void this.execute(goal).catch((err) => {
@@ -102,6 +157,27 @@ export class AgentRunManager {
     const state = this.runs.get(goal.runId)
     if (!state) return 'denied'
 
+    // Spec §13: an existing session approval covering the exact named
+    // capability/actionType/dataScope/destination skips the round-trip
+    // entirely — matches the renderer's existing auto-resolve behavior
+    // (state/store.ts's handleAgentStep), now backed by a real main-process
+    // store instead of only a client-side fake.
+    const existing = this.approvals.checkApproval({
+      capabilityId: request.capabilityId,
+      actionType: request.actionType,
+      dataScope: request.dataScope,
+      destination: request.destination
+    })
+    if (existing) {
+      this.emit(goal.runId, {
+        stepIndex: state.record.steps.length,
+        kind: 'permission-request',
+        timestamp: new Date().toISOString(),
+        detail: { ...request, decision: 'approved-session' }
+      })
+      return 'approved-session'
+    }
+
     const decision = await new Promise<PermissionDecision>((resolve) => {
       state.pendingPermission = { requestId: request.requestId, resolve }
       this.emit(goal.runId, {
@@ -118,7 +194,106 @@ export class AgentRunManager {
       timestamp: new Date().toISOString(),
       detail: { ...request, decision }
     })
+
+    if (decision === 'approved-session') {
+      this.approvals.grantApproval(buildSessionApproval(request))
+    }
+
     return decision
+  }
+
+  // Checked right before each tool-call emission — do NOT execute the tool
+  // call if it would exceed maxToolCalls or the run is already past
+  // maxElapsedMs. A distinct terminal path from permission-denied: distinct
+  // message, and status 'cancelled' rather than an error.
+  private async guardToolCall(goal: AgentGoal, agentDisplayName: string): Promise<boolean> {
+    const state = this.runs.get(goal.runId)
+    if (!state) return true
+    const budget = state.budget
+
+    let reason: string | undefined
+    if (budget.toolCallsUsed + 1 > goal.constraints.maxToolCalls) {
+      reason = `tool-call budget (${goal.constraints.maxToolCalls}) reached before a result could be produced.`
+    } else if (Date.now() - budget.startedAtMs > goal.constraints.maxElapsedMs) {
+      reason = `time budget (${goal.constraints.maxElapsedMs}ms) was exceeded before a result could be produced.`
+    }
+
+    if (!reason) return false
+    await this.stopForBudget(goal, agentDisplayName, reason)
+    return true
+  }
+
+  // Checked right before each model-call emission, using the adapter's
+  // already-computed token/cost numbers rather than a pre-estimate.
+  private async guardModelCall(goal: AgentGoal, agentDisplayName: string, modelCall: ModelCallSummary): Promise<boolean> {
+    const state = this.runs.get(goal.runId)
+    if (!state) return true
+    const budget = state.budget
+
+    let reason: string | undefined
+    if (budget.tokensUsed + modelCall.inputTokens + modelCall.outputTokens > goal.constraints.maxTokens) {
+      reason = `token budget (${goal.constraints.maxTokens}) would be exceeded before a result could be produced.`
+    } else if (Date.now() - budget.startedAtMs > goal.constraints.maxElapsedMs) {
+      reason = `time budget (${goal.constraints.maxElapsedMs}ms) was exceeded before a result could be produced.`
+    } else if (
+      goal.constraints.maxCostUsd !== undefined &&
+      budget.costUsdUsed + modelCall.estimatedCostUsd > goal.constraints.maxCostUsd
+    ) {
+      reason = `cost budget ($${goal.constraints.maxCostUsd.toFixed(2)}) would be exceeded before a result could be produced.`
+    }
+
+    if (!reason) return false
+    await this.stopForBudget(goal, agentDisplayName, reason)
+    return true
+  }
+
+  private async guardDuplicateAction(goal: AgentGoal, agentDisplayName: string, signature: string): Promise<boolean> {
+    const state = this.runs.get(goal.runId)
+    if (!state) return true
+    if (detectDuplicateAction(state.budget.recentSignatures, signature)) {
+      await this.stopForBudget(
+        goal,
+        agentDisplayName,
+        'the same tool call was attempted repeatedly — stopping to avoid a runaway loop.',
+        'duplicate-action-detected'
+      )
+      return true
+    }
+    state.budget.recentSignatures.push(signature)
+    return false
+  }
+
+  private async stopForBudget(
+    goal: AgentGoal,
+    agentDisplayName: string,
+    reason: string,
+    warningCode: string = 'budget-exceeded'
+  ): Promise<void> {
+    const state = this.runs.get(goal.runId)
+    if (!state) return
+    this.emit(goal.runId, {
+      stepIndex: state.record.steps.length,
+      kind: 'result',
+      timestamp: new Date().toISOString(),
+      detail: { summary: `${agentDisplayName} stopped: ${reason}`, warnings: [warningCode] } satisfies AgentResult
+    })
+    await this.finish(goal.runId, 'cancelled')
+  }
+
+  private async runModelCallStep(goal: AgentGoal, selection: string): Promise<ModelCallSummary> {
+    return selectAdapter(goal.modelRef).runModelCall({
+      modelRef: goal.modelRef,
+      userIntent: goal.userIntent,
+      contextText: selection
+    })
+  }
+
+  private recordModelCall(goal: AgentGoal, modelCall: ModelCallSummary): void {
+    const state = this.runs.get(goal.runId)
+    if (!state) return
+    state.budget.tokensUsed += modelCall.inputTokens + modelCall.outputTokens
+    state.budget.costUsdUsed += modelCall.estimatedCostUsd
+    state.budget.turnsUsed += 1
   }
 
   private async execute(goal: AgentGoal): Promise<void> {
@@ -187,12 +362,19 @@ export class AgentRunManager {
     const state = this.runs.get(goal.runId)
     if (!state) return
 
+    if (await this.guardToolCall(goal, 'Line Editor')) return
+
     const selection = goal.scope.selectionText ?? ''
+    const toolInput = { selection }
+    if (await this.guardDuplicateAction(goal, 'Line Editor', toolSignature('global.tools.line-edit-scan@1.0.0', toolInput))) {
+      return
+    }
+
     const suggestions = simulateLineEditFindings(selection, goal.scope.sceneIds?.[0])
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.line-edit-scan@1.0.0',
-      input: { selection },
+      input: toolInput,
       output: suggestions
     }
     this.emit(goal.runId, {
@@ -201,19 +383,17 @@ export class AgentRunManager {
       timestamp: new Date().toISOString(),
       detail: toolCall
     })
+    state.budget.toolCallsUsed += 1
 
-    const modelCall: ModelCallSummary = {
-      modelRef: goal.modelRef,
-      inputTokens: 180 + selection.length,
-      outputTokens: 60 + suggestions.length * 40,
-      estimatedCostUsd: 0.0021
-    }
+    const modelCall = await this.runModelCallStep(goal, selection)
+    if (await this.guardModelCall(goal, 'Line Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
       kind: 'model-call',
       timestamp: new Date().toISOString(),
       detail: modelCall
     })
+    this.recordModelCall(goal, modelCall)
 
     const result: AgentResult = {
       summary:
@@ -259,12 +439,21 @@ export class AgentRunManager {
     const state = this.runs.get(goal.runId)
     if (!state) return
 
+    if (await this.guardToolCall(goal, 'Generator')) return
+
     const selection = goal.scope.selectionText ?? ''
+    const toolInput = { selection }
+    if (
+      await this.guardDuplicateAction(goal, 'Generator', toolSignature('global.tools.prose-continuation@1.0.0', toolInput))
+    ) {
+      return
+    }
+
     const suggestions = simulateGeneratorContinuation(selection, goal.scope.sceneIds?.[0])
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.prose-continuation@1.0.0',
-      input: { selection },
+      input: toolInput,
       output: suggestions
     }
     this.emit(goal.runId, {
@@ -273,19 +462,17 @@ export class AgentRunManager {
       timestamp: new Date().toISOString(),
       detail: toolCall
     })
+    state.budget.toolCallsUsed += 1
 
-    const modelCall: ModelCallSummary = {
-      modelRef: goal.modelRef,
-      inputTokens: 180 + selection.length,
-      outputTokens: 60 + suggestions.length * 60,
-      estimatedCostUsd: 0.0024
-    }
+    const modelCall = await this.runModelCallStep(goal, selection)
+    if (await this.guardModelCall(goal, 'Generator', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
       kind: 'model-call',
       timestamp: new Date().toISOString(),
       detail: modelCall
     })
+    this.recordModelCall(goal, modelCall)
 
     const result: AgentResult = {
       summary: `Generator drafted ${suggestions.length} continuation${suggestions.length === 1 ? '' : 's'}.`,
@@ -328,13 +515,30 @@ export class AgentRunManager {
     const state = this.runs.get(goal.runId)
     if (!state) return
 
+    if (await this.guardToolCall(goal, 'Story Editor')) return
+
     const selection = goal.scope.selectionText ?? ''
+    const toolInput = { selection }
+    if (
+      await this.guardDuplicateAction(goal, 'Story Editor', toolSignature('global.tools.structural-analysis@1.0.0', toolInput))
+    ) {
+      return
+    }
+
     const suggestions = simulateStructuralFindings(selection, goal.scope.sceneIds?.[0])
+
+    // The one real thing Story Editor does in this build: discover the real
+    // codex-contradiction-check capability via the registry and, if it's
+    // enabled and compatible with this role, actually run it (through the
+    // sandbox) against the project's real Codex entries — augmenting the
+    // simulated structural findings with one genuine data point, not
+    // replacing them.
+    const contradictionNote = await this.checkCodexContradictions(goal)
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.structural-analysis@1.0.0',
-      input: { selection },
-      output: suggestions
+      input: toolInput,
+      output: contradictionNote ? { findings: suggestions, codexContradictionCheck: contradictionNote } : suggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -342,23 +546,24 @@ export class AgentRunManager {
       timestamp: new Date().toISOString(),
       detail: toolCall
     })
+    state.budget.toolCallsUsed += 1
 
-    const modelCall: ModelCallSummary = {
-      modelRef: goal.modelRef,
-      inputTokens: 220 + selection.length,
-      outputTokens: 70 + suggestions.length * 50,
-      estimatedCostUsd: 0.0027
-    }
+    const modelCall = await this.runModelCallStep(goal, selection)
+    if (await this.guardModelCall(goal, 'Story Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
       kind: 'model-call',
       timestamp: new Date().toISOString(),
       detail: modelCall
     })
+    this.recordModelCall(goal, modelCall)
 
     const result: AgentResult = {
-      summary: `Story Editor found ${suggestions.length} structural note${suggestions.length === 1 ? '' : 's'}.`,
-      proposedManuscriptChanges: suggestions
+      summary: `Story Editor found ${suggestions.length} structural note${suggestions.length === 1 ? '' : 's'}.${
+        contradictionNote ? ` ${contradictionNote.summary}` : ''
+      }`,
+      proposedManuscriptChanges: suggestions,
+      warnings: contradictionNote ? [contradictionNote.summary] : undefined
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -368,6 +573,38 @@ export class AgentRunManager {
     })
 
     await this.finish(goal.runId, 'completed')
+  }
+
+  private async checkCodexContradictions(
+    goal: AgentGoal
+  ): Promise<{ summary: string; contradictions: [string, string[]][] } | undefined> {
+    try {
+      const capabilities = await listCapabilities(this.projectRoot)
+      const capability = capabilities.find(
+        (c) =>
+          c.id === 'global.tools.codex-contradiction-check' &&
+          c.lifecycleState === 'enabled' &&
+          c.compatibleAgentRoles.includes(goal.agentRole)
+      )
+      if (!capability) return undefined
+
+      const tool = getSeedTool(capability.id)
+      if (!tool) return undefined
+
+      const entries = await listCodexEntries(this.projectRoot)
+      const { output, error } = await runSandboxed(tool, { entries })
+      if (error || !output) return undefined
+
+      const { contradictions } = output as { contradictions: [string, string[]][] }
+      if (contradictions.length === 0) return undefined
+
+      return {
+        summary: `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} detected in the Codex.`,
+        contradictions
+      }
+    } catch {
+      return undefined
+    }
   }
 
   private async runDialoguer(goal: AgentGoal): Promise<void> {
@@ -397,12 +634,21 @@ export class AgentRunManager {
     const state = this.runs.get(goal.runId)
     if (!state) return
 
+    if (await this.guardToolCall(goal, 'Dialogue Editor')) return
+
     const selection = goal.scope.selectionText ?? ''
+    const toolInput = { selection }
+    if (
+      await this.guardDuplicateAction(goal, 'Dialogue Editor', toolSignature('global.tools.dialogue-scan@1.0.0', toolInput))
+    ) {
+      return
+    }
+
     const suggestions = simulateDialogueAlternatives(selection, goal.scope.sceneIds?.[0])
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.dialogue-scan@1.0.0',
-      input: { selection },
+      input: toolInput,
       output: suggestions
     }
     this.emit(goal.runId, {
@@ -411,19 +657,17 @@ export class AgentRunManager {
       timestamp: new Date().toISOString(),
       detail: toolCall
     })
+    state.budget.toolCallsUsed += 1
 
-    const modelCall: ModelCallSummary = {
-      modelRef: goal.modelRef,
-      inputTokens: 160 + selection.length,
-      outputTokens: 50 + suggestions.length * 45,
-      estimatedCostUsd: 0.002
-    }
+    const modelCall = await this.runModelCallStep(goal, selection)
+    if (await this.guardModelCall(goal, 'Dialogue Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
       kind: 'model-call',
       timestamp: new Date().toISOString(),
       detail: modelCall
     })
+    this.recordModelCall(goal, modelCall)
 
     const result: AgentResult = {
       summary: `Dialogue Editor proposed ${suggestions.length} alternative reading${suggestions.length === 1 ? '' : 's'}.`,
@@ -466,12 +710,21 @@ export class AgentRunManager {
     const state = this.runs.get(goal.runId)
     if (!state) return
 
+    if (await this.guardToolCall(goal, 'World Builder')) return
+
     const selection = goal.scope.selectionText ?? ''
+    const toolInput = { selection }
+    if (
+      await this.guardDuplicateAction(goal, 'World Builder', toolSignature('global.tools.world-research@1.0.0', toolInput))
+    ) {
+      return
+    }
+
     const suggestions = simulateCodexAdditions(selection, goal.scope.sceneIds?.[0])
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.world-research@1.0.0',
-      input: { selection },
+      input: toolInput,
       output: suggestions
     }
     this.emit(goal.runId, {
@@ -480,19 +733,17 @@ export class AgentRunManager {
       timestamp: new Date().toISOString(),
       detail: toolCall
     })
+    state.budget.toolCallsUsed += 1
 
-    const modelCall: ModelCallSummary = {
-      modelRef: goal.modelRef,
-      inputTokens: 200 + selection.length,
-      outputTokens: 80 + suggestions.length * 55,
-      estimatedCostUsd: 0.0026
-    }
+    const modelCall = await this.runModelCallStep(goal, selection)
+    if (await this.guardModelCall(goal, 'World Builder', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
       kind: 'model-call',
       timestamp: new Date().toISOString(),
       detail: modelCall
     })
+    this.recordModelCall(goal, modelCall)
 
     const result: AgentResult = {
       // Routed through proposedManuscriptChanges (rather than

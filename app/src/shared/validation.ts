@@ -10,6 +10,7 @@
 // each schema against its source-of-truth interface at compile time.
 import { z } from 'zod'
 import type { AgentGoal, ModelRef } from './schema/agent'
+import type { CapabilityManifest, JsonSchema } from './schema/capability'
 import type { CodexEntry, CodexEntryType, CodexVersion, CodexRelationship, FactStatus, ManuscriptLink } from './schema/codex'
 import type { ProjectManifest } from './schema/project'
 import type { SessionGoal } from './schema/session'
@@ -196,6 +197,64 @@ export const AgentGoalSchema = z.object({
 type _AgentGoalCheck = z.infer<typeof AgentGoalSchema> extends AgentGoal ? true : never
 const _agentGoalCheck: _AgentGoalCheck = true
 void _agentGoalCheck
+
+// ---------------------------------------------------------------------------
+// Capability manifest
+// ---------------------------------------------------------------------------
+
+// JsonSchema is a self-referential minimal JSON Schema surface (see
+// schema/capability.ts) with an index signature for arbitrary extra keys —
+// z.lazy() + catchall mirrors both.
+export const JsonSchemaSchema: z.ZodType<JsonSchema> = z.lazy(() =>
+  z
+    .object({
+      type: z.string().optional(),
+      properties: z.record(JsonSchemaSchema).optional(),
+      items: JsonSchemaSchema.optional(),
+      required: z.array(z.string()).optional(),
+      description: z.string().optional()
+    })
+    .catchall(z.unknown())
+)
+
+export const CapabilityTypeSchema = z.enum(['tool', 'skill'])
+export const CapabilityScopeSchema = z.enum(['global', 'project'])
+export const CapabilitySideEffectsSchema = z.enum(['none', 'reads-project', 'writes-project', 'network', 'filesystem-external'])
+export const ValidationStatusSchema = z.enum(['untested', 'passed', 'failed'])
+export const LifecycleStateSchema = z.enum(['draft', 'enabled', 'disabled', 'deprecated'])
+
+export const CapabilityManifestSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  type: CapabilityTypeSchema,
+  scope: CapabilityScopeSchema,
+  owner: z.string(),
+  version: z.string(),
+  inputSchema: JsonSchemaSchema,
+  outputSchema: JsonSchemaSchema,
+  requiredContext: z.array(z.string()),
+  dependsOn: z.array(z.string()),
+  compatibleAgentRoles: z.array(AgentRoleSchema),
+  compatibleModelCapabilities: z.array(z.string()),
+  sideEffects: CapabilitySideEffectsSchema,
+  permissionCategory: z.string(),
+  localOnly: z.boolean(),
+  costCharacteristics: z.object({
+    estTokens: z.number().optional(),
+    estTimeMs: z.number().optional(),
+    estCostUsd: z.number().optional()
+  }),
+  validationStatus: ValidationStatusSchema,
+  lifecycleState: LifecycleStateSchema,
+  createdBy: z.enum(['author', 'agent-generated']),
+  history: z.array(z.object({ versionId: z.string(), changedAt: z.string(), note: z.string() }))
+})
+
+type _CapabilityManifestCheck = z.infer<typeof CapabilityManifestSchema> extends CapabilityManifest ? true : never
+const _capabilityManifestCheck: _CapabilityManifestCheck = true
+void _capabilityManifestCheck
 
 // ---------------------------------------------------------------------------
 // Session goal

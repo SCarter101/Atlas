@@ -306,7 +306,18 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     set({ pendingPermission: null })
   },
 
-  revokeSessionApproval: (id) => set((s) => ({ sessionApprovals: s.sessionApprovals.filter((a) => a.id !== id) })),
+  // Fires the main-process revoke (the real SessionApprovalStore backing
+  // requestPermission()'s auto-approve check — see permissions/
+  // sessionApprovals.ts) and updates local state immediately rather than
+  // waiting on a refetch, so the Settings list still redraws right away.
+  // The renderer's sessionApprovals array and main's SessionApprovalStore
+  // are two views of "the same grant," populated by two separate code paths
+  // reacting to the same user action (see resolvePermission below) — a
+  // mismatch between them is low-stakes for this prototype.
+  revokeSessionApproval: (id) => {
+    void window.atlas.permissions.revoke(id)
+    set((s) => ({ sessionApprovals: s.sessionApprovals.filter((a) => a.id !== id) }))
+  },
 
   setSuggestionState: async (id, state) => {
     const suggestion = get().activeSuggestions.find((sg) => sg.id === id)

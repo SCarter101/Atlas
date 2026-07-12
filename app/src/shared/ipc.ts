@@ -1,5 +1,5 @@
 import type { AgentGoal, AgentRole, AgentRunRecord, AgentRunStatus, AgentStep, PermissionDecision } from './schema/agent'
-import type { CapabilityManifest } from './schema/capability'
+import type { CapabilityManifest, LifecycleState, SessionApproval } from './schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { ProjectManifest } from './schema/project'
 import type { ManuscriptTree, SceneMeta } from './schema/manuscript'
@@ -28,6 +28,11 @@ export const IpcChannel = {
   CodexUpsert: 'codex:upsert',
   CodexDelete: 'codex:delete',
   CapabilitiesList: 'capabilities:list',
+  CapabilitiesCreate: 'capabilities:create',
+  CapabilitiesUpdate: 'capabilities:update',
+  CapabilitiesSetLifecycleState: 'capabilities:set-lifecycle-state',
+  PermissionsList: 'permissions:list',
+  PermissionsRevoke: 'permissions:revoke',
   AgentRunStart: 'agent-run:start',
   AgentRunStep: 'agent-run:step',
   AgentRunRespondToPermission: 'agent-run:respond-to-permission',
@@ -111,6 +116,13 @@ export interface AtlasBridge {
   }
   capabilities: {
     list(): Promise<CapabilityManifest[]>
+    create(manifest: CapabilityManifest): Promise<void>
+    update(manifest: CapabilityManifest): Promise<void>
+    setLifecycleState(id: string, state: LifecycleState): Promise<void>
+  }
+  permissions: {
+    list(): Promise<SessionApproval[]>
+    revoke(id: string): Promise<void>
   }
   agentRuns: {
     start(goal: AgentGoal): Promise<{ runId: string }>
