@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="font-family:'Public Sans',sans-serif; display:grid; grid-template-columns:200px 1fr; gap:20px;">
+  <div style="display:flex; flex-direction:column; gap:4px;">
+    <sc-for list="{{ agents }}" as="a" hint-placeholder-count="5">
+      <button onclick="{{ a.select }}" style="text-align:left; padding:8px 10px; border-radius:7px; border:none; background:{{ a.bg }}; color:{{ a.color }}; font-weight:{{ a.weight }}; font-size:13px; cursor:pointer; font-family:'Public Sans',sans-serif;">{{ a.name }}</button>
+    </sc-for>
+  </div>
+  <div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <div style="font-size:13.5px; font-weight:600; color:{{ ink }};">{{ selectedName }} \u2014 system prompt</div>
+      <span style="font-size:11px; color:{{ inkFaint }};">Version {{ version }}</span>
+    </div>
+    <textarea value="{{ draft }}" oninput="{{ onInput }}" style="width:100%; min-height:220px; border:1px solid {{ border }}; border-radius:10px; padding:14px; font-size:13px; font-family:ui-monospace,monospace; line-height:1.6; resize:vertical; background:{{ surfaceRaised }}; color:{{ ink }};"></textarea>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+      <div style="font-size:11.5px; color:{{ inkFaint }};">{{ dirtyLabel }}</div>
+      <div style="display:flex; gap:8px;">
+        <button onclick="{{ onReset }}" style="padding:7px 14px; border-radius:7px; border:1px solid {{ border }}; background:transparent; color:{{ inkSoft }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">Reset to default</button>
+        <button onclick="{{ onSave }}" style="padding:7px 16px; border-radius:7px; border:none; background:{{ accent }}; color:{{ bg }}; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Save new version</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:360}}">
+const DEFAULT_PROMPTS = {
+  generator: 'You are Generator, the primary drafting agent for this novelist\u2019s manuscript. Draft prose from the scene outline and metadata provided. Match the writer\u2019s established voice. Never contradict locked world rules or canon Codex facts. Ask a clarifying question if the outline is too vague to draft confidently.',
+  storyeditor: 'You are Story Editor, an industry developmental editor. Operate at the act or full-manuscript level. Detect plot holes, pacing problems, weak stakes, and broken setups/payoffs. Return a structured report with severity scores \u2014 never rewrite prose directly.',
+  lineeditor: 'You are Line Editor, a copy editor focused on clarity and voice preservation. Propose tracked changes only \u2014 never silently edit. Flag AI-sounding prose separately from grammar and style issues.',
+  dialogueeditor: 'You are Dialogue Editor. Use each character\u2019s Codex voice profile to evaluate whether dialogue is distinct, advances conflict, and avoids sounding interchangeable between characters.',
+  worldbuilder: 'You are World Builder. Use the Codex world repository as primary knowledge. Clearly separate invented facts from researched real-world facts, and cite sources for anything pulled from the web. Never add to the Codex without writer approval.'
+};
+
+const AGENTS = [
+  { id: 'generator', name: 'Generator' },
+  { id: 'storyeditor', name: 'Story Editor' },
+  { id: 'lineeditor', name: 'Line Editor' },
+  { id: 'dialogueeditor', name: 'Dialogue Editor' },
+  { id: 'worldbuilder', name: 'World Builder' }
+];
+
+class Component extends DCLogic {
+  state = {
+    selectedId: 'generator',
+    drafts: { ...DEFAULT_PROMPTS },
+    versions: { generator: '1.2', storyeditor: '1.0', lineeditor: '1.3', dialogueeditor: '1.0', worldbuilder: '1.1' },
+    dirty: false
+  };
+
+  select(id) { this.setState({ selectedId: id, dirty: false }); }
+  onInput(e) {
+    const id = this.state.selectedId;
+    this.setState(s => ({ drafts: { ...s.drafts, [id]: e.target.value }, dirty: true }));
+  }
+  onReset() {
+    const id = this.state.selectedId;
+    this.setState(s => ({ drafts: { ...s.drafts, [id]: DEFAULT_PROMPTS[id] }, dirty: false }));
+  }
+  onSave() {
+    const id = this.state.selectedId;
+    this.setState(s => ({
+      versions: { ...s.versions, [id]: (parseFloat(s.versions[id]) + 0.1).toFixed(1) },
+      dirty: false
+    }));
+  }
+
+  renderVals() {
+    const c = this.props.c || {};
+    const s = this.state;
+    const agents = AGENTS.map(a => ({
+      id: a.id, name: a.name,
+      select: () => this.select(a.id),
+      bg: s.selectedId === a.id ? c.accentSoft : 'transparent',
+      color: s.selectedId === a.id ? c.accentText : c.inkSoft,
+      weight: s.selectedId === a.id ? 600 : 400
+    }));
+    return {
+      ink: c.ink, inkSoft: c.inkSoft, inkFaint: c.inkFaint, border: c.border, surfaceRaised: c.surfaceRaised,
+      bg: c.bg, accent: c.accent,
+      agents,
+      selectedName: (AGENTS.find(a => a.id === s.selectedId) || {}).name,
+      version: s.versions[s.selectedId],
+      draft: s.drafts[s.selectedId],
+      onInput: (e) => this.onInput(e),
+      onReset: () => this.onReset(),
+      onSave: () => this.onSave(),
+      dirtyLabel: s.dirty ? 'Unsaved changes' : 'Saved'
+    };
+  }
+}
+
+</script>
+</body>
+</html>

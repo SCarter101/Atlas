@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&amp;family=Public+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; -webkit-font-smoothing: antialiased; }
+  ::selection { background: rgba(40,72,107,0.22); }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</helmet>
+
+<div style="height:100vh; width:100%; display:flex; flex-direction:column; overflow:hidden; font-family:'Public Sans',system-ui,sans-serif; background:{{ c.bg }}; color:{{ c.ink }}; transition:background 200ms ease-out, color 200ms ease-out;">
+
+  <!-- LANDING VIEW -->
+  <sc-if value="{{ stageIsLanding }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1; overflow-y:auto; position:relative;">
+      <img src="./assets/atlas-icon.png" alt="Atlas app icon — a bronze Atlas figure holding a globe over a page, with a fountain pen" style="position: absolute; top: 24px; left: 24px; width: 150px; height: 141px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); z-index: 2">
+
+      
+    <div style="display:flex; flex-direction:column; align-items:center; padding:64px 24px;">
+        <div style="font-family: 'Source Serif 4',serif; font-size: 42px; font-weight: 600; margin-bottom: 6px">Atlas</div>
+        <div style="font-size: 18px; color: {{ c.inkFaint }}; margin-bottom: 36px">A writing companion for the long haul of a novel</div><div style="width: 795px; max-width: 760px; position: relative; border-radius: 20px; overflow: hidden; background-image: url('./assets/writers-desk.png'); background-size: cover; background-position: center; padding: 40px 32px; min-height: 340px; box-shadow: 0 20px 48px rgba(0,0,0,0.22); height: 573px">
+          <div style="font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: #F1ECE4; text-shadow: 0 1px 3px rgba(0,0,0,0.6); margin-bottom: 16px; text-align: center; width: 674px; height: 119px">Your projects</div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px;">
+            <button onclick="{{ openCottonmouth }}" style="text-align: left; padding: 22px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.14); background: rgba(28,24,20,0.72); backdrop-filter: blur(2px); cursor: pointer; font-family: 'Public Sans',sans-serif; width: 218px; height: 140px">
+              <div style="width:36px; height:36px; border-radius:9px; background:{{ c.accentSoft }}; margin-bottom:14px;"></div>
+              <div style="font-family:'Source Serif 4',serif; font-size:17px; font-weight:600; color:#F5F1EA; margin-bottom:4px;">Cottonmouth</div>
+              <div style="font-size:12px; color:rgba(245,241,234,0.68);">Southern crime noir · 41,208 words</div>
+            </button>
+            <button onclick="{{ startNewProject }}" style="text-align: left; padding: 22px; border-radius: 14px; border: 1px dashed rgba(255,255,255,0.35); background: rgba(28,24,20,0.5); backdrop-filter: blur(2px); cursor: pointer; font-family: 'Public Sans',sans-serif; width: 220px; height: 139px">
+              <div style="width:36px; height:36px; border-radius:9px; border:1px solid rgba(255,255,255,0.3); display:flex; align-items:center; justify-content:center; font-size:18px; color:#F5F1EA; margin-bottom:14px;">+</div>
+              <div style="font-family:'Source Serif 4',serif; font-size:17px; font-weight:600; color:#F5F1EA; margin-bottom:4px;">New Project</div>
+              <div style="font-size:12px; color:rgba(245,241,234,0.68);">Start with a guided Story Foundations setup</div>
+            </button>
+          </div>
+        </div>
+
+        
+      </div></div>
+  </sc-if>
+
+  <!-- ONBOARDING VIEW -->
+  <sc-if value="{{ stageIsOnboarding }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1; overflow-y:auto;">
+      <dc-import name="StoryFoundations" c="{{ c }}" on-complete="{{ completeOnboarding }}" on-exit="{{ exitToLanding }}" hint-size="100%,600px"></dc-import>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ stageIsApp }}" hint-placeholder-val="{{ true }}">
+  <!-- TOP BAR -->
+  <sc-if value="{{ !focusMode }}" hint-placeholder-val="{{ true }}">
+  <div style="height:56px; min-height:56px; display:flex; align-items:center; justify-content:space-between; padding:0 20px; border-bottom:1px solid {{ c.border }}; background:{{ c.surface }}; gap:16px;">
+    <div style="display:flex; align-items:center; gap:14px; min-width:0; flex-shrink:1; overflow:hidden;">
+      <button onclick="{{ exitToLanding }}" title="All Projects" style="width:28px; height:28px; border-radius:7px; border:none; background:transparent; cursor:pointer; padding:0;">
+        <img src="./assets/atlas-icon.png" alt="All Projects" style="width:28px; height:28px; border-radius:7px; display:block;">
+      </button>
+      <div style="font-family:'Source Serif 4',Georgia,serif; font-size:17px; font-weight:600; letter-spacing:0.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;">{{ projectName }}</div>
+      <div style="width:1px; height:18px; background:{{ c.border }}; flex-shrink:0;"></div>
+      <div style="position:relative; flex-shrink:0;">
+        <button onclick="{{ toggleSnapshot }}" style="border:none; background:transparent; cursor:pointer; padding:0; font-size:12.5px; color:{{ c.inkFaint }}; font-family:'Public Sans',sans-serif; text-decoration:underline; white-space:nowrap;">All changes saved · 2:14 PM</button>
+        <sc-if value="{{ snapshotOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; top:26px; left:0; width:280px; background:{{ c.surfaceRaised }}; border:1px solid {{ c.border }}; border-radius:10px; box-shadow:0 12px 28px rgba(0,0,0,0.16); padding:10px; z-index:40;">
+            <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; padding:2px 6px 8px;">Snapshot history</div>
+            <sc-for list="{{ snapshots }}" as="snap" hint-placeholder-count="4">
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 6px; border-radius:6px; font-size:12px;">
+                <span style="color:{{ c.ink }};">{{ snap.label }}</span>
+                <span style="color:{{ c.inkFaint }}; font-size:11px; flex-shrink:0; margin-left:8px;">{{ snap.detail }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+      <sc-for list="{{ topBarNavItems }}" as="item" hint-placeholder-count="3">
+        <button onclick="{{ item.go }}" style="padding:7px 12px; border-radius:7px; border:1px solid {{ item.borderColor }}; background:{{ item.bg }}; color:{{ item.color }}; font-size:12.5px; font-weight:{{ item.weight }}; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap; flex-shrink:0;">{{ item.label }}</button>
+      </sc-for>
+      <button onclick="{{ openPalette }}" style="display:flex; align-items:center; gap:6px; padding:7px 10px; border-radius:7px; border:1px solid {{ c.border }}; background:{{ c.bg }}; color:{{ c.inkSoft }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif; flex-shrink:0; white-space:nowrap;">
+        <span>Search</span>
+        <span style="font-family:ui-monospace,monospace; font-size:11px; padding:1px 6px; border-radius:4px; background:{{ c.surfaceRaised }}; border:1px solid {{ c.border }};">⌘K</span>
+      </button>
+      <div style="display:flex; align-items:center; border-radius:7px; border:1px solid {{ c.border }}; overflow:hidden; flex-shrink:0;">
+        <button onclick="{{ setTheme_paper }}" style="padding:6px 12px; font-size:12px; border:none; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ paperBtnBg }}; color:{{ paperBtnColor }}; white-space:nowrap;">Paper</button>
+        <button onclick="{{ setTheme_night }}" style="padding:6px 12px; font-size:12px; border:none; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ nightBtnBg }}; color:{{ nightBtnColor }}; white-space:nowrap;">Night</button>
+      </div>
+      <button onclick="{{ goExport }}" style="padding:7px 13px; border-radius:7px; border:1px solid {{ c.border }}; background:transparent; color:{{ c.inkSoft }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif; flex-shrink:0; white-space:nowrap;">Export</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <div style="flex:1; display:flex; min-height:0;">
+
+    <!-- LEFT NAV -->
+    <sc-if value="{{ !focusMode }}" hint-placeholder-val="{{ true }}">
+    <div style="width:216px; min-width:216px; border-right:1px solid {{ c.border }}; background:{{ c.surface }}; padding:18px 12px; overflow-y:auto;">
+      <div style="font-size:10.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:{{ c.inkFaint }}; padding:0 8px 8px;">Project</div>
+      <sc-for list="{{ navItems }}" as="item" hint-placeholder-count="6">
+        <button onclick="{{ item.go }}" style="width:100%; text-align:left; display:block; padding:9px 12px; border-radius:8px; border:1px solid {{ item.borderColor }}; cursor:pointer; margin-bottom:6px; font-size:13.5px; font-family:'Public Sans',sans-serif; background:{{ item.bg }}; color:{{ item.color }}; font-weight:{{ item.weight }}; box-shadow:{{ item.shadow }};">
+          {{ item.label }}
+        </button>
+      </sc-for>
+
+      <sc-if value="{{ isManuscriptView }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:10.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:{{ c.inkFaint }}; padding:18px 8px 8px;">Outline</div>
+        <div style="font-size:12.5px; color:{{ c.inkSoft }}; padding:0 8px;">
+          <div style="font-weight:600; color:{{ c.ink }}; margin-bottom:6px;">Book One</div>
+          <div style="padding-left:10px; margin-bottom:4px; color:{{ c.inkFaint }};">Part One · Homecoming</div>
+          <sc-for list="{{ chapters }}" as="ch" hint-placeholder-count="5">
+            <div style="padding-left:16px; margin-bottom:3px; display:flex; align-items:center; gap:6px; border-radius:5px; padding-top:4px; padding-bottom:4px; background:{{ ch.hlBg }};">
+              <span style="width:5px; height:5px; border-radius:50%; background:{{ ch.dot }}; flex-shrink:0;"></span>
+              <span style="color:{{ ch.textColor }}; font-weight:{{ ch.weight }};">{{ ch.title }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isCodexView }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:10.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:{{ c.inkFaint }}; padding:18px 8px 8px;">Entry Types</div>
+        <sc-for list="{{ codexFilters }}" as="f" hint-placeholder-count="6">
+          <button onclick="{{ f.go }}" style="width:100%; text-align:left; padding:6px 10px; border-radius:6px; border:none; cursor:pointer; font-size:12.5px; margin-bottom:1px; font-family:'Public Sans',sans-serif; background:{{ f.bg }}; color:{{ f.color }};">{{ f.label }}</button>
+        </sc-for>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- MAIN CONTENT -->
+    <div style="flex:1; overflow-y:auto; min-width:0; position:relative;">
+
+      <!-- DASHBOARD VIEW -->
+      <sc-if value="{{ isDashboardView }}" hint-placeholder-val="{{ true }}">
+      <div style="max-width:920px; margin:0 auto; padding:36px 40px 80px;">
+        <sc-if value="{{ !isNewProject }}" hint-placeholder-val="{{ true }}">
+        <div style="font-family:'Source Serif 4',serif; font-size:26px; font-weight:600; margin-bottom:4px;">Good afternoon, Sam's Writing Desk</div>
+        <div style="font-size:13.5px; color:{{ c.inkFaint }}; margin-bottom:28px;">Cottonmouth · Book One · 41,208 words drafted</div>
+        </sc-if>
+        <sc-if value="{{ isNewProject }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'Source Serif 4',serif; font-size:26px; font-weight:600; margin-bottom:4px;">Welcome to {{ projectName }}</div>
+        <div style="font-size:13.5px; color:{{ c.inkFaint }}; margin-bottom:28px;">Your starter Codex is ready · 0 words drafted</div>
+        </sc-if>
+
+        <!-- Momentum -->
+        <sc-if value="{{ !isNewProject }}" hint-placeholder-val="{{ true }}">
+        <div style="border-radius:12px; background:{{ c.accentSoft }}; border:1px solid {{ c.border }}; padding:24px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:flex-end; gap:24px;">
+          <div>
+            <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.accentText }}; margin-bottom:8px;">Where you left off</div>
+            <div style="font-family:'Source Serif 4',serif; font-size:21px; font-weight:600; margin-bottom:4px;">Ch. 3 · Scene 2 — "The Fish House"</div>
+            <div style="font-size:12.5px; color:{{ c.inkSoft }};">Last edited 12 minutes ago · Ray confronts Tull Duvall</div>
+          </div>
+          <button onclick="{{ goManuscript }}" style="padding:10px 18px; border-radius:8px; border:none; background:{{ c.accent }}; color:{{ c.bg }}; font-size:13.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;">Resume Writing →</button>
+        </div>
+        </sc-if>
+        <sc-if value="{{ isNewProject }}" hint-placeholder-val="{{ false }}">
+        <div style="border-radius:12px; background:{{ c.accentSoft }}; border:1px solid {{ c.border }}; padding:24px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:flex-end; gap:24px;">
+          <div>
+            <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.accentText }}; margin-bottom:8px;">Start writing</div>
+            <div style="font-family:'Source Serif 4',serif; font-size:21px; font-weight:600; margin-bottom:4px;">Begin Chapter One</div>
+            <div style="font-size:12.5px; color:{{ c.inkSoft }};">Your Codex is seeded — the manuscript is a blank page.</div>
+          </div>
+          <button onclick="{{ goManuscript }}" style="padding:10px 18px; border-radius:8px; border:none; background:{{ c.accent }}; color:{{ c.bg }}; font-size:13.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;">Start Writing →</button>
+        </div>
+        </sc-if>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+          <div style="border:1px solid {{ c.border }}; border-radius:12px; padding:18px 20px; background:{{ c.surfaceRaised }};">
+            <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin-bottom:10px;">Today's session</div>
+            <div style="font-size:24px; font-weight:600; font-family:'Source Serif 4',serif; margin-bottom:6px;">1,240 <span style="font-size:13px; font-weight:400; color:{{ c.inkFaint }}; font-family:'Public Sans',sans-serif;">/ 1,500 word goal</span></div>
+            <div style="height:6px; border-radius:3px; background:{{ c.border }}; overflow:hidden;">
+              <div style="height:100%; width:83%; background:{{ c.accent }}; border-radius:3px;"></div>
+            </div>
+            <button onclick="{{ toggleStreak }}" style="margin-top:12px; background:none; border:none; padding:0; font-size:12px; color:{{ c.inkFaint }}; cursor:pointer; font-family:'Public Sans',sans-serif; text-decoration:underline;">{{ streakToggleLabel }}</button>
+            <sc-if value="{{ streakOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:8px; font-size:12.5px; color:{{ c.inkSoft }};">6-day writing streak · avg. 980 words/session this week</div>
+            </sc-if>
+          </div>
+          <div style="border:1px solid {{ c.border }}; border-radius:12px; padding:18px 20px; background:{{ c.surfaceRaised }};">
+            <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin-bottom:10px;">Act One progress</div>
+            <div style="font-size:24px; font-weight:600; font-family:'Source Serif 4',serif; margin-bottom:10px;">68%</div>
+            <div style="height:6px; border-radius:3px; background:{{ c.border }}; overflow:hidden; margin-bottom:12px;">
+              <div style="height:100%; width:68%; background:{{ c.green }}; border-radius:3px;"></div>
+            </div>
+            <sc-for list="{{ chapterStatus }}" as="ch" hint-placeholder-count="5">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12.5px; padding:3px 0;">
+                <span style="color:{{ c.inkSoft }}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;">{{ ch.title }}</span>
+                <span style="font-size:10.5px; font-weight:600; padding:2px 7px; border-radius:10px; background:{{ ch.badgeBg }}; color:{{ ch.badgeColor }}; flex-shrink:0; white-space:nowrap;">{{ ch.status }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin:24px 0 10px;">Next steps</div>
+        <sc-for list="{{ nextSteps }}" as="step" hint-placeholder-count="3">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; border:1px solid {{ c.border }}; border-radius:10px; padding:14px 18px; margin-bottom:10px; background:{{ c.surfaceRaised }};">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="width:8px; height:8px; border-radius:50%; background:{{ step.dot }}; flex-shrink:0;"></span>
+              <div>
+                <div style="font-size:13.5px; font-weight:500;">{{ step.title }}</div>
+                <div style="font-size:12px; color:{{ c.inkFaint }}; margin-top:2px;">{{ step.sub }}</div>
+              </div>
+            </div>
+            <button onclick="{{ step.go }}" style="padding:7px 14px; border-radius:7px; border:1px solid {{ c.border }}; background:transparent; color:{{ c.ink }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;">{{ step.action }}</button>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <!-- MANUSCRIPT VIEW -->
+      <sc-if value="{{ isManuscriptView }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex; flex-direction:column; height:100%;">
+
+        <sc-if value="{{ !focusMode }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 24px; border-bottom:1px solid {{ c.border }}; background:{{ c.surface }};">
+          <div style="font-size:12.5px; color:{{ c.inkFaint }};">Book One <span style="opacity:0.5;">›</span> Part One: Homecoming <span style="opacity:0.5;">›</span> <span style="color:{{ c.ink }}; font-weight:500;">Ch. 3: The Fish House</span> <span style="opacity:0.5;">›</span> Scene 2</div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <button onclick="{{ toggleFocus }}" style="padding:7px 13px; border-radius:7px; border:1px solid {{ c.border }}; background:transparent; color:{{ c.inkSoft }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">Distraction-free</button>
+          </div>
+        </div>
+        </sc-if>
+
+        <div style="flex:1; display:flex; min-height:0; position:relative;">
+
+          <!-- PAGE COLUMN -->
+          <div style="flex:1; overflow-y:auto; position:relative;">
+            <div style="max-width:700px; margin:0 auto; padding:{{ pagePadTop }} 40px 100px;">
+
+              <sc-if value="{{ !focusMode }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px;">
+                <span style="font-size:11.5px; padding:4px 10px; border-radius:14px; background:{{ c.surface }}; border:1px solid {{ c.border }}; color:{{ c.inkSoft }};">POV: Ray Chambliss</span>
+                <span style="font-size:11.5px; padding:4px 10px; border-radius:14px; background:{{ c.surface }}; border:1px solid {{ c.border }}; color:{{ c.inkSoft }};">Duvall Fish &amp; Cold Storage</span>
+                <span style="font-size:11.5px; padding:4px 10px; border-radius:14px; background:{{ c.surface }}; border:1px solid {{ c.border }}; color:{{ c.inkSoft }};">Late afternoon · June 2003</span>
+                <span style="font-size:11.5px; padding:4px 10px; border-radius:14px; background:{{ c.surface }}; border:1px solid {{ c.border }}; color:{{ c.inkSoft }};">Purpose: First confrontation since the funeral</span>
+                <button onclick="{{ toggleMeta }}" style="font-size:11.5px; padding:4px 10px; border-radius:14px; background:transparent; border:1px dashed {{ c.borderStrong }}; color:{{ c.inkFaint }}; cursor:pointer; font-family:'Public Sans',sans-serif;">{{ metaToggleLabel }}</button>
+              </div>
+              <sc-if value="{{ metaOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px solid {{ c.border }}; border-radius:10px; padding:16px 18px; margin-bottom:22px; background:{{ c.surface }}; display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; font-size:12.5px;">
+                  <div><span style="color:{{ c.inkFaint }};">Desire:</span> Answers about Dale's death</div>
+                  <div><span style="color:{{ c.inkFaint }};">External goal:</span> Get Tull to slip on the timeline</div>
+                  <div><span style="color:{{ c.inkFaint }};">Opposition:</span> Tull's practiced calm, the plant's noise</div>
+                  <div><span style="color:{{ c.inkFaint }};">Stakes:</span> If he pushes too hard, doors close for good</div>
+                  <div><span style="color:{{ c.inkFaint }};">Turning point:</span> Tull mentions the ice logs</div>
+                  <div><span style="color:{{ c.inkFaint }};">Outcome:</span> Ray leaves with a name to check</div>
+                </div>
+              </sc-if>
+
+              <button onclick="{{ toggleContinuity }}" style="font-size:11.5px; padding:4px 10px; border-radius:14px; background:transparent; border:1px dashed {{ c.borderStrong }}; color:{{ c.inkFaint }}; cursor:pointer; font-family:'Public Sans',sans-serif; margin-bottom:{{ continuityMarginBottom }}px;">{{ continuityToggleLabel }}</button>
+              <sc-if value="{{ continuityOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px solid {{ c.border }}; border-radius:10px; padding:16px 18px; margin-bottom:22px; background:{{ c.surface }}; display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; font-size:12.5px;">
+                  <div><span style="color:{{ c.inkFaint }};">Timeline placement:</span> Late June 2003, two days after the funeral</div>
+                  <div><span style="color:{{ c.inkFaint }};">Setup / payoff:</span> Plants the ice-log detail paid off in Ch.6</div>
+                  <div><span style="color:{{ c.inkFaint }};">Foreshadowing:</span> Tull's calm hints at rehearsed deception</div>
+                  <div><span style="color:{{ c.inkFaint }};">Theme / motif:</span> Inherited guilt; the river as memory</div>
+                  <div style="grid-column:1 / -1;"><span style="color:{{ c.inkFaint }};">Relevant Codex:</span> Ray Chambliss, Tull Duvall, Duvall Fish &amp; Cold Storage</div>
+                </div>
+              </sc-if>
+              </sc-if>
+
+              <div ref="{{ pageRef }}" onmouseup="{{ onSelectText }}" style="background:{{ c.pageBg }}; border:1px solid {{ c.border }}; border-radius:3px; box-shadow:0 1px 2px rgba(0,0,0,0.04), 0 12px 28px rgba(0,0,0,0.05); padding:56px 60px; font-family:'Source Serif 4',Georgia,serif; font-size:19px; line-height:1.75; color:{{ c.ink }};">
+                <div style="font-size:14px; letter-spacing:0.08em; text-transform:uppercase; color:{{ c.inkFaint }}; margin-bottom:22px; font-family:'Public Sans',sans-serif;">Chapter Three — The Fish House</div>
+                <p style="margin:0 0 20px;">The fish house smelled the way it always had — brine and diesel and something sweeter underneath, like the river itself was starting to turn. Ray parked the Bronco in the gravel lot and sat there a minute, engine ticking, watching the tin roof shimmer in the July heat.</p>
+                <p style="margin:0 0 20px;">Tull Duvall was standing on the loading dock same as he'd stood there thirty years ago, shouting orders at men half his age, sleeves rolled to the elbow. He saw Ray coming and didn't stop talking, just lifted two fingers off the clipboard in something that wasn't quite a wave.</p>
+                <p style="margin:0 0 20px;">"Didn't expect to see you out this way," Tull said, when Ray was close enough that shouting wasn't required anymore. "Thought you'd have gone on back up to Memphis by now."</p>
+                <p style="margin:0 0 20px;">"Not yet."</p>
+                <p style="margin:0 0 20px;">"Shame about Dale." Tull said it the way a man says grace before a meal he doesn't want. "Good boy. Never did understand why he'd do a thing like that."</p>
+                <p style="margin:0 0 20px;">Ray let that sit a second, the ice machine behind Tull grinding through its cycle. "Neither did I," he said.</p>
+                <p style="margin:0 0 20px;">Tull's eyes moved over him then, quick, the way they used to when Ray was seventeen and running with the wrong Duvall boy, cataloging what kind of trouble had walked up onto his dock. Whatever he found, he decided it wasn't worth his time. He turned back to the clipboard.</p>
+                <p style="margin:0 0 20px;">"You need something, Ray, or you just come by to look at fish?"</p>
+                <p style="margin:0;">Ray looked past him, down the line of gutted catfish sliding along the belt into the ice, and thought about the box of Dale's things still sitting unopened in the truck bed.</p>
+              </div>
+            </div>
+
+            <sc-if value="{{ selectionMenu }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute; top:{{ selectionMenu.top }}px; left:{{ selectionMenu.left }}px; transform:translate(-50%,-100%); background:{{ c.ink }}; color:{{ c.bg }}; border-radius:8px; padding:6px; display:flex; gap:4px; box-shadow:0 8px 20px rgba(0,0,0,0.25); z-index:20;">
+                <sc-for list="{{ assistants }}" as="a" hint-placeholder-count="5">
+                  <button onclick="{{ a.sendSelection }}" title="{{ a.name }}" style="border:none; background:transparent; color:{{ c.bg }}; padding:5px 9px; border-radius:5px; cursor:pointer; font-size:11.5px; font-family:'Public Sans',sans-serif; white-space:nowrap;">{{ a.name }}</button>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ focusMode }}" hint-placeholder-val="{{ false }}">
+              <div style="position:fixed; bottom:22px; left:50%; transform:translateX(-50%); font-size:11.5px; color:{{ c.inkFaint }}; background:{{ c.surface }}; border:1px solid {{ c.border }}; padding:6px 14px; border-radius:20px;">Press <b>Esc</b> to leave distraction-free mode</div>
+            </sc-if>
+          </div>
+
+          <!-- SIDEBAR: split dock -->
+          <sc-if value="{{ !focusMode }}" hint-placeholder-val="{{ true }}">
+          <div style="width:336px; min-width:336px; border-left:1px solid {{ c.border }}; background:{{ c.surface }}; display:flex; flex-direction:column;">
+            <div style="padding:14px 14px 8px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }};">Agents</div>
+            <div style="max-height:44%; overflow-y:auto; padding:0 14px 12px;">
+              <dc-import name="AssistantList" assistants="{{ assistants }}" expanded="{{ expandedAssistant }}" on-toggle="{{ toggleAssistant }}" on-invoke="{{ invokeAgent }}" c="{{ c }}" compact="{{ true }}" hint-size="100%,260px"></dc-import>
+            </div>
+            <div style="height:1px; background:{{ c.border }};"></div>
+            <div style="padding:14px 14px 8px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }};">Comments &amp; Tracked Changes</div>
+            <div style="flex:1; overflow-y:auto; padding:0 14px 14px;">
+              <dc-import name="ReviewPanel" changes="{{ changes }}" issue="{{ storyIssue }}" c="{{ c }}" on-change-action="{{ onChangeAction }}" on-issue-action="{{ onIssueAction }}" hint-size="100%,400px"></dc-import>
+            </div>
+          </div>
+          </sc-if>
+
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- OUTLINE VIEW -->
+      <sc-if value="{{ isOutlineView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:880px; margin:0 auto; padding:36px 40px 80px;">
+        <div style="font-family:'Source Serif 4',serif; font-size:24px; font-weight:600; margin-bottom:4px;">Outline</div>
+        <div style="font-size:13px; color:{{ c.inkFaint }}; margin-bottom:24px;">Book One · Part One: Homecoming</div>
+        <sc-for list="{{ outlineChapters }}" as="ch" hint-placeholder-count="5">
+          <div style="border:1px solid {{ c.border }}; border-radius:10px; padding:16px 18px; margin-bottom:10px; background:{{ c.surfaceRaised }};">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:{{ ch.hasScenes }}px;">
+              <div style="font-size:14.5px; font-weight:600; color:{{ c.ink }};">{{ ch.title }}</div>
+              <span style="font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:10px; background:{{ ch.badgeBg }}; color:{{ ch.badgeColor }};">{{ ch.status }}</span>
+            </div>
+            <sc-if value="{{ ch.scenes }}" hint-placeholder-val="{{ false }}">
+              <sc-for list="{{ ch.scenes }}" as="sc" hint-placeholder-count="2">
+                <div style="display:flex; gap:10px; padding:8px 0; border-top:1px solid {{ c.border }};">
+                  <span style="width:6px; height:6px; border-radius:50%; background:{{ c.accent }}; margin-top:6px; flex-shrink:0;"></span>
+                  <div>
+                    <div style="font-size:13px; font-weight:500; color:{{ c.ink }};">{{ sc.title }}</div>
+                    <div style="font-size:12px; color:{{ c.inkFaint }}; margin-top:2px;">{{ sc.purpose }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </sc-if>
+            <sc-if value="{{ ch.isEmpty }}" hint-placeholder-val="{{ false }}">
+              <div style="border-top:1px solid {{ c.border }}; padding-top:12px; margin-top:2px;">
+                <div style="font-size:12.5px; color:{{ c.inkFaint }}; margin-bottom:8px;">This chapter has no scenes outlined yet.</div>
+                <button style="padding:6px 12px; border-radius:7px; border:1px solid {{ c.border }}; background:transparent; color:{{ c.inkSoft }}; font-size:12px; cursor:pointer; font-family:'Public Sans',sans-serif;">Outline first scene</button>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <!-- AGENT ROUTING VIEW -->
+      <sc-if value="{{ isRoutingView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1080px; margin:0 auto; padding:36px 40px 80px;">
+        <dc-import name="RoutingDiagram" c="{{ c }}" hint-size="100%,420px"></dc-import>
+      </div>
+      </sc-if>
+
+      <!-- AGENT RUNS VIEW -->
+      <sc-if value="{{ isAgentRunsView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1080px; margin:0 auto; padding:36px 40px 80px;">
+        <dc-import name="AgentRunTrace" c="{{ c }}" hint-size="100%,600px"></dc-import>
+      </div>
+      </sc-if>
+
+      <!-- LIBRARY VIEW -->
+      <sc-if value="{{ isLibraryView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1080px; margin:0 auto; padding:36px 40px 80px;">
+        <dc-import name="CapabilityLibrary" c="{{ c }}" hint-size="100%,560px"></dc-import>
+      </div>
+      </sc-if>
+
+      <!-- EXPORT VIEW -->
+      <sc-if value="{{ isExportView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:720px; margin:0 auto; padding:36px 40px 80px;">
+        <div style="font-family:'Source Serif 4',serif; font-size:24px; font-weight:600; margin-bottom:4px;">Export</div>
+        <div style="font-size:13px; color:{{ c.inkFaint }}; margin-bottom:24px;">Export the manuscript or the Codex</div>
+
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin-bottom:10px;">Manuscript</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px; margin-bottom:24px;">
+          <sc-for list="{{ manuscriptExportFormats }}" as="f" hint-placeholder-count="5">
+            <button style="text-align:left; padding:14px; border-radius:10px; border:1px solid {{ c.border }}; background:{{ c.surfaceRaised }}; cursor:pointer; font-family:'Public Sans',sans-serif;">
+              <div style="font-size:13.5px; font-weight:600; color:{{ c.ink }}; margin-bottom:3px;">{{ f.label }}</div>
+              <div style="font-size:11.5px; color:{{ c.inkFaint }};">{{ f.hint }}</div>
+            </button>
+          </sc-for>
+        </div>
+
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin-bottom:10px;">Codex</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px;">
+          <sc-for list="{{ codexExportFormats }}" as="f" hint-placeholder-count="3">
+            <button style="text-align:left; padding:14px; border-radius:10px; border:1px solid {{ c.border }}; background:{{ c.surfaceRaised }}; cursor:pointer; font-family:'Public Sans',sans-serif;">
+              <div style="font-size:13.5px; font-weight:600; color:{{ c.ink }}; margin-bottom:3px;">{{ f.label }}</div>
+              <div style="font-size:11.5px; color:{{ c.inkFaint }};">{{ f.hint }}</div>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- STORY TIMELINE VIEW -->
+      <sc-if value="{{ isTimelineView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1080px; margin:0 auto; padding:36px 40px 80px;">
+        <div style="font-family:'Source Serif 4',serif; font-size:24px; font-weight:600; margin-bottom:4px;">Story Timeline</div>
+        
+        <div style="font-size: 15px; color: {{ c.inkFaint }}; margin-bottom: 40px; width: 911px; height: 65px">Anchor events the manuscript resolves against</div><div style="display: flex; align-items: stretch; overflow-x: auto; padding: 10px 10px 20px; width: 947px; height: 432px">
+          <sc-for list="{{ timelineEvents }}" as="ev" hint-placeholder-count="4">
+            <div style="display: flex; flex-direction: column; width: 245px; flex-shrink: 0; height: 260px">
+              <div style="height: 157px; display: flex; align-items: flex-end; padding: 0 14px 14px; overflow: visible; width: 244px">
+                <sc-if value="{{ ev.top }}" hint-placeholder-val="{{ false }}">
+                  <div>
+                    <div style="font-size: 11.5px; color: {{ c.inkFaint }}; margin-bottom: 3px; width: 215px; height: 13px">{{ ev.date }}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: {{ c.ink }}; margin-bottom: 4px; width: 214px; height: 33px">{{ ev.title }}</div>
+                    <div style="font-size:12.5px; color:{{ c.inkSoft }}; line-height:1.5;">{{ ev.body }}</div>
+                  </div>
+                </sc-if>
+              </div>
+              <div style="position: relative; height: 8px; background: {{ c.accent }}; flex-shrink: 0; width: 242px">
+                <div style="position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: {{ c.accent }}; border: 2px solid {{ c.bg }}; transform: translate(-50%,-50%); border-width: 2.5px"></div>
+              </div>
+              <div style="height: 119px; display: flex; align-items: flex-start; padding: 14px 14px 0; overflow: visible; width: 240px">
+                <sc-if value="{{ ev.bottom }}" hint-placeholder-val="{{ false }}">
+                  <div>
+                    <div style="font-size:11.5px; color:{{ c.inkFaint }}; margin-bottom:3px;">{{ ev.date }}</div>
+                    <div style="font-size:14px; font-weight:600; color:{{ c.ink }}; margin-bottom:4px;">{{ ev.title }}</div>
+                    <div style="font-size:12.5px; color:{{ c.inkSoft }}; line-height:1.5;">{{ ev.body }}</div>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- SETTINGS VIEW -->
+      <sc-if value="{{ isSettingsView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:760px; margin:0 auto; padding:36px 40px 80px;">
+        <div style="font-family:'Source Serif 4',serif; font-size:24px; font-weight:600; margin-bottom:24px;">Settings</div>
+
+        <div style="border:1px solid {{ c.border }}; border-radius:10px; padding:18px 20px; margin-bottom:16px; background:{{ c.surfaceRaised }}; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+          <div>
+            <div style="font-size:13.5px; font-weight:600; margin-bottom:3px;">Advanced Mode</div>
+            <div style="font-size:12.5px; color:{{ c.inkFaint }}; line-height:1.5;">Reveals model routing, prompt editing, multiple drafts, and token diagnostics. Never changes your manuscript.</div>
+          </div>
+          <button onclick="{{ toggleAdvanced }}" role="switch" aria-checked="{{ advancedMode }}" style="width:44px; height:26px; border-radius:14px; border:1px solid {{ c.border }}; cursor:pointer; background:{{ advancedTrackBg }}; position:relative; flex-shrink:0; padding:0;">
+            <span style="position:absolute; top:2px; left:{{ advancedThumbLeft }}px; width:20px; height:20px; border-radius:50%; background:{{ c.surfaceRaised }}; box-shadow:0 1px 3px rgba(0,0,0,0.2); transition:left 120ms ease-out;"></span>
+          </button>
+        </div>
+
+        <sc-if value="{{ !advancedMode }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin:22px 0 10px;">Agent models</div>
+        <sc-for list="{{ assistants }}" as="a" hint-placeholder-count="5">
+          <div style="display:flex; justify-content:space-between; align-items:center; border:1px solid {{ c.border }}; border-radius:10px; padding:12px 16px; margin-bottom:8px; background:{{ c.surfaceRaised }};">
+            <span style="font-size:13px; font-weight:500;">{{ a.name }}</span>
+            <span style="font-size:12.5px; color:{{ c.inkFaint }};">{{ a.model }}</span>
+          </div>
+        </sc-for>
+        </sc-if>
+
+        <sc-if value="{{ advancedMode }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin:22px 0 10px;">Per-agent model &amp; provider</div>
+        <sc-for list="{{ agentModelRows }}" as="row" hint-placeholder-count="5">
+          <div style="border:1px solid {{ c.border }}; border-radius:10px; padding:12px 16px; margin-bottom:8px; background:{{ c.surfaceRaised }};">
+            <div style="font-size:13px; font-weight:500; margin-bottom:8px;">{{ row.name }}</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <sc-for list="{{ row.options }}" as="opt" hint-placeholder-count="4">
+                <button onclick="{{ opt.pick }}" style="padding:5px 11px; border-radius:14px; border:1px solid {{ c.border }}; background:{{ opt.bg }}; color:{{ opt.color }}; font-size:11.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">{{ opt.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+
+        <div style="border:1px solid {{ c.border }}; border-radius:10px; padding:16px 18px; margin:18px 0; background:{{ c.surfaceRaised }}; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+          <div>
+            <div style="font-size:13.5px; font-weight:600; margin-bottom:3px;">LM Studio fallback</div>
+            <div style="font-size:12.5px; color:{{ c.inkFaint }}; line-height:1.5;">If an OpenRouter call fails, fall back to a local LM Studio model \u2014 after verifying it supports the required context size and tool-calling.</div>
+          </div>
+          <button onclick="{{ toggleLmStudioFallback }}" role="switch" aria-checked="{{ lmStudioFallback }}" style="width:44px; height:26px; border-radius:14px; border:1px solid {{ c.border }}; cursor:pointer; background:{{ lmStudioTrackBg }}; position:relative; flex-shrink:0; padding:0;">
+            <span style="position:absolute; top:2px; left:{{ lmStudioThumbLeft }}px; width:20px; height:20px; border-radius:50%; background:{{ c.surfaceRaised }}; box-shadow:0 1px 3px rgba(0,0,0,0.2); transition:left 120ms ease-out;"></span>
+          </button>
+        </div>
+
+        <div style="border:1px solid {{ c.border }}; border-radius:10px; padding:16px 18px; margin-bottom:24px; background:{{ c.surfaceRaised }}; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+          <div>
+            <div style="font-size:13.5px; font-weight:600; margin-bottom:3px;">OpenRouter API key</div>
+            <div style="font-size:12.5px; color:{{ c.inkFaint }};">•••• •••• •••• 8f21 \u00b7 stored in the backend vault, never on disk</div>
+          </div>
+          <button style="padding:7px 14px; border-radius:7px; border:1px solid {{ c.border }}; background:transparent; color:{{ c.inkSoft }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;">Edit</button>
+        </div>
+
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.inkFaint }}; margin-bottom:10px;">Prompt editor</div>
+        <dc-import name="PromptEditor" c="{{ c }}" hint-size="100%,360px"></dc-import>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- CODEX VIEW -->
+      <sc-if value="{{ isCodexView }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:960px; margin:0 auto; padding:36px 40px 80px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;">
+          <div>
+            <div style="font-family:'Source Serif 4',serif; font-size:24px; font-weight:600;">Codex</div>
+            <div style="font-size:13px; color:{{ c.inkFaint }}; margin-top:4px;">The living knowledgebase behind Cottonmouth</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px; color:{{ c.inkFaint }}; margin-bottom:4px;">Completeness</div>
+            <div style="width:160px; height:6px; border-radius:3px; background:{{ c.border }}; overflow:hidden;"><div style="height:100%; width:62%; background:{{ c.accent }};"></div></div>
+          </div>
+        </div>
+
+        <sc-if value="{{ hasCodexProposals }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-bottom:26px;">
+          <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ c.amber }}; margin-bottom:10px;">Pending agent proposals</div>
+          <sc-for list="{{ codexProposals }}" as="p" hint-placeholder-count="2">
+            <div style="border:1px dashed {{ c.borderStrong }}; border-radius:10px; padding:14px 16px; margin-bottom:8px; background:{{ c.amberSoft }};">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <div style="font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:{{ c.amber }};">{{ p.type }} · proposed by {{ p.agent }}</div>
+                <span style="font-size:10px; color:{{ c.inkFaint }};">{{ p.citation }}</span>
+              </div>
+              <div style="font-size:13.5px; font-weight:600; color:{{ c.ink }}; margin-bottom:3px;">{{ p.title }}</div>
+              <div style="font-size:12.5px; color:{{ c.inkSoft }}; line-height:1.5; margin-bottom:10px;">{{ p.body }}</div>
+              <div style="display:flex; gap:6px;">
+                <button onclick="{{ p.accept }}" style="padding:6px 13px; border-radius:6px; border:none; background:{{ c.greenSoft }}; color:{{ c.green }}; font-size:11.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Accept</button>
+                <button onclick="{{ p.reject }}" style="padding:6px 13px; border-radius:6px; border:none; background:{{ c.redSoft }}; color:{{ c.red }}; font-size:11.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Reject</button>
+                <button onclick="{{ p.refine }}" style="padding:6px 13px; border-radius:6px; border:1px solid {{ c.borderStrong }}; background:transparent; color:{{ c.inkSoft }}; font-size:11.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">Refine</button>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        </sc-if>
+
+        <sc-for list="{{ codexEntriesFiltered }}" as="entry" hint-placeholder-count="6">
+          <dc-import name="CodexCard" entry="{{ entry }}" c="{{ c }}" expanded="{{ expandedCodexId }}" on-toggle="{{ toggleCodexEntry }}" hint-size="100%,90px"></dc-import>
+        </sc-for>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+
+  <!-- STATUS BAR -->
+  <sc-if value="{{ !focusMode }}" hint-placeholder-val="{{ true }}">
+  <div style="height:28px; min-height:28px; display:flex; align-items:center; justify-content:space-between; padding:0 20px; border-top:1px solid {{ c.border }}; background:{{ c.surface }}; font-size:11px; color:{{ c.inkFaint }};">
+    <div>Scene 2 · 214 words · Draft</div>
+    <div style="display:flex; gap:16px;">
+      <span>~1,240 tokens est.</span>
+      <span>Saved</span>
+    </div>
+  </div>
+  </sc-if>
+  </sc-if>
+
+  <!-- COMMAND PALETTE -->
+  <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
+    <div onclick="{{ closePalette }}" style="position:fixed; inset:0; background:rgba(20,17,14,0.42); z-index:100; display:flex; align-items:flex-start; justify-content:center; padding-top:14vh;">
+      <div onclick="{{ stopProp }}" style="width:560px; max-width:90vw; background:{{ c.surfaceRaised }}; border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,0.28); overflow:hidden; border:1px solid {{ c.border }};">
+        <input ref="{{ paletteInputRef }}" value="{{ paletteQuery }}" oninput="{{ onPaletteInput }}" onkeydown="{{ onPaletteKeydown }}" placeholder="Type a command or search…" style="width:100%; border:none; outline:none; padding:16px 18px; font-size:15px; font-family:'Public Sans',sans-serif; background:transparent; color:{{ c.ink }}; border-bottom:1px solid {{ c.border }};">
+        <div style="max-height:340px; overflow-y:auto; padding:6px;">
+          <sc-for list="{{ paletteResults }}" as="cmd" hint-placeholder-count="4">
+            <button onclick="{{ cmd.run }}" style="width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border-radius:8px; border:none; cursor:pointer; font-size:13.5px; font-family:'Public Sans',sans-serif; background:{{ cmd.bg }}; color:{{ c.ink }};">
+              <span>{{ cmd.label }}</span>
+              <span style="font-size:10.5px; color:{{ c.inkFaint }}; text-transform:uppercase; letter-spacing:0.05em;">{{ cmd.group }}</span>
+            </button>
+          </sc-for>
+          <sc-if value="{{ paletteNoResults }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:16px; font-size:13px; color:{{ c.inkFaint }};">No matching commands.</div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const THEMES = {
+  paper: {
+    bg: '#FAF8F5', surface: '#F2EEE7', surfaceRaised: '#FFFFFF',
+    ink: '#2A241F', inkSoft: 'rgba(42,36,31,0.62)', inkFaint: 'rgba(42,36,31,0.40)',
+    border: 'rgba(42,36,31,0.14)', borderStrong: 'rgba(42,36,31,0.28)',
+    accent: '#28486B', accentSoft: 'rgba(40,72,107,0.10)', accentText: '#1D3A57',
+    pageBg: '#FFFEFB',
+    amber: '#96650F', amberSoft: 'rgba(150,101,15,0.12)',
+    red: '#A23B3B', redSoft: 'rgba(162,59,59,0.10)',
+    green: '#3E7A50', greenSoft: 'rgba(62,122,80,0.12)'
+  },
+  night: {
+    bg: '#1E1B18', surface: '#262220', surfaceRaised: '#2C2724',
+    ink: '#F1ECE4', inkSoft: 'rgba(241,236,228,0.66)', inkFaint: 'rgba(241,236,228,0.42)',
+    border: 'rgba(241,236,228,0.14)', borderStrong: 'rgba(241,236,228,0.28)',
+    accent: '#8FB2D6', accentSoft: 'rgba(143,178,214,0.14)', accentText: '#AFCBE8',
+    pageBg: '#242020',
+    amber: '#D8A94E', amberSoft: 'rgba(216,169,78,0.14)',
+    red: '#D97A7A', redSoft: 'rgba(217,122,122,0.14)',
+    green: '#7FBF8E', greenSoft: 'rgba(127,191,142,0.14)'
+  }
+};
+
+const ASSISTANT_DEFS = [
+  { id: 'generator', name: 'Generator', alias: 'Generator', iconKind: 'nib', model: 'Claude Opus 4', status: 'Idle' },
+  { id: 'storyeditor', name: 'Story Editor', alias: 'Dev-Editor', iconKind: 'compass', model: 'Claude Opus 4', status: 'Idle' },
+  { id: 'lineeditor', name: 'Line Editor', alias: 'Line-Editor', iconKind: 'loupe', model: 'GPT-4.1', status: '3 changes pending' },
+  { id: 'dialogueeditor', name: 'Dialogue Editor', alias: 'Dialoguer', iconKind: 'quote', model: 'Claude Sonnet 4', status: 'Idle' },
+  { id: 'worldbuilder', name: 'World Builder', alias: 'World-Builder', iconKind: 'globe', model: 'Gemini 1.5 Pro', status: 'Idle' }
+];
+
+const CODEX_ENTRIES = [
+  { id: 'ray', type: 'Character', title: 'Ray Chambliss', status: 'canon', private: false,
+    body: 'Protagonist. 41. Ex-Memphis PD homicide detective. Returned to Bellhaven after brother Dale\u2019s death was ruled a suicide he doesn\u2019t believe.' },
+  { id: 'dale', type: 'Character', title: 'Dale Chambliss', status: 'canon', private: false,
+    body: 'Ray\u2019s younger brother. Found dead June 14, 2003. Ruling: suicide. Ray disputes it.' },
+  { id: 'tull', type: 'Character', title: 'Sheriff Tull Duvall', status: 'canon', private: false,
+    body: 'Runs Bellhaven through the fish plant and county contracts. Old friend of Ray\u2019s late father.' },
+  { id: 'bellhaven', type: 'Location', title: 'Bellhaven, Mississippi', status: 'canon', private: false,
+    body: 'Fictional Delta town, population 4,200. River town built around catfish processing and cotton money.' },
+  { id: 'fishhouse', type: 'Location', title: 'Duvall Fish & Cold Storage', status: 'canon', private: false,
+    body: 'The Duvall family\u2019s processing plant on the river. Site of Ch.3 confrontation.' },
+  { id: 'duvalls', type: 'Faction', title: 'The Duvall Family', status: 'canon', private: false,
+    body: 'Political dynasty controlling county contracts and the fish plant for three generations.' },
+  { id: 'heat', type: 'World Rule', title: 'The Delta heat never breaks before September', status: 'tentative', private: false,
+    body: 'Atmospheric constraint \u2014 keep summer scenes oppressive through August.' },
+  { id: 'daletimeline', type: 'Timeline', title: 'Dale Chambliss found dead \u2014 June 14, 2003', status: 'canon', private: false,
+    body: 'Anchor event. All flashback and present-day chapters resolve against this date.' },
+  { id: 'guilt', type: 'Theme', title: 'Inherited guilt', status: 'tentative', private: false,
+    body: 'Motif tracked across manuscript \u2014 sins of the fathers revisited on the sons.' },
+  { id: 'privatenote', type: 'Private Note', title: 'Ray\u2019s drinking', status: 'tentative', private: true,
+    body: 'Keep it a symptom, not a plot device. Don\u2019t let it resolve too neatly.' }
+];
+
+class Component extends DCLogic {
+  state = {
+    stage: 'landing',
+    projectName: 'Cottonmouth',
+    isNewProject: false,
+    view: 'dashboard',
+    theme: 'paper',
+    focusMode: false,
+    streakOpen: false,
+    metaOpen: false,
+    continuityOpen: false,
+    snapshotOpen: false,
+    expandedAssistant: null,
+    selectionMenu: null,
+    codexFilter: 'All',
+    expandedCodexId: null,
+    paletteOpen: false,
+    paletteQuery: '',
+    advancedMode: false,
+    changes: [
+      { id: 'c1', category: 'Filter word', before: 'Ray noticed that the ice machine was grinding behind Tull.', after: 'The ice machine ground behind Tull.', status: 'pending', refining: false, refineText: '' },
+      { id: 'c2', category: 'Adverb overuse', before: 'Tull said it very casually, like he didn\u2019t care.', after: 'Tull said it like he didn\u2019t care.', status: 'pending', refining: false, refineText: '' },
+      { id: 'c3', category: 'Repeated structure', before: 'Ray parked the Bronco. Ray sat there a minute. Ray watched the roof shimmer.', after: 'Ray parked the Bronco and sat there a minute, watching the roof shimmer.', status: 'pending', refining: false, refineText: '' }
+    ],
+    storyIssue: {
+      status: 'Open', refining: false, refineText: '',
+      title: 'Scene lacks a clear turn',
+      body: 'Ray leaves with the same information \u2014 and the same suspicion \u2014 he arrived with. Consider giving Tull a small, checkable lie here that Ray can catch later, so this scene plants a payoff.',
+      severity: 'Medium'
+    },
+    codexProposals: [
+      { id: 'p1', type: 'World Rule', agent: 'World Builder', citation: '3 sources cited', title: 'Catfish farming boom, 1980s\u201390s', body: 'Mississippi\u2019s shift from cotton to farm-raised catfish reshaped Delta river towns economically \u2014 grounds Duvall Fish & Cold Storage\u2019s rise.', status: 'pending' },
+      { id: 'p2', type: 'Research Note', agent: 'World Builder', citation: '1 source cited', title: 'Ice-house cold-chain logistics', body: 'Processing plants of this era relied on on-site ice production for same-day shipping \u2014 explains the ice machine detail in Ch.3.', status: 'pending' }
+    ],
+    lmStudioFallback: true,
+    agentModels: {
+      generator: 'Claude Opus 4', storyeditor: 'Claude Opus 4', lineeditor: 'GPT-4.1',
+      dialogueeditor: 'Claude Sonnet 4', worldbuilder: 'Gemini 1.5 Pro'
+    }
+  };
+
+  pageRef = React.createRef();
+  paletteInputRef = React.createRef();
+
+  componentDidMount() {
+    this._onKey = (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        this.openPalette();
+      } else if (e.key === 'Escape') {
+        if (this.state.paletteOpen) this.closePalette();
+        else if (this.state.focusMode) this.setState({ focusMode: false });
+      }
+    };
+    window.addEventListener('keydown', this._onKey);
+  }
+  componentWillUnmount() {
+    window.removeEventListener('keydown', this._onKey);
+  }
+
+  componentDidUpdate(pp, ps) {
+    if (this.state.paletteOpen && !ps.paletteOpen && this.paletteInputRef.current) {
+      this.paletteInputRef.current.focus();
+    }
+  }
+
+  go(view) { this.setState({ view, expandedCodexId: null }); }
+  openCottonmouth() { this.setState({ stage: 'app', projectName: 'Cottonmouth', isNewProject: false, view: 'dashboard' }); }
+  startNewProject() { this.setState({ stage: 'onboarding' }); }
+  exitToLanding() { this.setState({ stage: 'landing' }); }
+  completeOnboarding() { this.setState({ stage: 'app', projectName: 'Untitled Project', isNewProject: true, view: 'dashboard' }); }
+  openPalette() { this.setState({ paletteOpen: true, paletteQuery: '' }); }
+  closePalette() { this.setState({ paletteOpen: false }); }
+  stopProp(e) { e.stopPropagation(); }
+
+  onPaletteInput(e) { this.setState({ paletteQuery: e.target.value }); }
+  onPaletteKeydown(e) {
+    if (e.key === 'Enter') {
+      const results = this.getPaletteResults();
+      if (results.length) results[0].run();
+    }
+  }
+
+  getPaletteResults() {
+    const q = (this.state.paletteQuery || '').toLowerCase();
+    const cmds = [
+      { label: 'Go to Dashboard', group: 'Navigate', run: () => { this.go('dashboard'); this.closePalette(); } },
+      { label: 'Go to Manuscript', group: 'Navigate', run: () => { this.go('manuscript'); this.closePalette(); } },
+      { label: 'Go to Codex', group: 'Navigate', run: () => { this.go('codex'); this.closePalette(); } },
+      { label: 'Go to Outline', group: 'Navigate', run: () => { this.go('outline'); this.closePalette(); } },
+      { label: 'Go to Story Timeline', group: 'Navigate', run: () => { this.go('timeline'); this.closePalette(); } },
+      { label: 'Go to Agent Routing', group: 'Navigate', run: () => { this.go('routing'); this.closePalette(); } },
+      { label: 'Go to Export', group: 'Navigate', run: () => { this.go('export'); this.closePalette(); } },
+      { label: 'Go to Agent Runs', group: 'Navigate', run: () => { this.go('agentruns'); this.closePalette(); } },
+      { label: 'Go to Tool & Skill Library', group: 'Navigate', run: () => { this.go('library'); this.closePalette(); } },
+      { label: 'Go to Settings', group: 'Navigate', run: () => { this.go('settings'); this.closePalette(); } },
+      { label: 'Jump to Ch. 3, Scene 2: The Fish House', group: 'Navigate', run: () => { this.go('manuscript'); this.closePalette(); } },
+      { label: 'Toggle Paper / Night theme', group: 'View', run: () => { this.setState(s => ({ theme: s.theme === 'paper' ? 'night' : 'paper' })); this.closePalette(); } },
+      { label: 'Toggle distraction-free mode', group: 'View', run: () => { this.go('manuscript'); this.setState(s => ({ focusMode: !s.focusMode })); this.closePalette(); } },
+      ...ASSISTANT_DEFS.map(a => ({
+        label: `Invoke ${a.name} on current scene`, group: 'Agent',
+        run: () => { this.go('manuscript'); this.setState({ expandedAssistant: a.id }); this.closePalette(); }
+      }))
+    ];
+    if (!q) return cmds;
+    return cmds.filter(c => c.label.toLowerCase().includes(q));
+  }
+
+  onSelectText() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !this.pageRef.current) { this.setState({ selectionMenu: null }); return; }
+    const range = sel.getRangeAt(0);
+    if (!this.pageRef.current.contains(range.commonAncestorContainer)) { this.setState({ selectionMenu: null }); return; }
+    const rect = range.getBoundingClientRect();
+    const parentRect = this.pageRef.current.parentElement.getBoundingClientRect();
+    this.setState({
+      selectionMenu: {
+        top: rect.top - parentRect.top - 8,
+        left: rect.left - parentRect.left + rect.width / 2
+      }
+    });
+  }
+
+  sendSelectionTo(assistantId) {
+    this.setState(s => ({
+      selectionMenu: null,
+      expandedAssistant: assistantId
+    }));
+    window.getSelection().removeAllRanges();
+  }
+
+  toggleAssistant(id) {
+    this.setState(s => ({ expandedAssistant: s.expandedAssistant === id ? null : id }));
+  }
+  invokeAgent(id) {
+    if (id === 'storyeditor' || id === 'worldbuilder') {
+      this.go('agentruns');
+    }
+  }
+
+  onChangeAction(id, action) {
+    if (action === 'refine') {
+      this.setState(s => ({ changes: s.changes.map(c => c.id === id ? { ...c, refining: !c.refining } : c) }));
+      return;
+    }
+    if (action === 'submitRefine') {
+      this.setState(s => ({ changes: s.changes.map(c => c.id === id ? { ...c, status: 'pending', refining: false } : c) }));
+      return;
+    }
+    this.setState(s => ({ changes: s.changes.map(c => c.id === id ? { ...c, status: action } : c) }));
+  }
+
+  onProposalAction(id, action) {
+    this.setState(s => ({ codexProposals: s.codexProposals.map(p => p.id === id ? { ...p, status: action } : p) }));
+  }
+
+  onIssueAction(action) {
+    if (action === 'refine') {
+      this.setState(s => ({ storyIssue: { ...s.storyIssue, refining: !s.storyIssue.refining } }));
+      return;
+    }
+    if (action === 'submitRefine') {
+      this.setState(s => ({ storyIssue: { ...s.storyIssue, status: 'In progress', refining: false } }));
+      return;
+    }
+    const map = { accepted: 'Accepted', rejected: 'Rejected' };
+    this.setState(s => ({ storyIssue: { ...s.storyIssue, status: map[action] || s.storyIssue.status } }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const c = THEMES[s.theme];
+    const isDashboardView = s.view === 'dashboard';
+    const isManuscriptView = s.view === 'manuscript';
+    const isCodexView = s.view === 'codex';
+    const isRoutingView = s.view === 'routing';
+    const isTimelineView = s.view === 'timeline';
+    const isSettingsView = s.view === 'settings';
+    const isOutlineView = s.view === 'outline';
+    const isExportView = s.view === 'export';
+    const isAgentRunsView = s.view === 'agentruns';
+    const isLibraryView = s.view === 'library';
+
+    const navDefs = [
+      { id: 'dashboard', label: 'Dashboard' },
+      { id: 'manuscript', label: 'Manuscript' },
+      { id: 'codex', label: 'Codex' },
+      { id: 'outline', label: 'Outline' },
+      { id: 'timeline', label: 'Story Timeline' },
+      { id: 'settings', label: 'Settings' }
+    ];
+    const navItems = navDefs.map(n => {
+      const active = s.view === n.id;
+      return {
+        label: n.label,
+        go: () => this.go(n.id),
+        bg: active ? c.accentSoft : c.surfaceRaised,
+        color: active ? c.accentText : c.inkSoft,
+        weight: active ? 600 : 500,
+        borderColor: active ? c.accent : c.border,
+        shadow: active ? 'none' : '0 1px 1px rgba(0,0,0,0.02)'
+      };
+    });
+
+    const timelineEvents = [
+      { date: 'c. 1972', title: 'Ray & Dale\u2019s father works the Duvall plant', body: 'Backstory anchor \u2014 establishes the family\u2019s decades-long entanglement with the Duvalls.' },
+      { date: 'June 14, 2003', title: 'Dale Chambliss found dead', body: 'Ruled a suicide. Ray disputes it. All present-day chapters resolve against this date.' },
+      { date: 'June 2003, present', title: 'Ray returns to Bellhaven', body: 'Opens Chapter 1. Ray arrives for the funeral and doesn\u2019t leave.' },
+      { date: 'Late June 2003', title: 'Ch.3 \u2014 The Fish House confrontation', body: 'Ray\u2019s first direct exchange with Tull Duvall since the funeral.' }
+    ].map((ev, i) => ({ ...ev, top: i % 2 === 0, bottom: i % 2 !== 0 }));
+
+    const chapters = [
+      { title: 'Ch.1 Homecoming', current: false },
+      { title: 'Ch.2 Blood Kin', current: false },
+      { title: 'Ch.3 The Fish House', current: true },
+      { title: 'Ch.4 The Levee Road', current: false },
+      { title: 'Ch.5 Low Water', current: false }
+    ].map(ch => ({
+      title: ch.title,
+      hlBg: ch.current ? c.accentSoft : 'transparent',
+      textColor: ch.current ? c.accentText : c.inkSoft,
+      weight: ch.current ? 600 : 400,
+      dot: ch.current ? c.accent : c.inkFaint
+    }));
+
+    const codexFilterDefs = ['All', 'Character', 'Location', 'Faction', 'World Rule', 'Timeline', 'Theme', 'Private Note'];
+    const codexFilters = codexFilterDefs.map(f => ({
+      label: f,
+      go: () => this.setState({ codexFilter: f }),
+      bg: s.codexFilter === f ? c.accentSoft : 'transparent',
+      color: s.codexFilter === f ? c.accentText : c.inkSoft
+    }));
+    const codexEntriesFiltered = CODEX_ENTRIES.filter(e => s.codexFilter === 'All' || e.type === s.codexFilter);
+
+    const statusColors = {
+      canon: { bg: c.greenSoft, color: c.green, label: 'Canon' },
+      tentative: { bg: c.amberSoft, color: c.amber, label: 'Tentative' },
+      deprecated: { bg: c.border, color: c.inkFaint, label: 'Deprecated' },
+      contradicted: { bg: c.redSoft, color: c.red, label: 'Contradicted' }
+    };
+
+    const chapterStatus = [
+      { title: 'Ch.1 Homecoming', status: 'Drafted' },
+      { title: 'Ch.2 Blood Kin', status: 'Drafted' },
+      { title: 'Ch.3 The Fish House', status: 'In progress' },
+      { title: 'Ch.4 The Levee Road', status: 'Not started' },
+      { title: 'Ch.5 Low Water', status: 'Not started' }
+    ].map(ch => ({
+      title: ch.title,
+      status: ch.status,
+      badgeBg: ch.status === 'Drafted' ? c.greenSoft : ch.status === 'In progress' ? c.amberSoft : c.border,
+      badgeColor: ch.status === 'Drafted' ? c.green : ch.status === 'In progress' ? c.amber : c.inkFaint
+    }));
+
+    const nextSteps = [
+      { title: '2 structural issues flagged by Story Editor', sub: 'Chapter 2 \u2014 pacing and a broken setup', action: 'Review', dot: c.amber, go: () => this.go('manuscript') },
+      { title: '3 tracked changes awaiting review', sub: 'Line Editor \u2014 Chapter 3, Scene 2', action: 'Review', dot: c.accent, go: () => this.go('manuscript') },
+      { title: 'Codex is 62% complete', sub: 'World Builder interview \u2014 40% answered', action: 'Continue', dot: c.green, go: () => this.go('codex') }
+    ];
+
+    const assistants = ASSISTANT_DEFS.map(a => ({
+      id: a.id, name: a.name, model: a.model, status: a.status, iconKind: a.iconKind,
+      iconColor: c.accent,
+      statusDot: a.status === 'Idle' ? c.inkFaint : c.amber,
+      sendSelection: () => this.sendSelectionTo(a.id)
+    }));
+
+    const openChangesCount = s.changes.filter(ch => ch.status === 'pending').length + (s.storyIssue.status === 'Open' ? 1 : 0);
+
+    return {
+      c,
+      stageIsLanding: s.stage === 'landing',
+      stageIsOnboarding: s.stage === 'onboarding',
+      stageIsApp: s.stage === 'app',
+      projectName: s.projectName,
+      isNewProject: s.isNewProject,
+      openCottonmouth: () => this.openCottonmouth(),
+      startNewProject: () => this.startNewProject(),
+      exitToLanding: () => this.exitToLanding(),
+      completeOnboarding: () => this.completeOnboarding(),
+      focusMode: s.focusMode,
+      streakOpen: s.streakOpen,
+      streakToggleLabel: s.streakOpen ? 'Hide writing history' : 'Show writing history',
+      toggleStreak: () => this.setState(s2 => ({ streakOpen: !s2.streakOpen })),
+      metaOpen: s.metaOpen,
+      metaToggleLabel: s.metaOpen ? 'Hide story craft ▾' : 'Story craft ▸',
+      toggleMeta: () => this.setState(s2 => ({ metaOpen: !s2.metaOpen })),
+      continuityOpen: s.continuityOpen,
+      continuityToggleLabel: s.continuityOpen ? 'Hide continuity & threads ▾' : 'Continuity & Threads ▸',
+      continuityMarginBottom: s.continuityOpen ? 0 : 22,
+      toggleContinuity: () => this.setState(s2 => ({ continuityOpen: !s2.continuityOpen })),
+      toggleFocus: () => this.setState(s2 => ({ focusMode: !s2.focusMode })),
+      isDashboardView, isManuscriptView, isCodexView, isRoutingView, isTimelineView, isSettingsView, isOutlineView, isExportView, isAgentRunsView, isLibraryView,
+      topBarNavItems: [
+        { id: 'routing', label: 'Routing' },
+        { id: 'agentruns', label: 'Agent Runs' },
+        { id: 'library', label: 'Library' }
+      ].map(n => {
+        const active = s.view === n.id;
+        return {
+          label: n.label,
+          go: () => this.go(n.id),
+          bg: active ? '#C7A876' : '#E4D3AF',
+          borderColor: active ? '#A9834E' : '#C9AD82',
+          color: active ? '#3A2A14' : '#5C4327',
+          weight: active ? 700 : 600
+        };
+      }),
+      outlineChapters: [
+        { title: 'Ch.1 Homecoming', status: 'Drafted', scenes: [
+          { title: 'Scene 1 — The Drive In', purpose: 'Ray arrives for the funeral; first sight of Bellhaven in a decade.' },
+          { title: 'Scene 2 — The Wake', purpose: 'Ray reconnects with family; tension with the Duvalls surfaces.' }
+        ] },
+        { title: 'Ch.2 Blood Kin', status: 'Drafted', scenes: [
+          { title: 'Scene 1 — The Will', purpose: 'Dale\u2019s effects raise a question about his state of mind.' }
+        ] },
+        { title: 'Ch.3 The Fish House', status: 'In progress', scenes: [
+          { title: 'Scene 1 — Cold Storage', purpose: 'Ray revisits the plant; sets up the confrontation.' },
+          { title: 'Scene 2 — The Fish House', purpose: 'Ray confronts Tull Duvall; leaves with a name to check.' }
+        ] },
+        { title: 'Ch.4 The Levee Road', status: 'Not started', scenes: null, isEmpty: true },
+        { title: 'Ch.5 Low Water', status: 'Not started', scenes: null, isEmpty: true }
+      ].map(ch => ({
+        ...ch,
+        badgeBg: ch.status === 'Drafted' ? c.greenSoft : ch.status === 'In progress' ? c.amberSoft : c.border,
+        badgeColor: ch.status === 'Drafted' ? c.green : ch.status === 'In progress' ? c.amber : c.inkFaint,
+        hasScenes: ch.scenes ? 12 : 0
+      })),
+      manuscriptExportFormats: [
+        { label: 'Markdown', hint: '.md, scene files' },
+        { label: 'DOCX', hint: 'Word-compatible' },
+        { label: 'PDF', hint: 'Print-ready' },
+        { label: 'EPUB', hint: 'E-reader format' },
+        { label: 'Plain text', hint: '.txt' }
+      ],
+      codexExportFormats: [
+        { label: 'JSON', hint: 'Structured data' },
+        { label: 'Markdown', hint: 'Readable bible' },
+        { label: 'Series Bible (summary)', hint: 'Compressed overview' }
+      ],
+      snapshotOpen: s.snapshotOpen,
+      toggleSnapshot: () => this.setState(s2 => ({ snapshotOpen: !s2.snapshotOpen })),
+      snapshots: [
+        { label: 'Autosave · 2:14 PM', detail: 'Current' },
+        { label: 'Autosave · 1:52 PM', detail: '22 min ago' },
+        { label: 'Autosave · 1:20 PM', detail: '54 min ago' },
+        { label: 'Manual snapshot · "Before Fish House rewrite"', detail: 'Yesterday, 6:41 PM' }
+      ],
+      navItems,
+      timelineEvents,
+      advancedMode: s.advancedMode,
+      toggleAdvanced: () => this.setState(s2 => ({ advancedMode: !s2.advancedMode })),
+      advancedTrackBg: s.advancedMode ? c.accent : c.border,
+      advancedThumbLeft: s.advancedMode ? 20 : 2,
+      chapters,
+      goManuscript: () => this.go('manuscript'),
+      goExport: () => this.go('export'),
+      chapterStatus,
+      nextSteps,
+      codexFilters,
+      codexEntriesFiltered: codexEntriesFiltered.map(e => ({
+        ...e,
+        statusMeta: statusColors[e.status]
+      })),
+      expandedCodexId: s.expandedCodexId,
+      toggleCodexEntry: (id) => this.setState(s2 => ({ expandedCodexId: s2.expandedCodexId === id ? null : id })),
+      hasCodexProposals: s.codexProposals.some(p => p.status === 'pending'),
+      codexProposals: s.codexProposals.filter(p => p.status === 'pending').map(p => ({
+        ...p,
+        accept: () => this.onProposalAction(p.id, 'accepted'),
+        reject: () => this.onProposalAction(p.id, 'rejected'),
+        refine: () => this.onProposalAction(p.id, 'pending')
+      })),
+      lmStudioFallback: s.lmStudioFallback,
+      toggleLmStudioFallback: () => this.setState(s2 => ({ lmStudioFallback: !s2.lmStudioFallback })),
+      lmStudioTrackBg: s.lmStudioFallback ? c.accent : c.border,
+      lmStudioThumbLeft: s.lmStudioFallback ? 20 : 2,
+      agentModelRows: ASSISTANT_DEFS.map(a => ({
+        id: a.id, name: a.name,
+        model: s.agentModels[a.id],
+        options: ['Claude Opus 4', 'Claude Sonnet 4', 'GPT-4.1', 'Gemini 1.5 Pro'].map(m => ({
+          label: m,
+          pick: () => this.setState(s2 => ({ agentModels: { ...s2.agentModels, [a.id]: m } })),
+          bg: s.agentModels[a.id] === m ? c.accent : 'transparent',
+          color: s.agentModels[a.id] === m ? c.bg : c.inkSoft
+        }))
+      })),
+      pagePadTop: s.focusMode ? '80px' : '40px',
+      pageRef: this.pageRef,
+      onSelectText: () => this.onSelectText(),
+      selectionMenu: s.selectionMenu,
+      assistants,
+      expandedAssistant: s.expandedAssistant,
+      toggleAssistant: (id) => this.toggleAssistant(id),
+      invokeAgent: (id) => this.invokeAgent(id),
+      openChangesCount,
+      changes: s.changes,
+      storyIssue: s.storyIssue,
+      onChangeAction: (id, action) => this.onChangeAction(id, action),
+      onIssueAction: (action) => this.onIssueAction(action),
+      paperBtnBg: s.theme === 'paper' ? c.accent : 'transparent',
+      paperBtnColor: s.theme === 'paper' ? c.bg : c.inkSoft,
+      nightBtnBg: s.theme === 'night' ? c.accent : 'transparent',
+      nightBtnColor: s.theme === 'night' ? c.bg : c.inkSoft,
+      setTheme_paper: () => this.setState({ theme: 'paper' }),
+      setTheme_night: () => this.setState({ theme: 'night' }),
+      paletteOpen: s.paletteOpen,
+      paletteQuery: s.paletteQuery,
+      paletteInputRef: this.paletteInputRef,
+      openPalette: () => this.openPalette(),
+      closePalette: () => this.closePalette(),
+      stopProp: (e) => this.stopProp(e),
+      onPaletteInput: (e) => this.onPaletteInput(e),
+      onPaletteKeydown: (e) => this.onPaletteKeydown(e),
+      paletteResults: this.getPaletteResults().map((r, i) => ({ ...r, bg: 'transparent' })),
+      paletteNoResults: this.getPaletteResults().length === 0
+    };
+  }
+}
+
+</script>
+</body>
+</html>

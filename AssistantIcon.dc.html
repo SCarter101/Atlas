@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:{{ size }}px; height:{{ size }}px; position:relative; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+  <sc-if value="{{ isNib }}" hint-placeholder-val="{{ false }}">
+    <div style="width:62%; height:62%; background:{{ color }}; transform:rotate(45deg); border-radius:2px;"></div>
+  </sc-if>
+  <sc-if value="{{ isCompass }}" hint-placeholder-val="{{ false }}">
+    <div style="width:90%; height:90%; border-radius:50%; border:1.6px solid {{ color }}; position:relative;">
+      <div style="position:absolute; top:50%; left:50%; width:1.6px; height:64%; background:{{ color }}; transform:translate(-50%,-50%) rotate(35deg);"></div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isLoupe }}" hint-placeholder-val="{{ false }}">
+    <div style="width:66%; height:66%; border-radius:50%; border:1.6px solid {{ color }}; position:absolute; top:6%; left:6%;"></div>
+    <div style="width:34%; height:1.8px; background:{{ color }}; position:absolute; bottom:12%; right:6%; transform:rotate(45deg); border-radius:2px;"></div>
+  </sc-if>
+  <sc-if value="{{ isQuote }}" hint-placeholder-val="{{ false }}">
+    <div style="font-family:'Source Serif 4',Georgia,serif; font-weight:700; color:{{ color }}; line-height:1;">&#8221;</div>
+  </sc-if>
+  <sc-if value="{{ isGlobe }}" hint-placeholder-val="{{ false }}">
+    <div style="width:90%; height:90%; border-radius:50%; border:1.6px solid {{ color }}; position:relative; overflow:hidden;">
+      <div style="position:absolute; top:50%; left:0; width:100%; height:1.6px; background:{{ color }}; transform:translateY(-50%);"></div>
+      <div style="position:absolute; top:0; left:50%; width:46%; height:100%; border-left:1.6px solid {{ color }}; border-right:1.6px solid {{ color }}; border-radius:50%; transform:translateX(-50%);"></div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:40,&quot;height&quot;:40}, &quot;kind&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;nib&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;nib&quot;,&quot;compass&quot;,&quot;loupe&quot;,&quot;quote&quot;,&quot;globe&quot;]}, &quot;color&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#28486B&quot;,&quot;tsType&quot;:&quot;string&quot;}, &quot;size&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:20,&quot;tsType&quot;:&quot;number&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const kind = this.props.kind;
+    return {
+      size: this.props.size || 20,
+      color: this.props.color || '#28486B',
+      isNib: kind === 'nib',
+      isCompass: kind === 'compass',
+      isLoupe: kind === 'loupe',
+      isQuote: kind === 'quote',
+      isGlobe: kind === 'globe'
+    };
+  }
+}
+
+</script>
+</body>
+</html>

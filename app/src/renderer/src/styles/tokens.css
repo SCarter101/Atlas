@@ -1,0 +1,85 @@
+/* Ported from the Phase 1 prototype (Atlas.dc.html THEMES) — see
+   "Atlas Architecture and Data Contracts.md". Paper is default; Night is
+   opted into via a [data-theme="night"] attribute. Custom properties
+   cascade to descendants from wherever they're set, so the plain (non
+   :root-scoped) attribute selectors below work whether data-theme lands on
+   <html> or on a nested wrapper div (as AppShell and Landing do). Typewriter
+   theme is a Phase 4 concern per spec §10. */
+
+:root,
+[data-theme='paper'] {
+  --c-bg: #faf8f5;
+  --c-surface: #f2eee7;
+  --c-surface-raised: #ffffff;
+  --c-ink: #2a241f;
+  --c-ink-soft: rgba(42, 36, 31, 0.62);
+  --c-ink-faint: rgba(42, 36, 31, 0.4);
+  --c-border: rgba(42, 36, 31, 0.14);
+  --c-border-strong: rgba(42, 36, 31, 0.28);
+  --c-accent: #28486b;
+  --c-accent-soft: rgba(40, 72, 107, 0.1);
+  --c-accent-text: #1d3a57;
+  --c-page-bg: #fffefb;
+  --c-amber: #96650f;
+  --c-amber-soft: rgba(150, 101, 15, 0.12);
+  --c-red: #a23b3b;
+  --c-red-soft: rgba(162, 59, 59, 0.1);
+  --c-green: #3e7a50;
+  --c-green-soft: rgba(62, 122, 80, 0.12);
+}
+
+[data-theme='night'] {
+  --c-bg: #1e1b18;
+  --c-surface: #262220;
+  --c-surface-raised: #2c2724;
+  --c-ink: #f1ece4;
+  --c-ink-soft: rgba(241, 236, 228, 0.66);
+  --c-ink-faint: rgba(241, 236, 228, 0.42);
+  --c-border: rgba(241, 236, 228, 0.14);
+  --c-border-strong: rgba(241, 236, 228, 0.28);
+  --c-accent: #8fb2d6;
+  --c-accent-soft: rgba(143, 178, 214, 0.14);
+  --c-accent-text: #afcbe8;
+  --c-page-bg: #242020;
+  --c-amber: #d8a94e;
+  --c-amber-soft: rgba(216, 169, 78, 0.14);
+  --c-red: #d97a7a;
+  --c-red-soft: rgba(217, 122, 122, 0.14);
+  --c-green: #7fbf8e;
+  --c-green-soft: rgba(127, 191, 142, 0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family:
+    'Public Sans',
+    system-ui,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.manuscript-page {
+  font-family: 'Source Serif 4', serif;
+  font-size: 19px;
+  line-height: 1.65;
+  max-width: 68ch;
+}

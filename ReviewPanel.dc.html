@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div>
+  <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ inkFaint }}; margin-bottom:8px;">Story Editor</div>
+  <div style="border:1px solid {{ issueBorder }}; border-radius:10px; padding:12px; margin-bottom:16px; background:{{ surfaceRaised }};">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <span style="font-size:12.5px; font-weight:600;">{{ issueTitle }}</span>
+      <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; background:{{ issueBadgeBg }}; color:{{ issueBadgeColor }};">{{ issueStatus }}</span>
+    </div>
+    <div style="font-size:12px; color:{{ inkSoft }}; line-height:1.5; margin-bottom:10px;">{{ issueBody }}</div>
+    <div style="font-size:10.5px; color:{{ inkFaint }}; margin-bottom:10px;">Severity: {{ issueSeverity }}</div>
+    <sc-if value="{{ issueRefining }}" hint-placeholder-val="{{ false }}">
+      <textarea placeholder="Follow-up instruction…" style="width:100%; min-height:52px; border:1px solid {{ border }}; border-radius:7px; padding:8px; font-size:12px; font-family:'Public Sans',sans-serif; margin-bottom:8px; resize:vertical; background:{{ bg }}; color:{{ ink }};"></textarea>
+      <button onclick="{{ issueSubmitRefine }}" style="width:100%; padding:7px 0; border-radius:7px; border:none; background:{{ accent }}; color:{{ bg }}; font-size:12px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Send refinement</button>
+    </sc-if>
+    <sc-if value="{{ !issueRefining }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex; gap:6px;">
+        <button onclick="{{ issueAccept }}" style="flex:1; padding:6px 0; border-radius:6px; border:none; background:{{ greenSoft }}; color:{{ green }}; font-size:11.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Accept</button>
+        <button onclick="{{ issueReject }}" style="flex:1; padding:6px 0; border-radius:6px; border:none; background:{{ redSoft }}; color:{{ red }}; font-size:11.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Reject</button>
+        <button onclick="{{ issueRefine }}" style="flex:1; padding:6px 0; border-radius:6px; border:1px solid {{ border }}; background:transparent; color:{{ inkSoft }}; font-size:11.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">Refine</button>
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ inkFaint }}; margin-bottom:8px;">Line Editor — Tracked Changes</div>
+  <sc-for list="{{ items }}" as="ch" hint-placeholder-count="3">
+    <div style="border:1px solid {{ ch.borderColor }}; border-radius:10px; padding:12px; margin-bottom:10px; background:{{ ch.cardBg }}; opacity:{{ ch.opacity }};">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; background:{{ accentSoft }}; color:{{ accentText }};">{{ ch.category }}</span>
+        <span style="font-size:10.5px; color:{{ inkFaint }}; text-transform:capitalize;">{{ ch.status }}</span>
+      </div>
+      <div style="font-size:11.5px; color:{{ inkFaint }}; text-decoration:line-through; margin-bottom:4px; line-height:1.5;">{{ ch.before }}</div>
+      <div style="font-size:12px; color:{{ ink }}; line-height:1.5; margin-bottom:10px;">{{ ch.after }}</div>
+      <sc-if value="{{ ch.refining }}" hint-placeholder-val="{{ false }}">
+        <textarea placeholder="Follow-up instruction…" style="width:100%; min-height:48px; border:1px solid {{ border }}; border-radius:7px; padding:8px; font-size:12px; font-family:'Public Sans',sans-serif; margin-bottom:8px; resize:vertical; background:{{ bg }}; color:{{ ink }};"></textarea>
+        <button onclick="{{ ch.submitRefine }}" style="width:100%; padding:6px 0; border-radius:6px; border:none; background:{{ accent }}; color:{{ bg }}; font-size:11.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Send refinement</button>
+      </sc-if>
+      <sc-if value="{{ !ch.refining }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex; gap:6px;">
+          <button onclick="{{ ch.accept }}" style="flex:1; padding:6px 0; border-radius:6px; border:none; background:{{ greenSoft }}; color:{{ green }}; font-size:11.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Accept</button>
+          <button onclick="{{ ch.reject }}" style="flex:1; padding:6px 0; border-radius:6px; border:none; background:{{ redSoft }}; color:{{ red }}; font-size:11.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Reject</button>
+          <button onclick="{{ ch.refine }}" style="flex:1; padding:6px 0; border-radius:6px; border:1px solid {{ border }}; background:transparent; color:{{ inkSoft }}; font-size:11.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">Refine</button>
+        </div>
+      </sc-if>
+    </div>
+  </sc-for>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:320,&quot;height&quot;:520}}">
+class Component extends DCLogic {
+  renderVals() {
+    const c = this.props.c || {};
+    const changes = this.props.changes || [];
+    const issue = this.props.issue || {};
+    const onChangeAction = this.props.onChangeAction || (() => {});
+    const onIssueAction = this.props.onIssueAction || (() => {});
+
+    const issueStatusColors = {
+      'Open': { bg: c.amberSoft, color: c.amber },
+      'Accepted': { bg: c.greenSoft, color: c.green },
+      'Rejected': { bg: c.redSoft, color: c.red },
+      'In progress': { bg: c.accentSoft, color: c.accentText },
+      'Fixed': { bg: c.greenSoft, color: c.green }
+    };
+    const im = issueStatusColors[issue.status] || issueStatusColors['Open'];
+
+    return {
+      inkFaint: c.inkFaint, inkSoft: c.inkSoft, ink: c.ink, border: c.border,
+      surfaceRaised: c.surfaceRaised, bg: c.bg, accent: c.accent, accentSoft: c.accentSoft,
+      accentText: c.accentText, green: c.green, greenSoft: c.greenSoft, red: c.red, redSoft: c.redSoft,
+      issueBorder: c.border,
+      issueTitle: issue.title, issueBody: issue.body, issueSeverity: issue.severity,
+      issueStatus: issue.status, issueBadgeBg: im.bg, issueBadgeColor: im.color,
+      issueRefining: issue.refining,
+      issueAccept: () => onIssueAction('accepted'),
+      issueReject: () => onIssueAction('rejected'),
+      issueRefine: () => onIssueAction('refine'),
+      issueSubmitRefine: () => onIssueAction('submitRefine'),
+      items: changes.map(ch => ({
+        ...ch,
+        borderColor: c.border,
+        cardBg: c.surfaceRaised,
+        opacity: ch.status === 'pending' ? 1 : 0.55,
+        accept: () => onChangeAction(ch.id, 'accepted'),
+        reject: () => onChangeAction(ch.id, 'rejected'),
+        refine: () => onChangeAction(ch.id, 'refine'),
+        submitRefine: () => onChangeAction(ch.id, 'submitRefine')
+      }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>

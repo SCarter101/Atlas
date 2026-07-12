@@ -1,0 +1,251 @@
+import { create } from 'zustand'
+import type { AgentGoal, AgentRole, AgentStep, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
+import type { FoundationsCodexDraft } from '@shared/ipc'
+import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
+import type { ProjectManifest } from '@shared/schema/project'
+
+interface PendingPermission {
+  runId: string
+  request: PermissionRequest
+}
+
+// Per-agent model assignment shown in Settings and read by AgentRail — a
+// Phase 2 "mockup" per spec §15 (no real OpenRouter routing behind it yet).
+export const DEFAULT_AGENT_MODELS: Record<AgentRole, string> = {
+  Generator: 'Claude Opus 4',
+  'Dev-Editor': 'Claude Opus 4',
+  'Line-Editor': 'GPT-4.1',
+  Dialoguer: 'Claude Sonnet 4',
+  'World-Builder': 'Gemini 1.5 Pro'
+}
+
+function allScenes(tree: ManuscriptTree | null): SceneMeta[] {
+  return (tree?.books ?? []).flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
+}
+
+interface AtlasState {
+  stage: 'landing' | 'onboarding' | 'app'
+  projectRoot: string | null
+  manifest: ProjectManifest | null
+  manuscriptTree: ManuscriptTree | null
+  activeSceneId: string | null
+  sceneSaveState: 'saved' | 'saving'
+  theme: 'paper' | 'night'
+  focusMode: boolean
+  agentModels: Record<AgentRole, string>
+  lmStudioFallback: boolean
+  advancedMode: boolean
+
+  pendingPermission: PendingPermission | null
+  activeSuggestions: SuggestionRef[]
+  lastAgentSummary: string | null
+
+  // Full trace of the most recent agent run — feeds the routing
+  // visualization and context inspection panel with real run data rather
+  // than fabricated placeholders. Replaced (not appended across runs) each
+  // time a new run starts.
+  currentRunGoal: AgentGoal | null
+  currentRunSteps: AgentStep[]
+
+  // Bumped whenever a suggestion's acceptance writes new prose to a scene
+  // out from under the open editor, so ManuscriptWorkspace knows to re-read
+  // it (see setSuggestionState).
+  sceneProseVersion: number
+
+  openSampleProject: () => Promise<void>
+  startNewProject: () => void
+  createProjectFromFoundations: (title: string, genrePrimary: string | undefined, entries: FoundationsCodexDraft[]) => Promise<void>
+  exitToLanding: () => void
+  refreshManuscriptTree: () => Promise<void>
+  setActiveScene: (sceneId: string) => void
+  setSceneSaveState: (state: 'saved' | 'saving') => void
+  toggleTheme: () => void
+  toggleFocusMode: () => void
+  setAgentModel: (role: AgentRole, model: string) => void
+  toggleLmStudioFallback: () => void
+  toggleAdvancedMode: () => void
+  startAgentRun: (goal: AgentGoal) => void
+  handleAgentStep: (runId: string, step: AgentStep) => void
+  resolvePermission: (decision: 'approved-once' | 'approved-session' | 'denied') => void
+  setSuggestionState: (id: string, state: SuggestionRef['state']) => Promise<void>
+}
+
+export const useAtlasStore = create<AtlasState>((set, get) => ({
+  stage: 'landing',
+  projectRoot: null,
+  manifest: null,
+  manuscriptTree: null,
+  activeSceneId: null,
+  sceneSaveState: 'saved',
+  theme: 'paper',
+  focusMode: false,
+  agentModels: { ...DEFAULT_AGENT_MODELS },
+  lmStudioFallback: true,
+  advancedMode: false,
+
+  pendingPermission: null,
+  activeSuggestions: [],
+  lastAgentSummary: null,
+  currentRunGoal: null,
+  currentRunSteps: [],
+  sceneProseVersion: 0,
+
+  openSampleProject: async () => {
+    const { projectRoot, manifest } = await window.atlas.project.openSample()
+    set({ projectRoot, manifest, theme: manifest.theme === 'night' ? 'night' : 'paper', stage: 'app' })
+    await get().refreshManuscriptTree()
+
+    const scenes = allScenes(get().manuscriptTree)
+    const mostRecentlyEdited = scenes.reduce<SceneMeta | undefined>(
+      (latest, scene) => (!latest || scene.updatedAt > latest.updatedAt ? scene : latest),
+      undefined
+    )
+    if (mostRecentlyEdited) set({ activeSceneId: mostRecentlyEdited.id })
+
+    // Story Editor isn't a wired agent yet (only Line Editor runs for real),
+    // so this one editorial finding is seeded demo content — the same
+    // finding shown in the Phase 1 prototype for this scene — rather than
+    // the output of a live run. It goes through the real Accept/Reject/
+    // Refine contract like any other suggestion.
+    // Same reasoning for these three tracked changes — the exact Line
+    // Editor demo content from the Phase 1 prototype, seeded so the default
+    // state has "visible tracked changes" per spec §2's Phase 1 acceptance
+    // criteria, rather than only appearing after a live run.
+    if (scenes.some((s) => s.id === 'chapter-003-scene-002')) {
+      set((s) => ({
+        activeSuggestions: [
+          ...s.activeSuggestions,
+          {
+            id: 'seed-story-editor-ch3-scene2',
+            agentRole: 'Dev-Editor',
+            kind: 'editorial-finding',
+            targetSceneId: 'chapter-003-scene-002',
+            payload: {
+              title: 'Scene lacks a clear turn',
+              body: 'Ray leaves with the same information — and the same suspicion — he arrived with. Consider giving Tull a small, checkable lie here that Ray can catch later, so this scene plants a payoff.',
+              severity: 'Medium'
+            },
+            provenance: { runId: 'seed-story-editor-ch3-scene2' },
+            state: 'pending'
+          },
+          {
+            id: 'seed-line-editor-ch3-scene2-c1',
+            agentRole: 'Line-Editor',
+            kind: 'tracked-change',
+            targetSceneId: 'chapter-003-scene-002',
+            payload: {
+              category: 'Filter word',
+              before: 'Ray noticed that the ice machine was grinding behind Tull.',
+              after: 'The ice machine ground behind Tull.'
+            },
+            provenance: { capabilityId: 'global.tools.line-edit-scan', capabilityVersion: '1.0.0', runId: 'seed-line-editor-ch3-scene2' },
+            state: 'pending'
+          },
+          {
+            id: 'seed-line-editor-ch3-scene2-c2',
+            agentRole: 'Line-Editor',
+            kind: 'tracked-change',
+            targetSceneId: 'chapter-003-scene-002',
+            payload: {
+              category: 'Adverb overuse',
+              before: "Tull said it very casually, like he didn't care.",
+              after: "Tull said it like he didn't care."
+            },
+            provenance: { capabilityId: 'global.tools.line-edit-scan', capabilityVersion: '1.0.0', runId: 'seed-line-editor-ch3-scene2' },
+            state: 'pending'
+          },
+          {
+            id: 'seed-line-editor-ch3-scene2-c3',
+            agentRole: 'Line-Editor',
+            kind: 'tracked-change',
+            targetSceneId: 'chapter-003-scene-002',
+            payload: {
+              category: 'Repeated structure',
+              before: 'Ray parked the Bronco. Ray sat there a minute. Ray watched the roof shimmer.',
+              after: 'Ray parked the Bronco and sat there a minute, watching the roof shimmer.'
+            },
+            provenance: { capabilityId: 'global.tools.line-edit-scan', capabilityVersion: '1.0.0', runId: 'seed-line-editor-ch3-scene2' },
+            state: 'pending'
+          }
+        ]
+      }))
+    }
+  },
+
+  startNewProject: () => set({ stage: 'onboarding' }),
+
+  createProjectFromFoundations: async (title, genrePrimary, entries) => {
+    const { projectRoot, manifest } = await window.atlas.project.createFromFoundations(title, genrePrimary, entries)
+    set({ projectRoot, manifest, theme: manifest.theme === 'night' ? 'night' : 'paper', stage: 'app', activeSceneId: null })
+    await get().refreshManuscriptTree()
+  },
+
+  exitToLanding: () => set({ stage: 'landing' }),
+
+  refreshManuscriptTree: async () => {
+    const tree = await window.atlas.manuscript.tree()
+    set({ manuscriptTree: tree })
+  },
+
+  setActiveScene: (sceneId) => set({ activeSceneId: sceneId }),
+
+  setSceneSaveState: (state) => set({ sceneSaveState: state }),
+
+  toggleTheme: () => set((s) => ({ theme: s.theme === 'paper' ? 'night' : 'paper' })),
+
+  toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
+
+  setAgentModel: (role, model) => set((s) => ({ agentModels: { ...s.agentModels, [role]: model } })),
+
+  toggleLmStudioFallback: () => set((s) => ({ lmStudioFallback: !s.lmStudioFallback })),
+
+  toggleAdvancedMode: () => set((s) => ({ advancedMode: !s.advancedMode })),
+
+  startAgentRun: (goal) => set({ currentRunGoal: goal, currentRunSteps: [] }),
+
+  handleAgentStep: (_runId, step) => {
+    set((s) => ({ currentRunSteps: [...s.currentRunSteps, step] }))
+
+    if (step.kind === 'permission-request') {
+      const request = step.detail as PermissionRequest
+      set({ pendingPermission: request.decision === 'pending' ? { runId: _runId, request } : null })
+    }
+    if (step.kind === 'result') {
+      const result = step.detail as { summary: string; proposedManuscriptChanges?: SuggestionRef[] }
+      set((s) => ({
+        lastAgentSummary: result.summary,
+        activeSuggestions: [...s.activeSuggestions, ...(result.proposedManuscriptChanges ?? [])]
+      }))
+    }
+  },
+
+  resolvePermission: (decision) => {
+    const pending = get().pendingPermission
+    if (!pending) return
+    void window.atlas.agentRuns.respondToPermission(pending.runId, pending.request.requestId, decision)
+    set({ pendingPermission: null })
+  },
+
+  setSuggestionState: async (id, state) => {
+    const suggestion = get().activeSuggestions.find((sg) => sg.id === id)
+
+    // Accepting a tracked change is the one action that should actually
+    // touch the manuscript — otherwise "Accept" is cosmetic and the whole
+    // suggestion contract is theater. Only tracked-change has a literal
+    // before/after text to apply; editorial findings and other kinds are
+    // reviewed, not auto-applied.
+    if (state === 'accepted' && suggestion?.kind === 'tracked-change' && suggestion.targetSceneId) {
+      const payload = suggestion.payload as { before: string; after: string }
+      const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
+      if (prose.includes(payload.before)) {
+        const nextProse = prose.replace(payload.before, payload.after)
+        await window.atlas.scenes.write(suggestion.targetSceneId, { prose: nextProse })
+        set((s) => ({ sceneProseVersion: s.sceneProseVersion + 1 }))
+      }
+    }
+
+    set((s) => ({
+      activeSuggestions: s.activeSuggestions.map((sg) => (sg.id === id ? { ...sg, state } : sg))
+    }))
+  }
+}))

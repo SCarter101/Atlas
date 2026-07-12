@@ -1,0 +1,116 @@
+import { useState } from 'react'
+import type { SuggestionRef } from '@shared/schema/agent'
+import { useAtlasStore } from '../state/store'
+
+const STATE_BADGE: Record<SuggestionRef['state'], { bg: string; color: string; label: string }> = {
+  pending: { bg: 'var(--c-amber-soft)', color: 'var(--c-amber)', label: 'Open' },
+  accepted: { bg: 'var(--c-green-soft)', color: 'var(--c-green)', label: 'Accepted' },
+  rejected: { bg: 'var(--c-red-soft)', color: 'var(--c-red)', label: 'Rejected' },
+  refining: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent-text)', label: 'In progress' }
+}
+
+// Ported from the Phase 1 prototype's ReviewPanel.dc.html Story Editor
+// issue card. Structural findings still go through the same Universal
+// Suggestion Contract (Accept/Reject/Refine) as tracked changes — see spec
+// §10 — just rendered with the title/body/severity shape that fits a
+// developmental-editing finding instead of a before/after diff.
+export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef }): JSX.Element {
+  const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
+  const [refining, setRefining] = useState(false)
+  const [refineText, setRefineText] = useState('')
+
+  const payload = suggestion.payload as { title: string; body: string; severity: string }
+  const isResolved = suggestion.state === 'accepted' || suggestion.state === 'rejected'
+  const badge = STATE_BADGE[suggestion.state]
+
+  return (
+    <div
+      style={{
+        border: '1px solid var(--c-border)',
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 10,
+        background: 'var(--c-surface-raised)',
+        opacity: isResolved ? 0.7 : 1
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{payload.title}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10, background: badge.bg, color: badge.color }}>
+          {badge.label}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--c-ink-soft)', lineHeight: 1.5, marginBottom: 10 }}>{payload.body}</div>
+      <div style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', marginBottom: 10 }}>Severity: {payload.severity}</div>
+
+      {!isResolved && refining && (
+        <>
+          <textarea
+            value={refineText}
+            onChange={(e) => setRefineText(e.target.value)}
+            placeholder="Follow-up instruction…"
+            style={{
+              width: '100%',
+              minHeight: 52,
+              border: '1px solid var(--c-border)',
+              borderRadius: 7,
+              padding: 8,
+              fontSize: 12,
+              fontFamily: 'Public Sans, sans-serif',
+              marginBottom: 8,
+              resize: 'vertical',
+              background: 'var(--c-bg)',
+              color: 'var(--c-ink)'
+            }}
+          />
+          <button
+            onClick={() => {
+              setSuggestionState(suggestion.id, 'refining')
+              setRefining(false)
+            }}
+            style={{
+              width: '100%',
+              padding: '7px 0',
+              borderRadius: 7,
+              border: 'none',
+              background: 'var(--c-accent)',
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            Send refinement
+          </button>
+        </>
+      )}
+      {!isResolved && !refining && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setSuggestionState(suggestion.id, 'accepted')} style={pillStyle('var(--c-green-soft)', 'var(--c-green)')}>
+            Accept
+          </button>
+          <button onClick={() => setSuggestionState(suggestion.id, 'rejected')} style={pillStyle('var(--c-red-soft)', 'var(--c-red)')}>
+            Reject
+          </button>
+          <button onClick={() => setRefining(true)} style={pillStyle('transparent', 'var(--c-ink-soft)', true)}>
+            Refine
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function pillStyle(bg: string, color: string, outlined = false) {
+  return {
+    flex: 1,
+    padding: '6px 0',
+    borderRadius: 6,
+    border: outlined ? '1px solid var(--c-border)' : 'none',
+    background: bg,
+    color,
+    fontSize: 11.5,
+    fontWeight: 600,
+    cursor: 'pointer'
+  } as const
+}

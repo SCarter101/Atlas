@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="font-family:'Public Sans',sans-serif;">
+  <div style="margin-bottom:20px;">
+    <div style="font-family:'Source Serif 4',serif; font-size:24px; font-weight:600; color:{{ ink }};">Agent Runs</div>
+    <div style="font-size:13px; color:{{ inkFaint }}; margin-top:4px;">Simulated bounded agent runs — goal, context, tools, permissions, and the model call behind a suggestion.</div>
+  </div>
+
+  <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+    <sc-for list="{{ runsList }}" as="run" hint-placeholder-count="2">
+      <button onclick="{{ run.select }}" style="text-align:left; width:340px; padding:14px 16px; border-radius:12px; border:{{ run.borderWidth }}px solid {{ run.borderColor }}; background:{{ run.bg }}; cursor:pointer; font-family:'Public Sans',sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div style="width:26px; height:26px; border-radius:7px; background:{{ accentSoft }}; display:flex; align-items:center; justify-content:center;">
+              <dc-import name="AssistantIcon" kind="{{ run.icon }}" color="{{ accent }}" size="14" hint-size="14px,14px"></dc-import>
+            </div>
+            <div style="font-size:13.5px; font-weight:600; color:{{ ink }};">{{ run.name }}</div>
+          </div>
+          <span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; background:{{ run.statusBg }}; color:{{ run.statusColor }};">{{ run.statusLabel }}</span>
+        </div>
+        <div style="font-size:12px; color:{{ inkSoft }}; line-height:1.5;">{{ run.goalShort }}</div>
+      </button>
+    </sc-for>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; border:1px solid {{ border }}; border-radius:10px; padding:12px 16px; margin-bottom:20px; background:{{ surfaceRaised }};">
+    <div style="display:flex; gap:20px; flex-wrap:wrap;">
+      <div style="font-size:11.5px; color:{{ inkFaint }};">Turns <span style="color:{{ ink }}; font-weight:600;">{{ budgetTurns }}</span></div>
+      <div style="font-size:11.5px; color:{{ inkFaint }};">Est. cost <span style="color:{{ ink }}; font-weight:600;">{{ budgetCost }}</span></div>
+      <div style="font-size:11.5px; color:{{ inkFaint }};">Status <span style="color:{{ statusTextColor }}; font-weight:600;">{{ statusText }}</span></div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button onclick="{{ primaryAction }}" style="padding:8px 16px; border-radius:7px; border:none; background:{{ accent }}; color:{{ bg }}; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">{{ primaryLabel }}</button>
+      <sc-if value="{{ showPauseCancel }}" hint-placeholder-val="{{ false }}">
+        <button onclick="{{ pauseRun }}" style="padding:8px 14px; border-radius:7px; border:1px solid {{ border }}; background:transparent; color:{{ inkSoft }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">{{ pauseLabel }}</button>
+        <button onclick="{{ cancelRun }}" style="padding:8px 14px; border-radius:7px; border:1px solid {{ border }}; background:transparent; color:{{ inkFaint }}; font-size:12.5px; cursor:pointer; font-family:'Public Sans',sans-serif;">Cancel</button>
+      </sc-if>
+    </div>
+  </div>
+
+  <sc-if value="{{ deniedBannerVisible }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; justify-content:space-between; align-items:center; border:1px solid {{ amber }}; background:{{ amberSoft }}; border-radius:10px; padding:12px 16px; margin-bottom:20px;">
+      <div style="font-size:12.5px; color:{{ ink }};">Run paused \u2014 permission denied for Web Search. The agent did not proceed to the model call.</div>
+      <div style="display:flex; gap:8px;">
+        <button onclick="{{ reopenPermission }}" style="padding:6px 12px; border-radius:6px; border:1px solid {{ amber }}; background:transparent; color:{{ amber }}; font-size:12px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Reconsider</button>
+        <button onclick="{{ cancelRun }}" style="padding:6px 12px; border-radius:6px; border:none; background:transparent; color:{{ inkFaint }}; font-size:12px; cursor:pointer; font-family:'Public Sans',sans-serif;">Cancel run</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Console -->
+  <div style="display:grid; grid-template-columns:220px 1fr; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:4px; border-right:1px solid {{ border }}; padding-right:12px;">
+        <sc-for list="{{ steps }}" as="st" hint-placeholder-count="8">
+          <button onclick="{{ st.focus }}" style="text-align:left; display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:7px; border:none; background:{{ st.railBg }}; cursor:pointer; font-family:'Public Sans',sans-serif; opacity:{{ st.opacity }};">
+            <span style="width:7px; height:7px; border-radius:50%; background:{{ st.dot }}; flex-shrink:0;"></span>
+            <span style="font-size:12px; color:{{ ink }}; font-weight:{{ st.railWeight }};">{{ st.title }}</span>
+          </button>
+        </sc-for>
+      </div>
+      <div style="border:1px solid {{ border }}; border-radius:10px; padding:18px; background:{{ surfaceRaised }};">
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ inkFaint }}; margin-bottom:8px;">{{ focusedStep.statusLabel }}</div>
+        <div style="font-size:15px; font-weight:600; color:{{ ink }}; margin-bottom:8px;">{{ focusedStep.title }}</div>
+        <div style="font-size:13px; color:{{ inkSoft }}; line-height:1.55; margin-bottom:12px;">{{ focusedStep.detail }}</div>
+        <sc-if value="{{ focusedStep.hasContext }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:{{ accentText }}; margin-bottom:6px;">Context sent</div>
+          <ul style="margin:0 0 10px 0; padding-left:18px;">
+            <sc-for list="{{ focusedStep.contextItems }}" as="ci" hint-placeholder-count="3">
+              <li style="font-size:12px; color:{{ inkSoft }}; margin-bottom:3px;">{{ ci }}</li>
+            </sc-for>
+          </ul>
+        </sc-if>
+        <sc-if value="{{ focusedStep.hasToolResult }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:{{ accentText }}; margin-bottom:6px;">Structured result</div>
+          <ul style="margin:0; padding-left:18px;">
+            <sc-for list="{{ focusedStep.toolResult }}" as="tr" hint-placeholder-count="3">
+              <li style="font-size:12px; color:{{ inkSoft }}; margin-bottom:3px;">{{ tr }}</li>
+            </sc-for>
+          </ul>
+        </sc-if>
+      </div>
+    </div>
+
+  <!-- PERMISSION MODAL -->
+  <sc-if value="{{ showPermissionModal }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; background:rgba(20,17,14,0.44); z-index:200; display:flex; align-items:center; justify-content:center;">
+      <div style="width:440px; max-width:90vw; background:{{ surfaceRaised }}; border-radius:14px; box-shadow:0 24px 60px rgba(0,0,0,0.3); padding:22px; border:1px solid {{ border }};">
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ amber }}; margin-bottom:8px;">Permission requested</div>
+        <div style="font-size:16px; font-weight:600; color:{{ ink }}; margin-bottom:10px;">{{ permissionCapability }} wants to run</div>
+        <div style="font-size:13px; color:{{ inkSoft }}; line-height:1.55; margin-bottom:14px;">{{ permissionDetail }}</div>
+        <div style="border:1px solid {{ border }}; border-radius:8px; padding:10px 12px; margin-bottom:16px; font-size:12px; color:{{ inkSoft }};">
+          <div style="margin-bottom:4px;"><span style="color:{{ inkFaint }};">Scope:</span> {{ permissionScope }}</div>
+          <div><span style="color:{{ inkFaint }};">Destination:</span> {{ permissionDestination }}</div>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:{{ inkSoft }}; margin-bottom:18px; cursor:pointer;">
+          <input type="checkbox" checked="{{ sessionApproval }}" onchange="{{ toggleSessionApproval }}" style="width:15px; height:15px;" />
+          Approve this exact action for the rest of the session
+        </label>
+        <div style="display:flex; gap:8px;">
+          <button onclick="{{ approvePermission }}" style="flex:1; padding:9px 0; border-radius:8px; border:none; background:{{ accent }}; color:{{ bg }}; font-size:13px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Approve</button>
+          <button onclick="{{ denyPermission }}" style="flex:1; padding:9px 0; border-radius:8px; border:1px solid {{ border }}; background:transparent; color:{{ inkSoft }}; font-size:13px; cursor:pointer; font-family:'Public Sans',sans-serif;">Deny</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- COST PREFLIGHT MODAL -->
+  <sc-if value="{{ showPreflightModal }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; background:rgba(20,17,14,0.44); z-index:200; display:flex; align-items:center; justify-content:center;">
+      <div style="width:420px; max-width:90vw; background:{{ surfaceRaised }}; border-radius:14px; box-shadow:0 24px 60px rgba(0,0,0,0.3); padding:22px; border:1px solid {{ border }};">
+        <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ accentText }}; margin-bottom:8px;">Before you run this</div>
+        <div style="font-size:16px; font-weight:600; color:{{ ink }}; margin-bottom:10px;">{{ preflightTitle }}</div>
+        <div style="font-size:13px; color:{{ inkSoft }}; line-height:1.55; margin-bottom:16px;">{{ preflightBody }}</div>
+        <div style="display:flex; gap:8px;">
+          <button onclick="{{ confirmPreflight }}" style="flex:1; padding:9px 0; border-radius:8px; border:none; background:{{ accent }}; color:{{ bg }}; font-size:13px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Confirm &amp; Run</button>
+          <button style="flex:1; padding:9px 0; border-radius:8px; border:1px solid {{ border }}; background:transparent; color:{{ inkSoft }}; font-size:13px; cursor:pointer; font-family:'Public Sans',sans-serif;">Change Model</button>
+          <button onclick="{{ cancelPreflight }}" style="flex:1; padding:9px 0; border-radius:8px; border:none; background:transparent; color:{{ inkFaint }}; font-size:13px; cursor:pointer; font-family:'Public Sans',sans-serif;">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:600}}">
+const RUNS = [
+  {
+    id: 'worldbuilder', name: 'World Builder', icon: 'globe',
+    goalShort: 'Research the Delta catfish industry (1980s\u20132000s) to ground Duvall Fish & Cold Storage.',
+    needsPreflight: false,
+    maxTurns: 9, maxCost: 0.50,
+    steps: [
+      { id: 'goal', kind: 'goal', title: 'Goal & Constraints received', detail: 'Scope: World Builder, project Codex only. Budget: 9 turns / $0.50 max. Manuscript is not modified.' },
+      { id: 'context', kind: 'context', title: 'Retrieve Codex & manuscript context', detail: 'Pulled existing entries for continuity before researching further.', contextItems: ['Codex: Bellhaven, Mississippi', 'Codex: Duvall Fish & Cold Storage', 'Codex: The Delta heat never breaks before September', 'Manuscript: Ch.3 \u2014 The Fish House'] },
+      { id: 'plan', kind: 'plan', title: 'Plan: needs external grounding', detail: 'Existing Codex has no real-world catfish-industry facts. World Builder searches the capability library for a compatible tool.' },
+      { id: 'discovery', kind: 'discovery', title: 'Tool & Skill Discovery', detail: 'Found Web Search (Global Tool) and Citation Formatter (Global Skill) \u2014 both compatible with World Builder and the selected model.' },
+      { id: 'permission', kind: 'permission', title: 'Permission check \u2014 Web Search', detail: 'Web Search sends only the search query, never manuscript content. Requires authorization before first use this session.', permission: { capability: 'Web Search', scope: 'Search query only, no manuscript content', destination: 'External web search provider' } },
+      { id: 'model', kind: 'model', title: 'Model call \u2014 Gemini 1.5 Pro via OpenRouter', detail: 'Query executed and 3 sources returned.' },
+      { id: 'tool', kind: 'tool', title: 'Structured Tool Result', detail: 'Web Search returned 3 sources on Delta catfish farming and cold-chain logistics, 1980s\u20132000s.', toolResult: ['Source: Mississippi catfish industry overview (agricultural history)', 'Source: Cold-chain logistics in Delta fish processing', 'Source: Regional economic shift, cotton to aquaculture'] },
+      { id: 'format', kind: 'format', title: 'Response formatted as proposed Codex entries', detail: 'Two new entries drafted with citations, marked Tentative pending your review.' },
+      { id: 'approval', kind: 'approval', title: 'Writer approval required', detail: 'Nothing was added to the Codex automatically. Review the proposals in the Codex panel.' }
+    ]
+  },
+  {
+    id: 'storyeditor', name: 'Story Editor', icon: 'compass',
+    goalShort: 'Full Act One structural pass \u2014 plot holes, pacing, weak stakes, broken setups.',
+    needsPreflight: true,
+    preflightBody: 'A full Act One Story Editor pass is estimated to cost $0.55\u2013$0.75 and use approximately 62,000 tokens.',
+    maxTurns: 7, maxCost: 0.80,
+    steps: [
+      { id: 'goal', kind: 'goal', title: 'Goal & Constraints received', detail: 'Scope: Story Editor, Act One (Chapters 1\u20137). Budget: 8 turns / $0.80 max.' },
+      { id: 'context', kind: 'context', title: 'Retrieve manuscript & Codex context', detail: 'Pulled chapter summaries, scene metadata, and locked world rules for Act One.', contextItems: ['Manuscript: Ch.1\u20133 full text', 'Chapter summaries: Ch.4\u20137 (drafted outline)', 'Codex: Character arcs \u2014 Ray, Tull', 'Codex: Locked world rule \u2014 Delta heat'] },
+      { id: 'plan', kind: 'plan', title: 'Plan: deterministic scan + judgment pass', detail: 'Story Editor runs the Continuity Checker tool first, then a judgment-based structural review.' },
+      { id: 'tool', kind: 'tool', title: 'Structured Tool Result \u2014 Continuity Checker', detail: 'Deterministic scan flagged 1 timeline inconsistency and 0 POV violations.', toolResult: ['Ch.2: Dale\u2019s funeral date is two days off from Ch.1 reference \u2014 flagged for review'] },
+      { id: 'model', kind: 'model', title: 'Model call \u2014 Claude Opus 4 via OpenRouter', detail: 'Structural review completed within budget: 6 of 8 turns used.' },
+      { id: 'format', kind: 'format', title: 'Response formatted as editorial report', detail: 'Findings written as a structured report with severity scores, visible in the manuscript sidebar.' },
+      { id: 'approval', kind: 'approval', title: 'Writer approval required', detail: 'Each finding awaits Accept, Reject, or Refine \u2014 nothing rewrites the manuscript automatically.' }
+    ]
+  }
+];
+
+class Component extends DCLogic {
+  state = {
+    selectedRunId: 'worldbuilder',
+    currentStep: -1,
+    focusedId: null,
+    status: 'idle',
+    permissionResolved: false,
+    permissionDenied: false,
+    sessionApproval: true,
+    showPermissionModal: false,
+    showPreflightModal: false
+  };
+
+  selectRun(id) {
+    this.setState({ selectedRunId: id, currentStep: -1, focusedId: null, status: 'idle', permissionResolved: false, permissionDenied: false, showPermissionModal: false, showPreflightModal: false });
+  }
+
+  getRun() { return RUNS.find(r => r.id === this.state.selectedRunId); }
+
+  start() {
+    const run = this.getRun();
+    if (run.needsPreflight) {
+      this.setState({ showPreflightModal: true });
+    } else {
+      this.setState({ currentStep: 0, focusedId: run.steps[0].id, status: 'running' });
+    }
+  }
+
+  confirmPreflight() {
+    const run = this.getRun();
+    this.setState({ showPreflightModal: false, currentStep: 0, focusedId: run.steps[0].id, status: 'running' });
+  }
+
+  next() {
+    const run = this.getRun();
+    const s = this.state;
+    const targetIndex = s.currentStep + 1;
+    if (targetIndex >= run.steps.length) return;
+    const targetStep = run.steps[targetIndex];
+    if (targetStep.kind === 'permission' && !s.permissionResolved) {
+      this.setState({ showPermissionModal: true });
+      return;
+    }
+    const status = targetIndex === run.steps.length - 1 ? 'done' : 'running';
+    this.setState({ currentStep: targetIndex, focusedId: targetStep.id, status });
+  }
+
+  approvePermission() {
+    this.setState({ showPermissionModal: false, permissionResolved: true, permissionDenied: false });
+    this.next();
+  }
+  denyPermission() {
+    this.setState({ showPermissionModal: false, permissionDenied: true, status: 'paused' });
+  }
+  reopenPermission() {
+    this.setState({ permissionDenied: false, showPermissionModal: true });
+  }
+  toggleSessionApproval() {
+    this.setState(s => ({ sessionApproval: !s.sessionApproval }));
+  }
+
+  pause() { this.setState(s => ({ status: s.status === 'paused' ? 'running' : 'paused' })); }
+  cancel() { this.setState({ currentStep: -1, focusedId: null, status: 'idle', permissionResolved: false, permissionDenied: false }); }
+
+  renderVals() {
+    const c = this.props.c || {};
+    const s = this.state;
+    const run = this.getRun();
+
+    const runsList = RUNS.map(r => {
+      const isSelected = r.id === s.selectedRunId;
+      const activeStatus = isSelected ? s.status : (r.id === s.selectedRunId ? s.status : 'idle');
+      const labelMap = { idle: 'Not started', running: 'Running', paused: 'Paused', done: 'Complete' };
+      return {
+        id: r.id, name: r.name, icon: r.icon, goalShort: r.goalShort,
+        select: () => this.selectRun(r.id),
+        borderColor: isSelected ? c.accent : c.border,
+        borderWidth: isSelected ? 2 : 1,
+        bg: isSelected ? c.accentSoft : c.surfaceRaised,
+        statusLabel: isSelected ? (labelMap[activeStatus] || 'Not started') : 'Not started',
+        statusBg: isSelected && activeStatus === 'done' ? c.greenSoft : isSelected && activeStatus === 'paused' ? c.amberSoft : c.border,
+        statusColor: isSelected && activeStatus === 'done' ? c.green : isSelected && activeStatus === 'paused' ? c.amber : c.inkFaint
+      };
+    });
+
+    const steps = run.steps.map((st, i) => {
+      const revealed = i <= s.currentStep;
+      const isActive = i === s.currentStep && s.status !== 'done';
+      const isDone = i < s.currentStep || (i === s.currentStep && s.status === 'done');
+      const statusLabel = isDone ? 'Done' : isActive ? (st.kind === 'permission' && s.permissionDenied ? 'Blocked' : 'Active') : 'Pending';
+      const statusBg = isDone ? c.greenSoft : isActive ? (statusLabel === 'Blocked' ? c.amberSoft : c.accentSoft) : c.border;
+      const statusColor = isDone ? c.green : isActive ? (statusLabel === 'Blocked' ? c.amber : c.accentText) : c.inkFaint;
+      const isFocused = (s.focusedId || (run.steps[Math.max(s.currentStep, 0)] || {}).id) === st.id;
+      return {
+        id: st.id, title: st.title, detail: st.detail,
+        revealed,
+        opacity: revealed ? 1 : 0.5,
+        statusLabel, statusBg, statusColor,
+        borderColor: isFocused && revealed ? c.accent : c.border,
+        bg: revealed ? c.surfaceRaised : 'transparent',
+        railBg: isFocused ? c.accentSoft : 'transparent',
+        railWeight: isFocused ? 600 : 400,
+        dot: isDone ? c.green : isActive ? c.accent : c.border,
+        hasArrow: i < run.steps.length - 1,
+        hasContext: !!st.contextItems,
+        contextItems: st.contextItems || [],
+        hasToolResult: !!st.toolResult,
+        toolResult: st.toolResult || [],
+        focus: () => revealed && this.setState({ focusedId: st.id })
+      };
+    });
+
+    const focusedStep = steps.find(st => st.id === (s.focusedId || (steps[Math.max(s.currentStep, 0)] || {}).id)) || steps[0] || { title: '', detail: '', statusLabel: '' };
+
+    const permStep = run.steps.find(st => st.kind === 'permission');
+
+    let primaryLabel = 'Start Run';
+    if (s.currentStep >= 0) primaryLabel = s.status === 'done' ? 'Run Complete' : 'Next Step \u2192';
+    if (s.status === 'paused' && !s.permissionDenied) primaryLabel = 'Paused';
+
+    return {
+      ink: c.ink, inkSoft: c.inkSoft, inkFaint: c.inkFaint, border: c.border, surfaceRaised: c.surfaceRaised,
+      bg: c.bg, accent: c.accent, accentSoft: c.accentSoft, accentText: c.accentText,
+      green: c.green, greenSoft: c.greenSoft, amber: c.amber, amberSoft: c.amberSoft,
+      runsList,
+      steps,
+      focusedStep,
+      budgetTurns: `${Math.max(s.currentStep + 1, 0)} / ${run.maxTurns}`,
+      budgetCost: `$${(Math.max(s.currentStep + 1, 0) * (run.maxCost / run.steps.length)).toFixed(2)} / $${run.maxCost.toFixed(2)}`,
+      statusText: s.currentStep < 0 ? 'Not started' : s.status === 'done' ? 'Complete' : s.status === 'paused' ? 'Paused' : 'Running',
+      statusTextColor: s.status === 'done' ? c.green : s.status === 'paused' ? c.amber : c.accentText,
+      primaryLabel,
+      primaryAction: () => s.currentStep < 0 ? this.start() : (s.status !== 'done' && s.status !== 'paused' ? this.next() : null),
+      showPauseCancel: s.currentStep >= 0 && s.status !== 'done',
+      pauseLabel: s.status === 'paused' ? 'Resume' : 'Pause',
+      pauseRun: () => this.pause(),
+      cancelRun: () => this.cancel(),
+      deniedBannerVisible: s.permissionDenied,
+      reopenPermission: () => this.reopenPermission(),
+      showPermissionModal: s.showPermissionModal,
+      permissionCapability: permStep ? permStep.permission.capability : '',
+      permissionDetail: permStep ? permStep.detail : '',
+      permissionScope: permStep ? permStep.permission.scope : '',
+      permissionDestination: permStep ? permStep.permission.destination : '',
+      sessionApproval: s.sessionApproval,
+      toggleSessionApproval: () => this.toggleSessionApproval(),
+      approvePermission: () => this.approvePermission(),
+      denyPermission: () => this.denyPermission(),
+      showPreflightModal: s.showPreflightModal,
+      preflightTitle: run.name + ' \u2014 ' + run.goalShort,
+      preflightBody: run.preflightBody || '',
+      confirmPreflight: () => this.confirmPreflight(),
+      cancelPreflight: () => this.setState({ showPreflightModal: false })
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="font-family:'Public Sans',sans-serif;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:20px; gap:16px; flex-wrap:wrap;">
+    <div>
+      <div style="font-family:'Source Serif 4',serif; font-size:24px; font-weight:600; color:{{ ink }};">Agent Routing</div>
+      <div style="font-size:13px; color:{{ inkFaint }}; margin-top:4px;">How an agent request flows through Atlas's model-neutral runtime — from your selection to a reviewable suggestion.</div>
+    </div>
+    <div role="tablist" aria-label="Routing view mode" style="display:flex; border-radius:8px; border:1px solid {{ border }}; overflow:hidden; flex-shrink:0;">
+      <button role="tab" aria-selected="{{ isDiagram }}" onclick="{{ setDiagram }}" style="padding:8px 14px; font-size:12.5px; font-weight:600; border:none; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ diagramTabBg }}; color:{{ diagramTabColor }};">Diagram</button>
+      <button role="tab" aria-selected="{{ isList }}" onclick="{{ setList }}" style="padding:8px 14px; font-size:12.5px; font-weight:600; border:none; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ listTabBg }}; color:{{ listTabColor }};">Step-by-step list</button>
+    </div>
+  </div>
+
+  <div aria-live="polite" style="min-height:64px; border:1px solid {{ border }}; border-radius:10px; padding:14px 16px; margin-bottom:20px; background:{{ surfaceRaised }};">
+    <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:{{ inkFaint }}; margin-bottom:4px;">{{ detailLabel }}</div>
+    <div style="font-size:13.5px; font-weight:600; color:{{ ink }}; margin-bottom:4px;">{{ detailTitle }}</div>
+    <div style="font-size:13px; color:{{ inkSoft }}; line-height:1.55;">{{ detailBody }}</div>
+  </div>
+
+  <sc-if value="{{ isDiagram }}" hint-placeholder-val="{{ true }}">
+    <div role="group" aria-label="Routing diagram, stage 1 of 5: request" style="display:flex; gap:10px; align-items:stretch; overflow-x:auto; padding-bottom:8px;">
+      <sc-for list="{{ stages }}" as="stage" hint-placeholder-count="5">
+        <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+          <div style="display:flex; flex-direction:column; gap:8px; min-width:168px;">
+            <div style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:{{ inkFaint }}; padding-left:2px;">{{ stage.label }}</div>
+            <sc-for list="{{ stage.nodes }}" as="node" hint-placeholder-count="2">
+              <button
+                onfocus="{{ node.select }}"
+                onclick="{{ node.select }}"
+                aria-pressed="{{ node.isActive }}"
+                style="text-align:left; padding:10px 12px; border-radius:9px; cursor:pointer; font-family:'Public Sans',sans-serif; font-size:12.5px; font-weight:600; line-height:1.35; border:{{ node.borderWidth }}px solid {{ node.borderColor }}; background:{{ node.bg }}; color:{{ node.color }}; outline:{{ node.outline }};">
+                {{ node.name }}
+              </button>
+            </sc-for>
+          </div>
+          <sc-if value="{{ stage.hasArrow }}" hint-placeholder-val="{{ true }}">
+            <div aria-hidden="true" style="font-size:18px; color:{{ inkFaint }}; flex-shrink:0;">→</div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isList }}" hint-placeholder-val="{{ false }}">
+    <ol style="margin:0; padding-left:22px; display:flex; flex-direction:column; gap:14px;">
+      <sc-for list="{{ flatSteps }}" as="step" hint-placeholder-count="8">
+        <li style="font-size:13.5px; color:{{ ink }}; line-height:1.5;">
+          <span style="font-weight:600;">{{ step.name }}</span>
+          <span style="color:{{ inkSoft }};"> — {{ step.body }}</span>
+        </li>
+      </sc-for>
+    </ol>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:420}}">
+const STAGES = [
+  { label: 'Request', nodes: [
+    { id: 'agent', name: 'Selected Agent', body: 'The agent you invoked \u2014 e.g. Line Editor \u2014 sets the default role, tone, and guardrails for this request.' },
+    { id: 'selection', name: 'User Selection', body: 'The highlighted text or scene you sent, plus any instruction you typed alongside it.' }
+  ]},
+  { label: 'Plan', nodes: [
+    { id: 'goal', name: 'Agent Goal & Constraints', body: 'Your selection becomes a bounded goal \u2014 with scope, budget, and limits \u2014 rather than an open-ended chat turn.' },
+    { id: 'prompt', name: 'Agent Prompt & Bounded Loop', body: 'The agent runs a bounded observe-plan-act loop: retrieve context, decide the next action, and stop within configured limits.' },
+    { id: 'discovery', name: 'Tool & Skill Discovery', body: 'The agent searches the shared capability library for tools and skills compatible with this task and the selected model.' },
+    { id: 'permission', name: 'Permission Check', body: 'Sensitive actions \u2014 web access, external calls, manuscript-wide changes \u2014 require authorization before they run.' }
+  ]},
+  { label: 'Model', nodes: [
+    { id: 'modelselect', name: 'Model Selection', body: 'Atlas picks the model assigned to this agent, and shows a plain-language cost/speed estimate before sending.' },
+    { id: 'openrouter', name: 'OpenRouter', body: 'Primary path: the request is routed through OpenRouter to the selected commercial or hosted model.' },
+    { id: 'lmstudio', name: 'LM Studio Fallback', body: 'If OpenRouter is unavailable, or you\u2019ve chosen a local model, the request runs through LM Studio instead.' }
+  ]},
+  { label: 'Context & Tools', nodes: [
+    { id: 'codex', name: 'Codex Retrieval', body: 'Relevant Codex entries \u2014 characters, locations, world rules \u2014 are retrieved by embedding search.' },
+    { id: 'manuscript', name: 'Manuscript Context', body: 'Surrounding scenes and the current chapter are pulled in so continuity is preserved.' },
+    { id: 'summaries', name: 'Chapter Summaries', body: 'Condensed summaries of earlier chapters keep long-range plot threads in view without blowing the context budget.' },
+    { id: 'websearch', name: 'Web Search', body: 'Optional, and only used when an agent needs real-world facts \u2014 off by default for creative drafting.' },
+    { id: 'toolresult', name: 'Structured Tool Result', body: 'Any tool or skill invoked returns a structured, schema-defined result \u2014 not free-form text \u2014 that the agent can act on.' }
+  ]},
+  { label: 'Response', nodes: [
+    { id: 'format', name: 'Response Format', body: 'The result is structured into the right shape for this agent \u2014 tracked change, structured report, or generated prose.' },
+    { id: 'approval', name: 'Writer Approval Step', body: 'Nothing touches your manuscript or Codex automatically. You accept, reject, or refine every suggestion.' }
+  ]}
+];
+
+const FLAT = STAGES.flatMap(s => s.nodes);
+
+class Component extends DCLogic {
+  state = { mode: 'diagram', activeId: 'agent' };
+
+  select(id) { this.setState({ activeId: id }); }
+
+  renderVals() {
+    const c = this.props.c || {};
+    const s = this.state;
+    const active = FLAT.find(n => n.id === s.activeId) || FLAT[0];
+
+    const stages = STAGES.map((stage, i) => ({
+      label: stage.label,
+      hasArrow: i < STAGES.length - 1,
+      nodes: stage.nodes.map(n => {
+        const isActive = n.id === s.activeId;
+        return {
+          id: n.id,
+          name: n.name,
+          isActive,
+          select: () => this.select(n.id),
+          bg: isActive ? c.accent : c.surfaceRaised,
+          color: isActive ? c.bg : c.ink,
+          borderColor: isActive ? c.accent : c.border,
+          borderWidth: isActive ? 2 : 1,
+          outline: isActive ? `2px solid ${c.accentSoft}` : 'none'
+        };
+      })
+    }));
+
+    return {
+      ink: c.ink, inkSoft: c.inkSoft, inkFaint: c.inkFaint, border: c.border, surfaceRaised: c.surfaceRaised,
+      isDiagram: s.mode === 'diagram',
+      isList: s.mode === 'list',
+      setDiagram: () => this.setState({ mode: 'diagram' }),
+      setList: () => this.setState({ mode: 'list' }),
+      diagramTabBg: s.mode === 'diagram' ? c.accent : 'transparent',
+      diagramTabColor: s.mode === 'diagram' ? c.bg : c.inkSoft,
+      listTabBg: s.mode === 'list' ? c.accent : 'transparent',
+      listTabColor: s.mode === 'list' ? c.bg : c.inkSoft,
+      stages,
+      flatSteps: FLAT,
+      detailLabel: 'Selected node',
+      detailTitle: active.name,
+      detailBody: active.body
+    };
+  }
+}
+
+</script>
+</body>
+</html>

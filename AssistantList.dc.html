@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div>
+  <sc-for list="{{ items }}" as="a" hint-placeholder-count="5">
+    <div style="border:1px solid {{ a.borderColor }}; border-radius:10px; margin-bottom:8px; background:{{ a.cardBg }}; overflow:hidden;">
+      <button onclick="{{ a.toggle }}" style="width:100%; display:flex; align-items:center; gap:10px; padding:10px 12px; border:none; background:transparent; cursor:pointer; text-align:left; font-family:'Public Sans',sans-serif;">
+        <div style="width:30px; height:30px; border-radius:8px; background:{{ a.iconBg }}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <dc-import name="AssistantIcon" kind="{{ a.iconKind }}" color="{{ a.accent }}" size="16" hint-size="16px,16px"></dc-import>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:600; color:{{ a.ink }};">{{ a.name }}</div>
+          <div style="font-size:11px; color:{{ a.inkFaint }}; margin-top:1px;">{{ a.model }}</div>
+        </div>
+        <span style="width:7px; height:7px; border-radius:50%; background:{{ a.statusDot }}; flex-shrink:0;"></span>
+      </button>
+      <sc-if value="{{ a.isExpanded }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:0 12px 12px;">
+          <div style="font-size:12px; color:{{ a.inkSoft }}; margin-bottom:10px;">{{ a.status }}</div>
+          <div style="display:flex; gap:8px;">
+            <button onclick="{{ a.invoke }}" style="flex:1; padding:7px 0; border-radius:7px; border:none; background:{{ a.accent }}; color:{{ a.bg }}; font-size:12px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;">Invoke on scene</button>
+            <button style="flex:1; padding:7px 0; border-radius:7px; border:1px solid {{ a.borderColor }}; background:transparent; color:{{ a.inkSoft }}; font-size:12px; cursor:pointer; font-family:'Public Sans',sans-serif;">Configure</button>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </sc-for>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:300,&quot;height&quot;:420}}">
+class Component extends DCLogic {
+  renderVals() {
+    const c = this.props.c || {};
+    const expanded = this.props.expanded;
+    const list = this.props.assistants || [];
+    const onToggle = this.props.onToggle || (() => {});
+    const onInvoke = this.props.onInvoke || (() => {});
+    return {
+      items: list.map(a => ({
+        ...a,
+        isExpanded: expanded === a.id,
+        cardBg: expanded === a.id ? c.surfaceRaised : 'transparent',
+        borderColor: c.border,
+        iconBg: c.accentSoft,
+        accent: c.accent,
+        ink: c.ink,
+        inkFaint: c.inkFaint,
+        inkSoft: c.inkSoft,
+        bg: c.bg,
+        toggle: () => onToggle(a.id),
+        invoke: () => onInvoke(a.id)
+      }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>
