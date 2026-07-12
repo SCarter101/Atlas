@@ -3,6 +3,11 @@ import { join } from 'node:path'
 import { is } from './is'
 import { registerIpcHandlers } from './ipc/handlers'
 
+// Built main entry lives at out/main/index.js, so __dirname is out/main both
+// in `npm run dev` (electron-vite still builds/watches into out/) and in a
+// packaged app — resources/ sits two levels up, as a sibling of out/.
+const iconPath = join(__dirname, '../../resources/icon.png')
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1440,
@@ -12,6 +17,7 @@ function createWindow(): BrowserWindow {
     show: false,
     backgroundColor: '#FAF8F5',
     autoHideMenuBar: true,
+    icon: iconPath,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
@@ -51,6 +57,19 @@ function createWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(() => {
+  // app.getName() / OS-level naming (e.g. macOS menu bar). Windows taskbar
+  // grouping additionally needs an explicit AppUserModelID.
+  app.setName('Atlas')
+  app.setAppUserModelId('com.atlas.desktop')
+  // NOTE: in unpackaged dev mode (`npm run dev`), Windows will still show
+  // "Electron.exe" as the underlying binary's file description in some
+  // places (e.g. hovering the taskbar icon) — that string is embedded in
+  // electron.exe itself, not something app.setName()/setAppUserModelId()
+  // can override. Window icon, window title, taskbar icon, and
+  // app.getName() are all correctly "Atlas" within what dev mode allows;
+  // fully renaming the underlying executable requires a packaged build via
+  // electron-builder (see the "build" config in package.json), which is
+  // out of scope here.
   createWindow()
 
   app.on('activate', () => {
