@@ -9,7 +9,8 @@ const STATE_BADGE: Record<SuggestionRef['state'], { bg: string; color: string; l
   pending: { bg: 'var(--c-amber-soft)', color: 'var(--c-amber)', label: 'Open' },
   accepted: { bg: 'var(--c-green-soft)', color: 'var(--c-green)', label: 'Accepted' },
   rejected: { bg: 'var(--c-red-soft)', color: 'var(--c-red)', label: 'Rejected' },
-  refining: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent-text)', label: 'In progress' }
+  refining: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent-text)', label: 'In progress' },
+  fixed: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent)', label: 'Fixed' }
 }
 
 const ROLE_ICON: Record<AgentRole, IconKind> = {
