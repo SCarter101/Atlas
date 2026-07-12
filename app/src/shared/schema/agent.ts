@@ -85,7 +85,11 @@ export interface SuggestionRef {
   targetCodexEntryId?: string
   payload: unknown
   provenance: { capabilityId?: string; capabilityVersion?: string; runId: string }
-  state: 'pending' | 'accepted' | 'rejected' | 'refining'
+  // 'fixed' is Story-Editor-specific (spec §7.2's 5 issue statuses: Open,
+  // Accepted, Rejected, In progress, Fixed — 'refining' already covers "In
+  // progress"). Only EditorialFindingCard.tsx offers a UI path to it; other
+  // suggestion kinds never produce it.
+  state: 'pending' | 'accepted' | 'rejected' | 'refining' | 'fixed'
   refineInstruction?: string
 }
 

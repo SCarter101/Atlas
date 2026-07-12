@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { AgentRole } from '@shared/schema/agent'
+import type { AgentRole, SuggestionRef } from '@shared/schema/agent'
+import { isReviewable, nextReviewIndex, orderSuggestionsForReview, prevReviewIndex } from '@shared/suggestionReview'
 import { ManuscriptEditor, type ManuscriptEditorHandle } from '../components/ManuscriptEditor'
 import { AgentRail } from '../components/AgentRail'
 import { SuggestionCard } from '../components/SuggestionCard'
@@ -11,6 +12,70 @@ import { CodexAdditionCard } from '../components/CodexAdditionCard'
 import { PermissionDialog } from '../components/PermissionDialog'
 import { SceneMetadataPanel } from '../components/SceneMetadataPanel'
 import { useAtlasStore } from '../state/store'
+
+// Keyboard-first suggestion review (Phase 4 spec: J/K next/previous, A
+// accept, R reject). Guards against stealing keystrokes from the writer —
+// bails whenever the active element is a text input, a textarea, or
+// contenteditable (Tiptap's ProseMirror root sets `contenteditable`, which
+// `isContentEditable` picks up natively), and whenever a modifier key is
+// held (so Ctrl/Cmd+R, for example, still reaches the browser/OS).
+function isTypingTarget(el: Element | null): boolean {
+  if (!el) return false
+  const tag = el.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  return (el as HTMLElement).isContentEditable === true
+}
+
+const focusRingStyle: CSSProperties = {
+  outline: '2px solid var(--c-accent)',
+  outlineOffset: 2,
+  borderRadius: 10
+}
+
+function SectionHeader({
+  label,
+  items,
+  onAcceptAll
+}: {
+  label: string
+  items: SuggestionRef[]
+  onAcceptAll: (items: SuggestionRef[]) => void
+}): JSX.Element {
+  const pendingCount = items.filter(isReviewable).length
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: 'var(--c-ink-faint)'
+        }}
+      >
+        {label}
+      </div>
+      {pendingCount > 0 && (
+        <button
+          onClick={() => onAcceptAll(items)}
+          style={{
+            flexShrink: 0,
+            fontSize: 10.5,
+            fontWeight: 600,
+            padding: '3px 9px',
+            borderRadius: 999,
+            border: '1px solid var(--c-border)',
+            background: 'transparent',
+            color: 'var(--c-accent-text)',
+            cursor: 'pointer'
+          }}
+        >
+          Accept all ({pendingCount})
+        </button>
+      )}
+    </div>
+  )
+}
 
 const SAVE_DEBOUNCE_MS = 800
 
@@ -32,9 +97,11 @@ export function ManuscriptWorkspace(): JSX.Element {
   const focusMode = useAtlasStore((s) => s.focusMode)
   const toggleFocusMode = useAtlasStore((s) => s.toggleFocusMode)
   const sceneProseVersion = useAtlasStore((s) => s.sceneProseVersion)
+  const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
   const navigate = useNavigate()
 
   const [prose, setProse] = useState('')
+  const [focusedSuggestionId, setFocusedSuggestionId] = useState<string | null>(null)
   const editorRef = useRef<ManuscriptEditorHandle>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -58,19 +125,65 @@ export function ManuscriptWorkspace(): JSX.Element {
   const insertions = sceneSuggestions.filter((s) => s.kind === 'insertion')
   const dialogueAlternatives = sceneSuggestions.filter((s) => s.kind === 'dialogue-alternative')
   const codexAdditions = sceneSuggestions.filter((s) => s.kind === 'codex-addition')
+  const orderedSuggestions = orderSuggestionsForReview(sceneSuggestions)
 
   useEffect(() => {
     if (!activeSceneId) return
     void window.atlas.scenes.read(activeSceneId).then((result) => setProse(result.prose))
   }, [activeSceneId, sceneProseVersion])
 
+  // Clear keyboard-review focus whenever the scene changes so J/K doesn't
+  // silently resume mid-list on a suggestion belonging to the old scene.
+  useEffect(() => {
+    setFocusedSuggestionId(null)
+  }, [activeSceneId])
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      if (e.key === 'Escape' && focusMode) toggleFocusMode()
+      if (e.key === 'Escape' && focusMode) {
+        toggleFocusMode()
+        return
+      }
+      // Keyboard-first suggestion review (J/K/A/R). Never in focus mode
+      // (the review rail isn't even rendered there), never with a modifier
+      // held (so e.g. Ctrl+R still reaches the browser), and never while
+      // the writer is actually typing — see isTypingTarget above.
+      if (focusMode) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (isTypingTarget(document.activeElement)) return
+      if (orderedSuggestions.length === 0) return
+
+      const key = e.key.toLowerCase()
+      if (key === 'j' || key === 'k') {
+        e.preventDefault()
+        const currentIndex = orderedSuggestions.findIndex((s) => s.id === focusedSuggestionId)
+        const nextIdx = key === 'j' ? nextReviewIndex(currentIndex, orderedSuggestions.length) : prevReviewIndex(currentIndex, orderedSuggestions.length)
+        const next = orderedSuggestions[nextIdx]
+        if (next) {
+          setFocusedSuggestionId(next.id)
+          document.getElementById(`suggestion-${next.id}`)?.scrollIntoView({ block: 'nearest' })
+        }
+      } else if (key === 'a' || key === 'r') {
+        const target = orderedSuggestions.find((s) => s.id === focusedSuggestionId)
+        if (!target || !isReviewable(target)) return
+        e.preventDefault()
+        void setSuggestionState(target.id, key === 'a' ? 'accepted' : 'rejected')
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [focusMode, toggleFocusMode])
+  }, [focusMode, toggleFocusMode, orderedSuggestions, focusedSuggestionId, setSuggestionState])
+
+  // Batch acceptance by issue category — loops setSuggestionState over every
+  // still-reviewable suggestion in a section, sequentially (not
+  // Promise.all) because acceptance for tracked-change/insertion kinds
+  // read-modify-writes the scene's prose via IPC; concurrent writes could
+  // race and clobber each other.
+  async function acceptAllInSection(items: SuggestionRef[]): Promise<void> {
+    for (const s of items.filter(isReviewable)) {
+      await setSuggestionState(s.id, 'accepted')
+    }
+  }
 
   function handleProseChange(nextProse: string): void {
     setProse(nextProse)
@@ -189,55 +302,75 @@ export function ManuscriptWorkspace(): JSX.Element {
 
                 {editorialFindings.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
-                      {ROLE_NAME[editorialFindings[0].agentRole]}
-                    </div>
+                    <SectionHeader
+                      label={ROLE_NAME[editorialFindings[0].agentRole]}
+                      items={editorialFindings}
+                      onAcceptAll={acceptAllInSection}
+                    />
                     {editorialFindings.map((s) => (
-                      <EditorialFindingCard key={s.id} suggestion={s} />
+                      <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>
+                        <EditorialFindingCard suggestion={s} />
+                      </div>
                     ))}
                   </div>
                 )}
 
                 {trackedChanges.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
-                      {ROLE_NAME[trackedChanges[0].agentRole]} — Tracked Changes
-                    </div>
+                    <SectionHeader
+                      label={`${ROLE_NAME[trackedChanges[0].agentRole]} — Tracked Changes`}
+                      items={trackedChanges}
+                      onAcceptAll={acceptAllInSection}
+                    />
                     {trackedChanges.map((s) => (
-                      <SuggestionCard key={s.id} suggestion={s} />
+                      <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>
+                        <SuggestionCard suggestion={s} />
+                      </div>
                     ))}
                   </div>
                 )}
 
                 {insertions.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
-                      {ROLE_NAME[insertions[0].agentRole]} — Suggested Insertions
-                    </div>
+                    <SectionHeader
+                      label={`${ROLE_NAME[insertions[0].agentRole]} — Suggested Insertions`}
+                      items={insertions}
+                      onAcceptAll={acceptAllInSection}
+                    />
                     {insertions.map((s) => (
-                      <GeneratorSuggestionCard key={s.id} suggestion={s} />
+                      <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>
+                        <GeneratorSuggestionCard suggestion={s} />
+                      </div>
                     ))}
                   </div>
                 )}
 
                 {dialogueAlternatives.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
-                      {ROLE_NAME[dialogueAlternatives[0].agentRole]} — Dialogue Alternatives
-                    </div>
+                    <SectionHeader
+                      label={`${ROLE_NAME[dialogueAlternatives[0].agentRole]} — Dialogue Alternatives`}
+                      items={dialogueAlternatives}
+                      onAcceptAll={acceptAllInSection}
+                    />
                     {dialogueAlternatives.map((s) => (
-                      <DialogueAlternativeCard key={s.id} suggestion={s} />
+                      <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>
+                        <DialogueAlternativeCard suggestion={s} />
+                      </div>
                     ))}
                   </div>
                 )}
 
                 {codexAdditions.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
-                      {ROLE_NAME[codexAdditions[0].agentRole]} — Codex Additions
-                    </div>
+                    <SectionHeader
+                      label={`${ROLE_NAME[codexAdditions[0].agentRole]} — Codex Additions`}
+                      items={codexAdditions}
+                      onAcceptAll={acceptAllInSection}
+                    />
                     {codexAdditions.map((s) => (
-                      <CodexAdditionCard key={s.id} suggestion={s} />
+                      <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>
+                        <CodexAdditionCard suggestion={s} />
+                      </div>
                     ))}
                   </div>
                 )}
