@@ -52,6 +52,10 @@ export function PermissionDialog(): JSX.Element | null {
             Deny
           </button>
         </div>
+        <div style={{ fontSize: 11, color: 'var(--c-ink-faint)', marginTop: 10 }}>
+          "Approve for session" is remembered and won't ask again for this exact capability, action, scope, and
+          destination during this session.
+        </div>
       </div>
     </div>
   )

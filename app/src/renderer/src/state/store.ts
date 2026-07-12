@@ -3,6 +3,7 @@ import type { AgentGoal, AgentRole, AgentStep, PermissionRequest, SuggestionRef 
 import type { FoundationsCodexDraft } from '@shared/ipc'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest } from '@shared/schema/project'
+import type { SessionApproval } from '@shared/schema/capability'
 
 interface PendingPermission {
   runId: string
@@ -37,6 +38,7 @@ interface AtlasState {
   advancedMode: boolean
 
   pendingPermission: PendingPermission | null
+  sessionApprovals: SessionApproval[]
   activeSuggestions: SuggestionRef[]
   lastAgentSummary: string | null
 
@@ -67,6 +69,7 @@ interface AtlasState {
   startAgentRun: (goal: AgentGoal) => void
   handleAgentStep: (runId: string, step: AgentStep) => void
   resolvePermission: (decision: 'approved-once' | 'approved-session' | 'denied') => void
+  revokeSessionApproval: (id: string) => void
   setSuggestionState: (id: string, state: SuggestionRef['state']) => Promise<void>
 }
 
@@ -84,6 +87,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   advancedMode: false,
 
   pendingPermission: null,
+  sessionApprovals: [],
   activeSuggestions: [],
   lastAgentSummary: null,
   currentRunGoal: null,
@@ -208,7 +212,24 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
 
     if (step.kind === 'permission-request') {
       const request = step.detail as PermissionRequest
-      set({ pendingPermission: request.decision === 'pending' ? { runId: _runId, request } : null })
+
+      // Spec §13: a session approval only covers the exact named
+      // capability, action type, data scope, and destination it was
+      // granted for — matching on capabilityId alone would silently widen
+      // the grant to unrelated actions/scopes on the same capability.
+      const matchingApproval = get().sessionApprovals.find(
+        (a) =>
+          a.capabilityId === request.capabilityId &&
+          a.actionType === request.actionType &&
+          a.dataScope === request.dataScope &&
+          a.destination === request.destination
+      )
+
+      if (matchingApproval && request.decision === 'pending') {
+        void window.atlas.agentRuns.respondToPermission(_runId, request.requestId, 'approved-session')
+      } else {
+        set({ pendingPermission: request.decision === 'pending' ? { runId: _runId, request } : null })
+      }
     }
     if (step.kind === 'result') {
       const result = step.detail as { summary: string; proposedManuscriptChanges?: SuggestionRef[] }
@@ -223,8 +244,34 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     const pending = get().pendingPermission
     if (!pending) return
     void window.atlas.agentRuns.respondToPermission(pending.runId, pending.request.requestId, decision)
+
+    if (decision === 'approved-session') {
+      const { request } = pending
+      // PermissionRequest has no separate version field today — the
+      // capabilityId strings in this codebase already embed the version as
+      // a "@x.y.z" suffix (e.g. "global.tools.line-edit-scan@1.0.0"), so we
+      // parse that if present and fall back to the whole capabilityId
+      // otherwise, rather than inventing a version the request doesn't carry.
+      const atIndex = request.capabilityId.lastIndexOf('@')
+      const capabilityVersion = atIndex >= 0 ? request.capabilityId.slice(atIndex + 1) : request.capabilityId
+
+      const approval: SessionApproval = {
+        id: crypto.randomUUID(),
+        capabilityId: request.capabilityId,
+        capabilityVersion,
+        actionType: request.actionType,
+        dataScope: request.dataScope,
+        destination: request.destination,
+        grantedAt: new Date().toISOString(),
+        expiresAtSessionEnd: true
+      }
+      set((s) => ({ sessionApprovals: [...s.sessionApprovals, approval] }))
+    }
+
     set({ pendingPermission: null })
   },
+
+  revokeSessionApproval: (id) => set((s) => ({ sessionApprovals: s.sessionApprovals.filter((a) => a.id !== id) })),
 
   setSuggestionState: async (id, state) => {
     const suggestion = get().activeSuggestions.find((sg) => sg.id === id)
