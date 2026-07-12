@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js'
+import { cosineSimilarity } from '../retrieval/vectorize'
 import { projectPaths } from './paths'
 
 // index.sqlite is a derived cache — see "Atlas Architecture and Data
@@ -61,6 +62,12 @@ export async function openIndexDb(projectRoot: string): Promise<AtlasDb> {
       status TEXT NOT NULL,
       started_at TEXT NOT NULL,
       ended_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS vectors (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      vector BLOB NOT NULL
     );
   `)
 
@@ -190,4 +197,41 @@ export function listAgentRunIndex(
   } finally {
     stmt.free()
   }
+}
+
+// Vectors produced by main/retrieval/vectorize.ts — stored as raw Float32
+// bytes in a BLOB column. sql.js hands blob params back as Uint8Array (see
+// its ParamsObject / SqlValue types), so the round trip is
+// Float32Array -> Buffer (write) -> Uint8Array -> Float32Array (read).
+export function upsertVectorIndex(atlasDb: AtlasDb, id: string, kind: string, vector: Float32Array): void {
+  atlasDb.db.run(
+    `INSERT INTO vectors (id, kind, vector) VALUES (?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, vector=excluded.vector`,
+    [id, kind, Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength)]
+  )
+  atlasDb.persist()
+}
+
+export function searchVectorIndex(
+  atlasDb: AtlasDb,
+  queryVector: Float32Array,
+  opts?: { kind?: string; limit?: number }
+): { id: string; kind: string; score: number }[] {
+  const stmt = atlasDb.db.prepare(
+    opts?.kind ? `SELECT id, kind, vector FROM vectors WHERE kind = ?` : `SELECT id, kind, vector FROM vectors`
+  )
+  const rows: { id: string; kind: string; score: number }[] = []
+  try {
+    stmt.bind(opts?.kind ? [opts.kind] : [])
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as unknown as { id: string; kind: string; vector: Uint8Array }
+      const bytes = row.vector
+      const vector = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+      rows.push({ id: row.id, kind: row.kind, score: cosineSimilarity(queryVector, vector) })
+    }
+  } finally {
+    stmt.free()
+  }
+  rows.sort((a, b) => b.score - a.score)
+  return rows.slice(0, opts?.limit ?? 10)
 }
