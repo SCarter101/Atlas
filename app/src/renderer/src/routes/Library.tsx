@@ -129,6 +129,20 @@ export function Library(): JSX.Element {
             <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--c-surface)', fontSize: 12, fontFamily: 'ui-monospace, monospace', color: 'var(--c-ink-soft)' }}>
               {schemaSignature(selected.inputSchema)} → {schemaSignature(selected.outputSchema)}
             </div>
+
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginTop: 16, marginBottom: 8 }}>
+              Dependencies
+            </div>
+            {selected.dependsOn.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {selected.dependsOn.map((depId) => {
+                  const dep = manifests.find((m) => m.id === depId.split('@')[0])
+                  return <Badge key={depId}>{dep ? dep.name : depId}</Badge>
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>No dependencies</div>
+            )}
           </div>
         )}
       </div>

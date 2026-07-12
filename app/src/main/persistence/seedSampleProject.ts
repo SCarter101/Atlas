@@ -444,19 +444,24 @@ export async function seedCottonmouthProject(projectRoot: string, db: AtlasDb): 
       }),
       version: '1.3.0'
     },
-    baseManifest({
-      id: 'global.skills.citation-formatter',
-      name: 'Citation Formatter',
-      description: "Formats research sources into Codex-ready citations with reliability ratings.",
-      type: 'skill',
-      scope: 'global',
-      compatibleAgentRoles: ['World-Builder'],
-      sideEffects: 'none',
-      permissionCategory: 'none',
-      costCharacteristics: { estTokens: 200 },
-      inputSchema: { type: 'object', properties: { sourceUrl: { type: 'string' } } },
-      outputSchema: { type: 'object', properties: { citation: { type: 'string' }, reliability: { type: 'string' } } }
-    }),
+    {
+      ...baseManifest({
+        id: 'global.skills.citation-formatter',
+        name: 'Citation Formatter',
+        description: "Formats research sources into Codex-ready citations with reliability ratings.",
+        type: 'skill',
+        scope: 'global',
+        compatibleAgentRoles: ['World-Builder'],
+        sideEffects: 'none',
+        permissionCategory: 'none',
+        costCharacteristics: { estTokens: 200 },
+        inputSchema: { type: 'object', properties: { sourceUrl: { type: 'string' } } },
+        outputSchema: { type: 'object', properties: { citation: { type: 'string' }, reliability: { type: 'string' } } }
+      }),
+      // Formatting a citation only makes sense once a web search has
+      // returned a source — demonstrates spec §8's dependency views.
+      dependsOn: ['global.tools.web-search@1.3.0']
+    },
     baseManifest({
       id: 'global.tools.continuity-checker',
       name: 'Continuity Checker',
@@ -498,7 +503,11 @@ export async function seedCottonmouthProject(projectRoot: string, db: AtlasDb): 
         inputSchema: { type: 'object', properties: { line: { type: 'string' }, characterId: { type: 'string' } } },
         outputSchema: { type: 'object', properties: { line: { type: 'string' } } }
       }),
-      owner: 'Cottonmouth project'
+      owner: 'Cottonmouth project',
+      // Project-scope capability depending on a global-scope one — spec §8
+      // explicitly calls out "project capabilities may depend on global
+      // capabilities".
+      dependsOn: ['global.skills.style-guide-enforcer@1.0.0']
     }
   ]
 
