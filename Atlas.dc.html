@@ -691,7 +691,7 @@ class Component extends DCLogic {
   }
 
   go(view) { this.setState({ view, expandedCodexId: null }); }
-  openCottonmouth() { this.setState({ stage: 'app', projectName: 'Cottonmouth', isNewProject: false, view: 'manuscript' }); }
+  openCottonmouth() { this.setState({ stage: 'app', projectName: 'Cottonmouth', isNewProject: false, view: 'dashboard' }); }
   startNewProject() { this.setState({ stage: 'onboarding' }); }
   exitToLanding() { this.setState({ stage: 'landing' }); }
   completeOnboarding() { this.setState({ stage: 'app', projectName: 'Untitled Project', isNewProject: true, view: 'dashboard' }); }
