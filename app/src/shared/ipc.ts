@@ -12,6 +12,10 @@ export const IpcChannel = {
   // Bootstraps (creating on first run if needed) the bundled "Cottonmouth"
   // demo project so the app opens on populated data — see seedSampleProject.ts.
   ProjectOpenSample: 'project:open-sample',
+  // Lists previously-created projects (excluding the bundled sample) so
+  // Landing can offer a "reopen" tile for each, and lets one be deleted.
+  ProjectList: 'project:list',
+  ProjectDelete: 'project:delete',
   // Real project creation from the Story Foundations onboarding flow.
   ProjectCreateFromFoundations: 'project:create-from-foundations',
   ManuscriptTree: 'manuscript:tree',
@@ -72,6 +76,8 @@ export interface AtlasBridge {
     open(path: string): Promise<ProjectManifest>
     create(path: string, seed: Partial<ProjectManifest>): Promise<ProjectManifest>
     openSample(): Promise<{ projectRoot: string; manifest: ProjectManifest }>
+    list(): Promise<{ projectRoot: string; manifest: ProjectManifest }[]>
+    delete(projectRoot: string): Promise<void>
     createFromFoundations(
       title: string,
       genrePrimary: string | undefined,

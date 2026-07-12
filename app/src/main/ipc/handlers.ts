@@ -11,14 +11,10 @@ import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persist
 import { createProjectFromFoundations, slugify } from '../persistence/createProjectFromFoundations'
 import { findSceneLocation } from '../persistence/db'
 import { readManuscriptTree } from '../persistence/manuscriptStore'
-import { createProject, openProject } from '../persistence/projectStore'
+import { createProject, deleteProject, listProjects, openProject, sampleProjectRoot } from '../persistence/projectStore'
 import { readScene, writeScene } from '../persistence/sceneStore'
 import { seedCottonmouthProject } from '../persistence/seedSampleProject'
 import { getCurrentProjectSession, ProjectSession, setCurrentProjectSession } from '../projectSession'
-
-function sampleProjectRoot(): string {
-  return join(app.getPath('documents'), 'Atlas Projects', 'Cottonmouth Sample.atlas')
-}
 
 export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.ProjectOpen, async (_evt, path: string) => {
@@ -42,6 +38,27 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     }
     const manifest = await openProject(projectRoot)
     return { projectRoot, manifest }
+  })
+
+  ipcMain.handle(IpcChannel.ProjectList, async () => {
+    const projects = await listProjects()
+    const sampleRoot = sampleProjectRoot()
+    return projects.filter((p) => p.projectRoot !== sampleRoot)
+  })
+
+  ipcMain.handle(IpcChannel.ProjectDelete, async (_evt, projectRoot: string) => {
+    try {
+      const session = getCurrentProjectSession()
+      if (session.projectRoot === projectRoot) {
+        // Deleting the currently-open project's files out from under its own
+        // session is fine — we intentionally don't tear down any in-memory
+        // session state here; the renderer simply won't have that project
+        // open anymore once it navigates elsewhere (e.g. back to Landing).
+      }
+    } catch {
+      // No project is open yet — nothing to compare against.
+    }
+    await deleteProject(projectRoot)
   })
 
   ipcMain.handle(
