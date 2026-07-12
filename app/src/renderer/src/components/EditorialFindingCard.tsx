@@ -7,7 +7,8 @@ const STATE_BADGE: Record<SuggestionRef['state'], { bg: string; color: string; l
   pending: { bg: 'var(--c-amber-soft)', color: 'var(--c-amber)', label: 'Open' },
   accepted: { bg: 'var(--c-green-soft)', color: 'var(--c-green)', label: 'Accepted' },
   rejected: { bg: 'var(--c-red-soft)', color: 'var(--c-red)', label: 'Rejected' },
-  refining: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent-text)', label: 'In progress' }
+  refining: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent-text)', label: 'In progress' },
+  fixed: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent)', label: 'Fixed' }
 }
 
 // Role -> stable icon / display name, per spec §10 "Universal AI Suggestion
@@ -40,7 +41,13 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
   const [refineText, setRefineText] = useState('')
 
   const payload = suggestion.payload as { title: string; body: string; severity: string }
-  const isResolved = suggestion.state === 'accepted' || suggestion.state === 'rejected'
+  // 'rejected'/'fixed' are terminal — no further action. 'accepted' still
+  // gets one action (Mark Fixed): accepting a finding only acknowledges it,
+  // it doesn't touch the manuscript (see store.ts's setSuggestionState), so
+  // the writer needs a separate way to say the underlying prose issue has
+  // actually been resolved once they've done the rewrite themselves.
+  const isTerminal = suggestion.state === 'rejected' || suggestion.state === 'fixed'
+  const isResolved = isTerminal || suggestion.state === 'accepted'
   const badge = STATE_BADGE[suggestion.state]
 
   return (
@@ -121,7 +128,7 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
           </button>
         </>
       )}
-      {!isResolved && !refining && (
+      {(suggestion.state === 'pending' || suggestion.state === 'refining') && !refining && (
         <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={() => setSuggestionState(suggestion.id, 'accepted')} style={pillStyle('var(--c-green-soft)', 'var(--c-green)')}>
             Accept
@@ -133,6 +140,14 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
             Refine
           </button>
         </div>
+      )}
+      {suggestion.state === 'accepted' && (
+        <button
+          onClick={() => setSuggestionState(suggestion.id, 'fixed')}
+          style={pillStyle('var(--c-accent-soft)', 'var(--c-accent)')}
+        >
+          Mark Fixed
+        </button>
       )}
     </div>
   )
