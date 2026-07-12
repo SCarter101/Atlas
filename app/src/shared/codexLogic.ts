@@ -69,6 +69,107 @@ export function getManuscriptReadingOrder(tree: ManuscriptTree): Map<string, num
   return order
 }
 
+export interface PlotThreadSceneLinks {
+  setupSceneIds: string[]
+  payoffSceneIds: string[]
+}
+
+// Plot threads intentionally don't carry a `linkedSceneIds` field of their
+// own — per spec, they reuse the existing SceneContinuityMeta.setupIds/
+// payoffIds arrays (scene -> Codex entry id) rather than duplicating the
+// relationship in both places. This inverts that mapping once per render:
+// Codex plot-thread entry id -> the scenes that reference it as a setup or
+// a payoff.
+export function getPlotThreadSceneLinks(tree: ManuscriptTree): Map<string, PlotThreadSceneLinks> {
+  const links = new Map<string, PlotThreadSceneLinks>()
+  const ensure = (id: string): PlotThreadSceneLinks => {
+    let entry = links.get(id)
+    if (!entry) {
+      entry = { setupSceneIds: [], payoffSceneIds: [] }
+      links.set(id, entry)
+    }
+    return entry
+  }
+
+  for (const book of tree.books) {
+    for (const part of book.parts) {
+      for (const chapter of part.chapters) {
+        for (const scene of chapter.scenes) {
+          for (const threadId of scene.continuity?.setupIds ?? []) {
+            ensure(threadId).setupSceneIds.push(scene.id)
+          }
+          for (const threadId of scene.continuity?.payoffIds ?? []) {
+            ensure(threadId).payoffSceneIds.push(scene.id)
+          }
+        }
+      }
+    }
+  }
+
+  return links
+}
+
+export interface ConflictCurvePoint {
+  sceneId: string
+  sceneTitle: string
+  ordinal: number
+  conflictLevel: number
+}
+
+// Only scenes with an explicitly-set conflictLevel are included. Unset means
+// "not yet assessed," not "zero conflict" — defaulting it to 0 would plot a
+// false trough for scenes the writer simply hasn't tagged yet, so those are
+// skipped/gapped rather than defaulted.
+export function getConflictCurve(tree: ManuscriptTree): ConflictCurvePoint[] {
+  const order = getManuscriptReadingOrder(tree)
+  const points: ConflictCurvePoint[] = []
+
+  for (const book of tree.books) {
+    for (const part of book.parts) {
+      for (const chapter of part.chapters) {
+        for (const scene of chapter.scenes) {
+          const level = scene.craft?.conflictLevel
+          if (level === undefined) continue
+          points.push({
+            sceneId: scene.id,
+            sceneTitle: scene.title,
+            ordinal: order.get(scene.id) ?? 0,
+            conflictLevel: level
+          })
+        }
+      }
+    }
+  }
+
+  return points.sort((a, b) => a.ordinal - b.ordinal)
+}
+
+export interface CharacterPresenceRow {
+  characterId: string
+  characterName: string
+  // chapterId -> present in any scene of that chapter, counting both
+  // presentCharacterIds and povCharacterId (POV always counts as present).
+  presentByChapter: Map<string, boolean>
+}
+
+export function getCharacterPresenceMap(
+  tree: ManuscriptTree,
+  characters: { id: string; name: string }[]
+): CharacterPresenceRow[] {
+  const chapters = tree.books.flatMap((book) => book.parts.flatMap((part) => part.chapters))
+
+  return characters.map((character) => {
+    const presentByChapter = new Map<string, boolean>()
+    for (const chapter of chapters) {
+      const present = chapter.scenes.some(
+        (scene) => scene.povCharacterId === character.id || (scene.presentCharacterIds ?? []).includes(character.id)
+      )
+      presentByChapter.set(chapter.id, present)
+    }
+    return { characterId: character.id, characterName: character.name, presentByChapter }
+  })
+}
+
 export function filterBySpoilerReveal(
   entries: CodexEntry[],
   asOfSceneId: string | undefined,

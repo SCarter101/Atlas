@@ -12,6 +12,7 @@ export const TYPE_LABEL: Record<CodexEntryType, string> = {
   event: 'Event',
   'world-rule': 'World Rule',
   'timeline-item': 'Timeline',
+  'plot-thread': 'Plot Thread',
   relationship: 'Relationship',
   theme: 'Theme',
   motif: 'Motif',

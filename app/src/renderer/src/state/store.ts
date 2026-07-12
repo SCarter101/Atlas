@@ -63,6 +63,7 @@ interface AtlasState {
   refreshManuscriptTree: () => Promise<void>
   setActiveScene: (sceneId: string) => void
   setSceneSaveState: (state: 'saved' | 'saving') => void
+  updateSceneMeta: (sceneId: string, metaPatch: Partial<SceneMeta>) => Promise<void>
   toggleTheme: () => void
   toggleFocusMode: () => void
   setAgentModel: (role: AgentRole, model: string) => void
@@ -233,6 +234,17 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   setActiveScene: (sceneId) => set({ activeSceneId: sceneId }),
 
   setSceneSaveState: (state) => set({ sceneSaveState: state }),
+
+  // Used by SceneMetadataPanel to persist writer-authored scene-metadata
+  // edits (conflictLevel, presentCharacterIds, ...) — same write-then-
+  // refresh pattern as prose edits in ManuscriptWorkspace, so the panel
+  // doesn't need its own local copy of the tree.
+  updateSceneMeta: async (sceneId, metaPatch) => {
+    set({ sceneSaveState: 'saving' })
+    await window.atlas.scenes.write(sceneId, { meta: metaPatch })
+    await get().refreshManuscriptTree()
+    set({ sceneSaveState: 'saved' })
+  },
 
   toggleTheme: () => set((s) => ({ theme: s.theme === 'paper' ? 'night' : 'paper' })),
 

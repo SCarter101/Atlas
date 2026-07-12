@@ -33,6 +33,10 @@ export interface SceneCraftMeta {
   outcome?: string
   emotionalShift?: string
   revealedInformation?: string
+  // 1 (calm) – 5 (max tension); unset means "not yet assessed" and must be
+  // treated differently from 0 by any consumer (e.g. the conflict/tension
+  // curve skips scenes without a value rather than plotting them at zero).
+  conflictLevel?: number
 }
 
 export interface SceneContinuityMeta {
@@ -58,6 +62,10 @@ export interface SceneMeta {
   locationId?: string
   timeOrDate?: string
   purpose?: string
+  // Fuller character-presence list beyond just POV — feeds the character
+  // presence map. povCharacterId also counts as "present" for that map even
+  // if a scene's author never duplicates it in here.
+  presentCharacterIds?: string[]
 
   // Tier 2 — Story Craft, expanded on demand
   craft?: SceneCraftMeta

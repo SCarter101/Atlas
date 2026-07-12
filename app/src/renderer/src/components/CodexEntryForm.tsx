@@ -57,18 +57,23 @@ export function CodexEntryForm({
   entry,
   allEntries,
   onClose,
-  onSaved
+  onSaved,
+  defaultType
 }: {
   entry: CodexEntry | null
   allEntries: CodexEntry[]
   onClose: () => void
   onSaved: () => void
+  // Lets a caller like the Plot Thread board pre-select its own type when
+  // opening this same generic form for a brand-new entry, instead of every
+  // "new" entry defaulting to 'character' regardless of context.
+  defaultType?: CodexEntryType
 }): JSX.Element {
   const manuscriptTree = useAtlasStore((s) => s.manuscriptTree)
   const sceneOptions = flattenSceneOptions(manuscriptTree)
 
   const [name, setName] = useState(entry?.name ?? '')
-  const [type, setType] = useState<CodexEntryType>(entry?.type ?? 'character')
+  const [type, setType] = useState<CodexEntryType>(entry?.type ?? defaultType ?? 'character')
   const [status, setStatus] = useState<FactStatus>(entry?.status ?? 'tentative')
   const [isPrivate, setIsPrivate] = useState(entry?.isPrivate ?? false)
   const [localModelOnly, setLocalModelOnly] = useState(entry?.localModelOnly ?? false)
