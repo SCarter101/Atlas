@@ -1,16 +1,41 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { AgentRole } from '@shared/schema/agent'
+import type { AgentRole, InsertionPayload, SuggestionRef } from '@shared/schema/agent'
 import { ManuscriptEditor, type ManuscriptEditorHandle } from '../components/ManuscriptEditor'
 import { AgentRail } from '../components/AgentRail'
 import { SuggestionCard } from '../components/SuggestionCard'
 import { EditorialFindingCard } from '../components/EditorialFindingCard'
 import { GeneratorSuggestionCard } from '../components/GeneratorSuggestionCard'
+import { DraftComparisonView } from '../components/DraftComparisonView'
 import { DialogueAlternativeCard } from '../components/DialogueAlternativeCard'
 import { CodexAdditionCard } from '../components/CodexAdditionCard'
 import { PermissionDialog } from '../components/PermissionDialog'
 import { SceneMetadataPanel } from '../components/SceneMetadataPanel'
+import { SnapshotDiffView } from '../components/SnapshotDiffView'
 import { useAtlasStore } from '../state/store'
+
+// Splits Generator `insertion` suggestions into ordinary single drafts
+// (rendered one card each, as before) and groups sharing a draftGroupId —
+// the output of the opt-in "Generate Alternatives" mode — rendered together
+// via DraftComparisonView so they read as one comparable set instead of N
+// unrelated cards.
+function partitionInsertions(insertions: SuggestionRef[]): { single: SuggestionRef[]; groups: SuggestionRef[][] } {
+  const single: SuggestionRef[] = []
+  const groupsById = new Map<string, SuggestionRef[]>()
+
+  for (const s of insertions) {
+    const groupId = (s.payload as InsertionPayload).draftGroupId
+    if (!groupId) {
+      single.push(s)
+      continue
+    }
+    const list = groupsById.get(groupId) ?? []
+    list.push(s)
+    groupsById.set(groupId, list)
+  }
+
+  return { single, groups: [...groupsById.values()] }
+}
 
 const SAVE_DEBOUNCE_MS = 800
 
@@ -35,6 +60,7 @@ export function ManuscriptWorkspace(): JSX.Element {
   const navigate = useNavigate()
 
   const [prose, setProse] = useState('')
+  const [showRevisionHistory, setShowRevisionHistory] = useState(false)
   const editorRef = useRef<ManuscriptEditorHandle>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -56,6 +82,7 @@ export function ManuscriptWorkspace(): JSX.Element {
   const editorialFindings = sceneSuggestions.filter((s) => s.kind === 'editorial-finding')
   const trackedChanges = sceneSuggestions.filter((s) => s.kind === 'tracked-change')
   const insertions = sceneSuggestions.filter((s) => s.kind === 'insertion')
+  const { single: singleInsertions, groups: draftGroups } = partitionInsertions(insertions)
   const dialogueAlternatives = sceneSuggestions.filter((s) => s.kind === 'dialogue-alternative')
   const codexAdditions = sceneSuggestions.filter((s) => s.kind === 'codex-addition')
 
@@ -133,9 +160,14 @@ export function ManuscriptWorkspace(): JSX.Element {
               activeScene?.title
             )}
           </div>
-          <button onClick={toggleFocusMode} style={pillButtonStyle}>
-            Distraction-free
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setShowRevisionHistory((v) => !v)} style={pillButtonStyle}>
+              {showRevisionHistory ? 'Hide revision history' : 'Revision history'}
+            </button>
+            <button onClick={toggleFocusMode} style={pillButtonStyle}>
+              Distraction-free
+            </button>
+          </div>
         </div>
       )}
 
@@ -149,6 +181,11 @@ export function ManuscriptWorkspace(): JSX.Element {
                   {sceneSaveState === 'saved' ? 'All changes saved' : 'Saving…'}
                 </div>
               </>
+            )}
+            {!focusMode && showRevisionHistory && activeSceneId && (
+              <div style={{ marginBottom: 20 }}>
+                <SnapshotDiffView sceneId={activeSceneId} />
+              </div>
             )}
             <ManuscriptEditor
               ref={editorRef}
@@ -214,7 +251,10 @@ export function ManuscriptWorkspace(): JSX.Element {
                     <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
                       {ROLE_NAME[insertions[0].agentRole]} — Suggested Insertions
                     </div>
-                    {insertions.map((s) => (
+                    {draftGroups.map((group) => (
+                      <DraftComparisonView key={(group[0].payload as InsertionPayload).draftGroupId} suggestions={group} />
+                    ))}
+                    {singleInsertions.map((s) => (
                       <GeneratorSuggestionCard key={s.id} suggestion={s} />
                     ))}
                   </div>

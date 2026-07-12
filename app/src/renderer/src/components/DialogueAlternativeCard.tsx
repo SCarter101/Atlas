@@ -1,13 +1,27 @@
 import { useState } from 'react'
-import type { AgentRole, SuggestionRef } from '@shared/schema/agent'
+import type { AgentRole, DialogueAlternativePayload, DialogueTensionTier, SuggestionRef } from '@shared/schema/agent'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { useAtlasStore } from '../state/store'
 
-const STATE_BADGE: Record<SuggestionRef['state'], { bg: string; color: string; label: string }> = {
+// Keyed on `SuggestionRef['state'] | 'fixed'` rather than just
+// `SuggestionRef['state']` because a parallel round of work is adding a
+// 'fixed' state to that shared union (shared/schema/agent.ts) without
+// touching this file's badge map — see this round's brief. Widening the key
+// type here (instead of narrowing to the current union) means this map
+// already has the right entry once that union lands, with no further edit
+// needed to this file.
+const STATE_BADGE: Record<SuggestionRef['state'] | 'fixed', { bg: string; color: string; label: string }> = {
   pending: { bg: 'var(--c-amber-soft)', color: 'var(--c-amber)', label: 'Open' },
   accepted: { bg: 'var(--c-green-soft)', color: 'var(--c-green)', label: 'Accepted' },
   rejected: { bg: 'var(--c-red-soft)', color: 'var(--c-red)', label: 'Rejected' },
-  refining: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent-text)', label: 'In progress' }
+  refining: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent-text)', label: 'In progress' },
+  fixed: { bg: 'var(--c-green-soft)', color: 'var(--c-green)', label: 'Fixed' }
+}
+
+const TENSION_LABEL: Record<DialogueTensionTier, string> = {
+  calm: 'Calm',
+  guarded: 'Guarded',
+  confrontational: 'Confrontational'
 }
 
 const ROLE_ICON: Record<AgentRole, IconKind> = {
@@ -34,7 +48,7 @@ export function DialogueAlternativeCard({ suggestion }: { suggestion: Suggestion
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
 
-  const payload = suggestion.payload as { characterName?: string; original: string; alternatives: string[] }
+  const payload = suggestion.payload as DialogueAlternativePayload
   const isResolved = suggestion.state === 'accepted' || suggestion.state === 'rejected'
   const badge = STATE_BADGE[suggestion.state]
 
@@ -80,15 +94,28 @@ export function DialogueAlternativeCard({ suggestion }: { suggestion: Suggestion
       </div>
 
       <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 6 }}>
-        Alternatives
+        Alternatives by tension level
       </div>
-      <ul style={{ margin: 0, marginBottom: 10, paddingLeft: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
         {payload.alternatives.map((alt, i) => (
-          <li key={i} style={{ fontSize: 12, color: 'var(--c-ink)', lineHeight: 1.5, marginBottom: 4 }}>
-            {alt}
-          </li>
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+            <span
+              style={{
+                fontSize: 9.5,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                color: 'var(--c-ink-faint)',
+                width: 92,
+                flexShrink: 0
+              }}
+            >
+              {TENSION_LABEL[alt.tier]}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--c-ink)', lineHeight: 1.5 }}>{alt.text}</span>
+          </div>
         ))}
-      </ul>
+      </div>
 
       {!isResolved && refining && (
         <>

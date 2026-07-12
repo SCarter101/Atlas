@@ -36,6 +36,27 @@ export interface CodexVersion {
   snapshot: Record<string, unknown>
 }
 
+// Spec §7.4 "Dialogue Editor should use character voice profiles from the
+// Codex" — only meaningful when CodexEntry.type === 'character'. All fields
+// optional since most existing character entries (and new ones a writer
+// hasn't gotten around to yet) won't have this filled in; the Dialoguer
+// agent degrades gracefully (see main/agent/simulator.ts) when it's absent.
+export interface CharacterVoiceProfile {
+  vocabulary?: string
+  rhythm?: string
+  educationLevel?: string
+  humorStyle?: string
+  emotionalGuardedness?: string
+  accentOrDialect?: string
+  verbalTics?: string[]
+  tabooTopics?: string[]
+  speechDirectness?: 'indirect' | 'balanced' | 'direct'
+  formalityLevel?: 'casual' | 'neutral' | 'formal'
+  favoritePhrases?: string[]
+  avoidedPhrases?: string[]
+  powerDynamics?: string
+}
+
 export interface CodexEntry {
   schemaVersion: 1
   id: string
@@ -51,6 +72,7 @@ export interface CodexEntry {
   relationships: CodexRelationship[]
   manuscriptLinks: ManuscriptLink[]
   spoilerRevealSceneId?: string
+  voiceProfile?: CharacterVoiceProfile
   createdAt: string
   updatedAt: string
   history: CodexVersion[]

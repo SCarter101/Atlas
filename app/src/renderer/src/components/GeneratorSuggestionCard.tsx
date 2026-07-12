@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AgentRole, SuggestionRef } from '@shared/schema/agent'
+import type { AgentRole, InsertionPayload, SuggestionRef } from '@shared/schema/agent'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { useAtlasStore } from '../state/store'
 
@@ -34,7 +34,7 @@ export function GeneratorSuggestionCard({ suggestion }: { suggestion: Suggestion
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
 
-  const payload = suggestion.payload as { text: string }
+  const payload = suggestion.payload as InsertionPayload
   const isResolved = suggestion.state === 'accepted' || suggestion.state === 'rejected'
   const badge = STATE_BADGE[suggestion.state]
 

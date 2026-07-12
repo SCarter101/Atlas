@@ -27,8 +27,16 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   const agentModels = useAtlasStore((s) => s.agentModels)
   const currentRunGoal = useAtlasStore((s) => s.currentRunGoal)
   const currentRunSteps = useAtlasStore((s) => s.currentRunSteps)
+  const advancedMode = useAtlasStore((s) => s.advancedMode)
   const [expandedRole, setExpandedRole] = useState<AgentRole | null>(null)
   const [preflight, setPreflight] = useState<{ agent: AgentDef; selectionText: string } | null>(null)
+  // Opt-in "Generate Alternatives" mode (Required UI Features: "Enable
+  // multiple drafts only as an optional advanced feature") — only exposed
+  // for Generator, and only when Advanced Mode is on (see Settings.tsx's
+  // description of what Advanced Mode reveals, which literally names
+  // "multiple drafts"). Read at the moment a run is started, not baked into
+  // AgentDef, since it's a per-run choice rather than a per-agent setting.
+  const [generateAlternatives, setGenerateAlternatives] = useState(false)
   const navigate = useNavigate()
 
   const runInFlight =
@@ -54,7 +62,8 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
         maxToolCalls: 3,
         maxElapsedMs: 30000,
         allowedCapabilityCategories: ['line-editing']
-      }
+      },
+      generateAlternatives: agent.role === 'Generator' && advancedMode && generateAlternatives ? true : undefined
     }
 
     startAgentRun(goal)
@@ -159,6 +168,26 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
                       {agent.wired && !selectionAvailable ? ' · select text in the manuscript first' : ''}
                       {!agent.wired ? ' · not wired up in this build yet' : ''}
                     </div>
+                    {agent.role === 'Generator' && advancedMode && (
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: 12,
+                          color: 'var(--c-ink-soft)',
+                          marginBottom: 10,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={generateAlternatives}
+                          onChange={(e) => setGenerateAlternatives(e.target.checked)}
+                        />
+                        Generate alternatives (3 drafts to compare)
+                      </label>
+                    )}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
                         onClick={() => setPreflight({ agent, selectionText: getSelection() })}

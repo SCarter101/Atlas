@@ -26,6 +26,14 @@ export interface AgentGoal {
     maxCostUsd?: number
     allowedCapabilityCategories: string[]
   }
+  // Opt-in "Generate Alternatives" mode (Required UI Features: "Enable
+  // multiple drafts only as an optional advanced feature"). Only consulted
+  // by the Generator role today — see simulateGeneratorContinuation() in
+  // main/agent/simulator.ts. Gated in the UI behind Advanced Mode (see
+  // AgentRail.tsx), not just this flag, so a hand-crafted AgentGoal that
+  // sets it without Advanced Mode still works — the gate is a UX affordance,
+  // not a security boundary.
+  generateAlternatives?: boolean
 }
 
 export interface AgentError {
@@ -69,6 +77,35 @@ export interface Citation {
   sourceUrl?: string
   note: string
   reliability?: 'low' | 'medium' | 'high'
+}
+
+// Payload shape for a `kind: 'insertion'` SuggestionRef (Generator). Plain
+// suggestions omit draftGroupId; the opt-in "Generate Alternatives" mode
+// (see AgentGoal.generateAlternatives) tags every draft it produces in one
+// run with the same draftGroupId so the UI can recognize and render them as
+// a comparable set (DraftComparisonView.tsx) instead of N unrelated cards.
+export interface InsertionPayload {
+  text: string
+  draftGroupId?: string
+  draftLabel?: string
+}
+
+// Spec §7.4: "suggest alternate dialogue options at different tension
+// levels." Payload shape for a `kind: 'dialogue-alternative'` SuggestionRef
+// (Dialoguer). tier is only meaningful when the alternative was generated
+// from a character's Codex voice profile — see buildTensionAlternatives()
+// in main/agent/simulator.ts.
+export type DialogueTensionTier = 'calm' | 'guarded' | 'confrontational'
+
+export interface DialogueAlternativeOption {
+  tier: DialogueTensionTier
+  text: string
+}
+
+export interface DialogueAlternativePayload {
+  characterName?: string
+  original: string
+  alternatives: DialogueAlternativeOption[]
 }
 
 export interface SuggestionRef {
