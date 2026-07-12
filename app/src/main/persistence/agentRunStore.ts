@@ -1,8 +1,8 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AgentRunRecord } from '@shared/schema/agent'
 import type { AtlasDb } from './db'
-import { upsertAgentRunIndex } from './db'
+import { listAgentRunIndex, upsertAgentRunIndex } from './db'
 import { projectPaths } from './paths'
 
 export async function saveAgentRun(projectRoot: string, db: AtlasDb, record: AgentRunRecord): Promise<void> {
@@ -17,4 +17,17 @@ export async function saveAgentRun(projectRoot: string, db: AtlasDb, record: Age
     startedAt: record.startedAt,
     endedAt: record.endedAt
   })
+}
+
+export async function loadAgentRun(projectRoot: string, runId: string): Promise<AgentRunRecord> {
+  const dir = projectPaths(projectRoot).agentRunsDir
+  const raw = await readFile(join(dir, `${runId}.json`), 'utf-8')
+  return JSON.parse(raw) as AgentRunRecord
+}
+
+export function listAgentRuns(
+  projectRoot: string,
+  db: AtlasDb
+): { runId: string; agentRole: string; status: string; startedAt: string; endedAt?: string }[] {
+  return listAgentRunIndex(db)
 }

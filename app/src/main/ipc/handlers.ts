@@ -5,6 +5,7 @@ import { IpcChannel, type FoundationsCodexDraft } from '@shared/ipc'
 import type { AgentGoal, PermissionDecision } from '@shared/schema/agent'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
+import { listAgentRuns, loadAgentRun } from '../persistence/agentRunStore'
 import { listCapabilityManifests } from '../persistence/capabilityStore'
 import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persistence/codexStore'
 import { createProjectFromFoundations, slugify } from '../persistence/createProjectFromFoundations'
@@ -119,5 +120,15 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.AgentRunCancel, async (_evt, runId: string) => {
     const session = getCurrentProjectSession()
     session.agentRuns.cancel(runId)
+  })
+
+  ipcMain.handle(IpcChannel.AgentRunsList, async () => {
+    const session = getCurrentProjectSession()
+    return listAgentRuns(session.projectRoot, session.db)
+  })
+
+  ipcMain.handle(IpcChannel.AgentRunGet, async (_evt, runId: string) => {
+    const session = getCurrentProjectSession()
+    return loadAgentRun(session.projectRoot, runId)
   })
 }

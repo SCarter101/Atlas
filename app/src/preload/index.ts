@@ -37,7 +37,9 @@ const atlasBridge: AtlasBridge = {
     },
     respondToPermission: (runId: string, requestId: string, decision: PermissionDecision) =>
       ipcRenderer.invoke(IpcChannel.AgentRunRespondToPermission, runId, requestId, decision),
-    cancel: (runId: string) => ipcRenderer.invoke(IpcChannel.AgentRunCancel, runId)
+    cancel: (runId: string) => ipcRenderer.invoke(IpcChannel.AgentRunCancel, runId),
+    list: () => ipcRenderer.invoke(IpcChannel.AgentRunsList),
+    get: (runId) => ipcRenderer.invoke(IpcChannel.AgentRunGet, runId)
   }
 }
 
