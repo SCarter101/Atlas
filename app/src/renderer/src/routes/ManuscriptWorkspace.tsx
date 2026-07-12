@@ -5,6 +5,9 @@ import { ManuscriptEditor, type ManuscriptEditorHandle } from '../components/Man
 import { AgentRail } from '../components/AgentRail'
 import { SuggestionCard } from '../components/SuggestionCard'
 import { EditorialFindingCard } from '../components/EditorialFindingCard'
+import { GeneratorSuggestionCard } from '../components/GeneratorSuggestionCard'
+import { DialogueAlternativeCard } from '../components/DialogueAlternativeCard'
+import { CodexAdditionCard } from '../components/CodexAdditionCard'
 import { PermissionDialog } from '../components/PermissionDialog'
 import { SceneMetadataPanel } from '../components/SceneMetadataPanel'
 import { useAtlasStore } from '../state/store'
@@ -52,6 +55,9 @@ export function ManuscriptWorkspace(): JSX.Element {
   const sceneSuggestions = activeSuggestions.filter((s) => s.targetSceneId === activeSceneId)
   const editorialFindings = sceneSuggestions.filter((s) => s.kind === 'editorial-finding')
   const trackedChanges = sceneSuggestions.filter((s) => s.kind === 'tracked-change')
+  const insertions = sceneSuggestions.filter((s) => s.kind === 'insertion')
+  const dialogueAlternatives = sceneSuggestions.filter((s) => s.kind === 'dialogue-alternative')
+  const codexAdditions = sceneSuggestions.filter((s) => s.kind === 'codex-addition')
 
   useEffect(() => {
     if (!activeSceneId) return
@@ -171,7 +177,11 @@ export function ManuscriptWorkspace(): JSX.Element {
 
             {lastAgentSummary && <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)' }}>{lastAgentSummary}</div>}
 
-            {(editorialFindings.length > 0 || trackedChanges.length > 0) && (
+            {(editorialFindings.length > 0 ||
+              trackedChanges.length > 0 ||
+              insertions.length > 0 ||
+              dialogueAlternatives.length > 0 ||
+              codexAdditions.length > 0) && (
               <div>
                 <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 10 }}>
                   Comments &amp; Tracked Changes
@@ -189,12 +199,45 @@ export function ManuscriptWorkspace(): JSX.Element {
                 )}
 
                 {trackedChanges.length > 0 && (
-                  <div>
+                  <div style={{ marginBottom: 16 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
                       {ROLE_NAME[trackedChanges[0].agentRole]} — Tracked Changes
                     </div>
                     {trackedChanges.map((s) => (
                       <SuggestionCard key={s.id} suggestion={s} />
+                    ))}
+                  </div>
+                )}
+
+                {insertions.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
+                      {ROLE_NAME[insertions[0].agentRole]} — Suggested Insertions
+                    </div>
+                    {insertions.map((s) => (
+                      <GeneratorSuggestionCard key={s.id} suggestion={s} />
+                    ))}
+                  </div>
+                )}
+
+                {dialogueAlternatives.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
+                      {ROLE_NAME[dialogueAlternatives[0].agentRole]} — Dialogue Alternatives
+                    </div>
+                    {dialogueAlternatives.map((s) => (
+                      <DialogueAlternativeCard key={s.id} suggestion={s} />
+                    ))}
+                  </div>
+                )}
+
+                {codexAdditions.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
+                      {ROLE_NAME[codexAdditions[0].agentRole]} — Codex Additions
+                    </div>
+                    {codexAdditions.map((s) => (
+                      <CodexAdditionCard key={s.id} suggestion={s} />
                     ))}
                   </div>
                 )}

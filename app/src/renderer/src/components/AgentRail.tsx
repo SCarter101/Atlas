@@ -13,11 +13,11 @@ interface AgentDef {
 }
 
 const AGENTS: AgentDef[] = [
-  { role: 'Generator', name: 'Generator', iconKind: 'nib', wired: false },
-  { role: 'Dev-Editor', name: 'Story Editor', iconKind: 'compass', wired: false },
+  { role: 'Generator', name: 'Generator', iconKind: 'nib', wired: true },
+  { role: 'Dev-Editor', name: 'Story Editor', iconKind: 'compass', wired: true },
   { role: 'Line-Editor', name: 'Line Editor', iconKind: 'loupe', wired: true },
-  { role: 'Dialoguer', name: 'Dialogue Editor', iconKind: 'quote', wired: false },
-  { role: 'World-Builder', name: 'World Builder', iconKind: 'globe', wired: false }
+  { role: 'Dialoguer', name: 'Dialogue Editor', iconKind: 'quote', wired: true },
+  { role: 'World-Builder', name: 'World Builder', iconKind: 'globe', wired: true }
 ]
 
 export function AgentRail({ getSelection, sceneId }: { getSelection: () => string; sceneId: string }): JSX.Element {
