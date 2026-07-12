@@ -37,5 +37,12 @@
     "typescript": "^5.7.2",
     "vite": "^5.4.11",
     "vitest": "^2.1.8"
+  },
+  "build": {
+    "productName": "Atlas",
+    "appId": "com.atlas.desktop",
+    "win": {
+      "icon": "resources/icon.png"
+    }
   }
 }
