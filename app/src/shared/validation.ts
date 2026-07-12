@@ -11,7 +11,15 @@
 import { z } from 'zod'
 import type { AgentGoal, ModelRef } from './schema/agent'
 import type { CapabilityManifest, JsonSchema } from './schema/capability'
-import type { CodexEntry, CodexEntryType, CodexVersion, CodexRelationship, FactStatus, ManuscriptLink } from './schema/codex'
+import type {
+  CharacterVoiceProfile,
+  CodexEntry,
+  CodexEntryType,
+  CodexVersion,
+  CodexRelationship,
+  FactStatus,
+  ManuscriptLink
+} from './schema/codex'
 import type { ProjectManifest } from './schema/project'
 import type { SessionGoal } from './schema/session'
 import type { SceneWritePatch } from './ipc'
@@ -60,6 +68,26 @@ export const CodexVersionSchema = z.object({
   snapshot: z.record(z.unknown())
 })
 
+// Spec §7.4 voice-profile fields — see CharacterVoiceProfile in
+// schema/codex.ts. Only relevant when CodexEntry.type === 'character', but
+// validated unconditionally here like the rest of CodexEntry's optional
+// fields (the schema doesn't branch on `type`).
+export const CharacterVoiceProfileSchema = z.object({
+  vocabulary: z.string().optional(),
+  rhythm: z.string().optional(),
+  educationLevel: z.string().optional(),
+  humorStyle: z.string().optional(),
+  emotionalGuardedness: z.string().optional(),
+  accentOrDialect: z.string().optional(),
+  verbalTics: z.array(z.string()).optional(),
+  tabooTopics: z.array(z.string()).optional(),
+  speechDirectness: z.enum(['indirect', 'balanced', 'direct']).optional(),
+  formalityLevel: z.enum(['casual', 'neutral', 'formal']).optional(),
+  favoritePhrases: z.array(z.string()).optional(),
+  avoidedPhrases: z.array(z.string()).optional(),
+  powerDynamics: z.string().optional()
+})
+
 export const CodexEntrySchema = z.object({
   schemaVersion: z.literal(1),
   id: z.string(),
@@ -75,6 +103,7 @@ export const CodexEntrySchema = z.object({
   relationships: z.array(CodexRelationshipSchema),
   manuscriptLinks: z.array(ManuscriptLinkSchema),
   spoilerRevealSceneId: z.string().optional(),
+  voiceProfile: CharacterVoiceProfileSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   history: z.array(CodexVersionSchema)
@@ -87,18 +116,23 @@ type _FactStatusCheck = z.infer<typeof FactStatusSchema> extends FactStatus ? tr
 type _CodexRelationshipCheck = z.infer<typeof CodexRelationshipSchema> extends CodexRelationship ? true : never
 type _ManuscriptLinkCheck = z.infer<typeof ManuscriptLinkSchema> extends ManuscriptLink ? true : never
 type _CodexVersionCheck = z.infer<typeof CodexVersionSchema> extends CodexVersion ? true : never
+type _CharacterVoiceProfileCheck = z.infer<typeof CharacterVoiceProfileSchema> extends CharacterVoiceProfile
+  ? true
+  : never
 type _CodexEntryCheck = z.infer<typeof CodexEntrySchema> extends CodexEntry ? true : never
 const _codexEntryTypeCheck: _CodexEntryTypeCheck = true
 const _factStatusCheck: _FactStatusCheck = true
 const _codexRelationshipCheck: _CodexRelationshipCheck = true
 const _manuscriptLinkCheck: _ManuscriptLinkCheck = true
 const _codexVersionCheck: _CodexVersionCheck = true
+const _characterVoiceProfileCheck: _CharacterVoiceProfileCheck = true
 const _codexEntryCheck: _CodexEntryCheck = true
 void _codexEntryTypeCheck
 void _factStatusCheck
 void _codexRelationshipCheck
 void _manuscriptLinkCheck
 void _codexVersionCheck
+void _characterVoiceProfileCheck
 void _codexEntryCheck
 
 // ---------------------------------------------------------------------------
@@ -194,7 +228,8 @@ export const AgentGoalSchema = z.object({
     maxElapsedMs: z.number(),
     maxCostUsd: z.number().optional(),
     allowedCapabilityCategories: z.array(z.string())
-  })
+  }),
+  generateAlternatives: z.boolean().optional()
 })
 
 type _AgentGoalCheck = z.infer<typeof AgentGoalSchema> extends AgentGoal ? true : never

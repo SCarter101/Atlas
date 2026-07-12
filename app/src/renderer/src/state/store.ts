@@ -1,5 +1,13 @@
 import { create } from 'zustand'
-import type { AgentGoal, AgentRole, AgentStep, MetadataProposalPayload, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
+import type {
+  AgentGoal,
+  AgentRole,
+  AgentStep,
+  InsertionPayload,
+  MetadataProposalPayload,
+  PermissionRequest,
+  SuggestionRef
+} from '@shared/schema/agent'
 import type { FoundationsCodexDraft } from '@shared/ipc'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest, Theme } from '@shared/schema/project'
@@ -431,8 +439,29 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       }
     }
 
+    // Drafts sharing a draftGroupId (the opt-in "Generate Alternatives" mode
+    // — see AgentGoal.generateAlternatives) are mutually exclusive: only one
+    // continuation should actually land in the manuscript. Accepting one
+    // auto-rejects its still-pending siblings so the writer doesn't have to
+    // clean up the rest of the group by hand.
+    const draftGroupId =
+      state === 'accepted' && suggestion?.kind === 'insertion'
+        ? (suggestion.payload as InsertionPayload).draftGroupId
+        : undefined
+
     set((s) => ({
-      activeSuggestions: s.activeSuggestions.map((sg) => (sg.id === id ? { ...sg, state } : sg))
+      activeSuggestions: s.activeSuggestions.map((sg) => {
+        if (sg.id === id) return { ...sg, state }
+        if (
+          draftGroupId &&
+          sg.kind === 'insertion' &&
+          sg.state === 'pending' &&
+          (sg.payload as InsertionPayload).draftGroupId === draftGroupId
+        ) {
+          return { ...sg, state: 'rejected' }
+        }
+        return sg
+      })
     }))
   }
 }))

@@ -4,7 +4,11 @@ import type {
   AgentResult,
   AgentRunRecord,
   AgentStep,
+  DialogueAlternativeOption,
+  DialogueAlternativePayload,
+  DialogueTensionTier,
   EditorialFindingPayload,
+  InsertionPayload,
   MetadataProposalPayload,
   ModelCallSummary,
   ModelRef,
@@ -14,12 +18,12 @@ import type {
   ToolCall
 } from '@shared/schema/agent'
 import type { SceneCraftMeta, SceneMeta } from '@shared/schema/manuscript'
+import type { CharacterVoiceProfile, CodexEntryType } from '@shared/schema/codex'
 import type { AtlasDb } from '../persistence/db'
 import { saveAgentRun } from '../persistence/agentRunStore'
 import { listCodexEntries } from '../persistence/codexStore'
 import { readScene } from '../persistence/sceneStore'
 import { configuredMcpServers } from '@shared/mcp'
-import type { CodexEntryType } from '@shared/schema/codex'
 import { decodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { listCapabilities } from '../capabilities/registry'
 import { runSandboxed } from '../capabilities/sandbox'
@@ -455,7 +459,15 @@ export class AgentRunManager {
       return
     }
 
-    const suggestions = simulateGeneratorContinuation(selection, goal.scope.sceneIds?.[0])
+    // "Generate Alternatives" (Required UI Features: "Enable multiple drafts
+    // only as an optional advanced feature") is opt-in via
+    // goal.generateAlternatives, set by AgentRail.tsx only when the writer
+    // has Advanced Mode on. Default path is unchanged: exactly one draft.
+    const suggestions = simulateGeneratorContinuation(
+      selection,
+      goal.scope.sceneIds?.[0],
+      goal.generateAlternatives ? 3 : 1
+    )
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.prose-continuation@1.0.0',
@@ -685,7 +697,24 @@ export class AgentRunManager {
       return
     }
 
-    const suggestions = simulateDialogueAlternatives(selection, goal.scope.sceneIds?.[0])
+    // Spec §7.4: use the character's Codex voice profile when one can be
+    // resolved for this run — see resolveDialogueCharacter() for the lookup
+    // heuristics (scene povCharacterId first, then a name match against the
+    // selection). No hard failure when nothing resolves: the alternatives
+    // just fall back to profile-agnostic phrasing, same as before this
+    // feature existed.
+    const character = await this.resolveDialogueCharacter(goal, selection)
+    const suggestions = simulateDialogueAlternatives(selection, goal.scope.sceneIds?.[0], character)
+
+    // "Detect when multiple characters sound too similar" — a real (if
+    // heuristic) comparison over every character Codex entry that has a
+    // voice profile filled in, not just the one involved in this run. Kept
+    // separate from `suggestions` above (which is what the tool-call step
+    // records as its output) and folded into the result as additional
+    // editorial-finding suggestions, the same "augment, don't replace"
+    // pattern Story Editor uses for its live contradiction check.
+    const similarVoiceFindings = await this.checkSimilarVoices(goal)
+    const allSuggestions = [...suggestions, ...similarVoiceFindings]
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.dialogue-scan@1.0.0',
@@ -711,8 +740,12 @@ export class AgentRunManager {
     this.recordModelCall(goal, modelCall)
 
     const result: AgentResult = {
-      summary: `Dialogue Editor proposed ${suggestions.length} alternative reading${suggestions.length === 1 ? '' : 's'}.`,
-      proposedManuscriptChanges: suggestions
+      summary: `Dialogue Editor proposed ${suggestions.length} alternative reading${suggestions.length === 1 ? '' : 's'}${
+        similarVoiceFindings.length > 0
+          ? ` and flagged ${similarVoiceFindings.length} character${similarVoiceFindings.length === 1 ? '' : 's'} pair${similarVoiceFindings.length === 1 ? '' : 's'} with similar voices`
+          : ''
+      }.`,
+      proposedManuscriptChanges: allSuggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -722,6 +755,69 @@ export class AgentRunManager {
     })
 
     await this.finish(goal.runId, 'completed')
+  }
+
+  // Resolution order: (1) the scene's declared POV character, since that's
+  // the character whose dialogue a writer is most likely reviewing; (2) a
+  // case-insensitive name match against the selected text itself (handles
+  // e.g. a quoted line with an attribution tag like `"...," Elena said.`).
+  // Real gap noted in this round's brief: there's no clean existing hook
+  // that ties a specific line of dialogue to its speaker, so this is a
+  // best-effort heuristic, not a guarantee.
+  private async resolveDialogueCharacter(
+    goal: AgentGoal,
+    selection: string
+  ): Promise<{ id: string; name: string; voiceProfile?: CharacterVoiceProfile } | undefined> {
+    try {
+      const characters = await listCodexEntries(this.projectRoot, { type: 'character' })
+      if (characters.length === 0) return undefined
+
+      const sceneId = goal.scope.sceneIds?.[0]
+      if (sceneId) {
+        try {
+          const { meta } = await readScene(this.projectRoot, this.db, sceneId)
+          const pov = meta.povCharacterId ? characters.find((c) => c.id === meta.povCharacterId) : undefined
+          if (pov) return { id: pov.id, name: pov.name, voiceProfile: pov.voiceProfile }
+        } catch {
+          // Scene not indexed yet (e.g. a detached run in a test) — fall
+          // through to the name-match heuristic below.
+        }
+      }
+
+      const byName = characters.find((c) => c.name.trim().length > 0 && selection.includes(c.name))
+      if (byName) return { id: byName.id, name: byName.name, voiceProfile: byName.voiceProfile }
+
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private async checkSimilarVoices(goal: AgentGoal): Promise<SuggestionRef[]> {
+    try {
+      const characters = await listCodexEntries(this.projectRoot, { type: 'character' })
+      const withProfiles = characters
+        .map((c) => (c.voiceProfile ? { id: c.id, name: c.name, voiceProfile: c.voiceProfile } : undefined))
+        .filter((c): c is { id: string; name: string; voiceProfile: CharacterVoiceProfile } => c !== undefined)
+      const pairs = detectSimilarVoices(withProfiles)
+      const runId = randomUUID()
+
+      return pairs.map((pair) => ({
+        id: randomUUID(),
+        agentRole: 'Dialoguer' as const,
+        kind: 'editorial-finding' as const,
+        targetSceneId: goal.scope.sceneIds?.[0],
+        payload: {
+          title: `${pair.aName} and ${pair.bName} may sound too similar`,
+          body: `Simulated approximation: these two characters' Codex voice profiles match on ${pair.matchedFields.length} field${pair.matchedFields.length === 1 ? '' : 's'} (${pair.matchedFields.join(', ')}). Consider differentiating their dialogue further.`,
+          severity: pair.matchedFields.length >= 5 ? 'high' : 'medium'
+        },
+        provenance: { capabilityId: 'global.tools.dialogue-scan', capabilityVersion: '1.0.0', runId },
+        state: 'pending' as const
+      }))
+    } catch {
+      return []
+    }
   }
 
   private async runWorldBuilder(goal: AgentGoal): Promise<void> {
@@ -891,32 +987,57 @@ function trackedChange(
   }
 }
 
-// Deterministic, template-based continuation — not a real model call. Anchors
-// on the last sentence of the selection when one is present so the result
-// reads as a plausible next beat rather than a non-sequitur; falls back to a
-// generic scene-continuation opener when there is no selection to anchor on.
-function simulateGeneratorContinuation(selection: string, sceneId?: string): SuggestionRef[] {
+// Deterministic, template-based continuations — not a real model call.
+// Anchors on the last sentence of the selection when one is present so each
+// result reads as a plausible next beat rather than a non-sequitur; falls
+// back to a generic scene-continuation opener when there is no selection to
+// anchor on. `draftCount` is 1 by default (the long-standing behavior); the
+// opt-in "Generate Alternatives" mode (AgentGoal.generateAlternatives) asks
+// for more than one, in which case every draft in the batch shares a
+// draftGroupId so the UI can render them together (DraftComparisonView.tsx)
+// instead of as unrelated single-insertion cards.
+const DRAFT_VARIANTS = [
+  (anchor: string) =>
+    `${anchor} A beat passed before the moment demanded a response — and the scene pressed forward into what came next.`,
+  (anchor: string) => `${anchor} Nobody moved. Then, all at once, the room remembered how to breathe.`,
+  (anchor: string) =>
+    `${anchor} It should have ended there. Instead, the silence stretched one beat too long, and something shifted.`
+]
+
+const DRAFT_FALLBACKS = [
+  'The scene continues: a beat of quiet tension before the next decision forces itself into the open.',
+  'The scene continues: the air in the room changes first, and the characters catch up a moment later.',
+  'The scene continues: what happens next is smaller than expected, and heavier for it.'
+]
+
+function simulateGeneratorContinuation(selection: string, sceneId: string | undefined, draftCount = 1): SuggestionRef[] {
   const runId = randomUUID()
   const trimmed = selection.trim()
   const sentences = trimmed.split(/(?<=[.!?])\s+/).filter(Boolean)
   const anchor = sentences[sentences.length - 1] ?? trimmed
+  const draftGroupId = draftCount > 1 ? randomUUID() : undefined
 
-  const text =
-    anchor.length > 0
-      ? `${anchor} A beat passed before the moment demanded a response — and the scene pressed forward into what came next.`
-      : 'The scene continues: a beat of quiet tension before the next decision forces itself into the open.'
+  const count = Math.max(1, draftCount)
+  return Array.from({ length: count }, (_, i) => {
+    const text =
+      anchor.length > 0
+        ? DRAFT_VARIANTS[i % DRAFT_VARIANTS.length](anchor)
+        : DRAFT_FALLBACKS[i % DRAFT_FALLBACKS.length]
 
-  return [
-    {
+    const payload: InsertionPayload = draftGroupId
+      ? { text, draftGroupId, draftLabel: `Draft ${i + 1}` }
+      : { text }
+
+    return {
       id: randomUUID(),
       agentRole: 'Generator',
       kind: 'insertion',
       targetSceneId: sceneId,
-      payload: { text },
+      payload,
       provenance: { capabilityId: 'global.tools.prose-continuation', capabilityVersion: '1.0.0', runId },
       state: 'pending'
     }
-  ]
+  })
 }
 
 // Heuristic structural pass styled on the Phase 1 prototype's Story Editor
@@ -1020,19 +1141,138 @@ export function proposeSceneMetadataPatch(
   }
 }
 
-// Deterministic string-transform "alternatives" — a stand-in for a real
-// dialogue-rewrite model call. Derives 2-3 phrasing variants from the
-// selection itself so results are reproducible for the same input.
-function simulateDialogueAlternatives(selection: string, sceneId?: string): SuggestionRef[] {
+function lowerFirst(s: string): string {
+  return s.length > 0 ? `${s.charAt(0).toLowerCase()}${s.slice(1)}` : s
+}
+
+// Deterministic phrasing transform — a stand-in for a real dialogue-rewrite
+// model call, same "honest placeholder" style as the rest of this file.
+// Produces one alternative per tension tier (spec §7.4: "suggest alternate
+// dialogue options at different tension levels"). When a character's Codex
+// voice profile is available, `formalityLevel`/`speechDirectness` shape the
+// phrasing (more clipped/direct at higher directness, softer hedging at
+// higher formality or indirectness); without one, falls back to
+// profile-agnostic transforms so the feature degrades gracefully rather
+// than requiring every character to have a filled-in profile first.
+// Exported (like detectDuplicateAction above) so it's directly unit-testable
+// as a pure function.
+export function buildTensionAlternatives(original: string, profile?: CharacterVoiceProfile): DialogueAlternativeOption[] {
+  const trimmed = original.trim().length > 0 ? original.trim() : "I don't know what else to say."
+  const stripped = trimmed.replace(/[.?!]+$/, '')
+
+  const formal = profile?.formalityLevel === 'formal'
+  const casual = profile?.formalityLevel === 'casual'
+  const direct = profile?.speechDirectness === 'direct'
+  const indirect = profile?.speechDirectness === 'indirect'
+
+  const calmPrefix = formal ? 'If I may say so — ' : casual ? 'Look, ' : indirect ? 'I wonder if ' : ''
+  const calmSuffix = formal ? ', if that is acceptable.' : ", if that's alright."
+  const calm = `${calmPrefix}${lowerFirst(stripped)}${calmSuffix}`
+
+  const guardedPrefix = indirect ? "I'm not sure this is my place, but " : ''
+  const guarded = `${guardedPrefix}${stripped}. That's all I'll say about it.`
+
+  const confrontational = direct || casual ? `${stripped}. Full stop.` : `${stripped}!`
+
+  const tiers: { tier: DialogueTensionTier; text: string }[] = [
+    { tier: 'calm', text: calm },
+    { tier: 'guarded', text: guarded },
+    { tier: 'confrontational', text: confrontational }
+  ]
+  return tiers
+}
+
+const VOICE_PROFILE_STRING_FIELDS: (keyof CharacterVoiceProfile)[] = [
+  'vocabulary',
+  'rhythm',
+  'educationLevel',
+  'humorStyle',
+  'emotionalGuardedness',
+  'accentOrDialect',
+  'speechDirectness',
+  'formalityLevel',
+  'powerDynamics'
+]
+
+const VOICE_PROFILE_ARRAY_FIELDS: (keyof CharacterVoiceProfile)[] = [
+  'verbalTics',
+  'tabooTopics',
+  'favoritePhrases',
+  'avoidedPhrases'
+]
+
+export interface SimilarVoicePair {
+  aId: string
+  aName: string
+  bId: string
+  bName: string
+  matchedFields: string[]
+}
+
+// Spec §7.4: "detect when multiple characters sound too similar." A simple
+// simulated heuristic — counts overlapping Codex voice-profile fields
+// between every pair of characters that have a profile filled in, and flags
+// a pair once `minMatches` fields overlap. This compares declared profile
+// fields, not actual dialogue lines, so it's explicitly an approximation
+// (see the finding text this feeds into in runDialoguer's checkSimilarVoices)
+// rather than a real semantic similarity check.
+export function detectSimilarVoices(
+  characters: { id: string; name: string; voiceProfile: CharacterVoiceProfile }[],
+  minMatches = 3
+): SimilarVoicePair[] {
+  const pairs: SimilarVoicePair[] = []
+
+  for (let i = 0; i < characters.length; i++) {
+    for (let j = i + 1; j < characters.length; j++) {
+      const a = characters[i]
+      const b = characters[j]
+      const matchedFields: string[] = []
+
+      for (const field of VOICE_PROFILE_STRING_FIELDS) {
+        const av = a.voiceProfile[field]
+        const bv = b.voiceProfile[field]
+        if (
+          typeof av === 'string' &&
+          typeof bv === 'string' &&
+          av.trim().length > 0 &&
+          av.trim().toLowerCase() === bv.trim().toLowerCase()
+        ) {
+          matchedFields.push(field)
+        }
+      }
+
+      for (const field of VOICE_PROFILE_ARRAY_FIELDS) {
+        const av = a.voiceProfile[field]
+        const bv = b.voiceProfile[field]
+        if (Array.isArray(av) && Array.isArray(bv) && av.length > 0 && bv.length > 0) {
+          const bSet = new Set(bv.map((v) => v.trim().toLowerCase()))
+          if (av.some((v) => bSet.has(v.trim().toLowerCase()))) matchedFields.push(field)
+        }
+      }
+
+      if (matchedFields.length >= minMatches) {
+        pairs.push({ aId: a.id, aName: a.name, bId: b.id, bName: b.name, matchedFields })
+      }
+    }
+  }
+
+  return pairs
+}
+
+function simulateDialogueAlternatives(
+  selection: string,
+  sceneId: string | undefined,
+  character?: { id: string; name: string; voiceProfile?: CharacterVoiceProfile }
+): SuggestionRef[] {
   const runId = randomUUID()
   const original = selection.trim().length > 0 ? selection.trim() : "I don't know what else to say."
-  const stripped = original.replace(/[.?!]+$/, '')
+  const alternatives = buildTensionAlternatives(original, character?.voiceProfile)
 
-  const alternatives = [
-    `${stripped}.`,
-    `${stripped} — you know that.`,
-    `Look, ${stripped.charAt(0).toLowerCase()}${stripped.slice(1)}.`
-  ]
+  const payload: DialogueAlternativePayload = {
+    characterName: character?.name,
+    original,
+    alternatives
+  }
 
   return [
     {
@@ -1040,7 +1280,7 @@ function simulateDialogueAlternatives(selection: string, sceneId?: string): Sugg
       agentRole: 'Dialoguer',
       kind: 'dialogue-alternative',
       targetSceneId: sceneId,
-      payload: { original, alternatives },
+      payload,
       provenance: { capabilityId: 'global.tools.dialogue-scan', capabilityVersion: '1.0.0', runId },
       state: 'pending'
     }

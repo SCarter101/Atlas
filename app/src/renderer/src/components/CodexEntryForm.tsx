@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
 import type {
+  CharacterVoiceProfile,
   CodexEntry,
   CodexEntryType,
   CodexRelationship,
@@ -12,6 +13,23 @@ import { useAtlasStore } from '../state/store'
 
 const ALL_TYPES = Object.keys(TYPE_LABEL) as CodexEntryType[]
 const STATUS_OPTIONS: FactStatus[] = ['canon', 'tentative', 'deprecated', 'contradicted']
+const SPEECH_DIRECTNESS_OPTIONS: NonNullable<CharacterVoiceProfile['speechDirectness']>[] = [
+  'indirect',
+  'balanced',
+  'direct'
+]
+const FORMALITY_OPTIONS: NonNullable<CharacterVoiceProfile['formalityLevel']>[] = ['casual', 'neutral', 'formal']
+
+function listToText(values: string[] | undefined): string {
+  return (values ?? []).join(', ')
+}
+
+function textToList(value: string): string[] {
+  return value
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+}
 
 interface SceneOption {
   id: string
@@ -84,6 +102,16 @@ export function CodexEntryForm({
   const [spoilerRevealSceneId, setSpoilerRevealSceneId] = useState<string | undefined>(entry?.spoilerRevealSceneId)
   const [saving, setSaving] = useState(false)
 
+  // Spec §7.4 "Dialogue Editor should use character voice profiles from the
+  // Codex" — only relevant/shown when type === 'character' (see the
+  // conditional section below), but kept in state unconditionally so
+  // switching the type dropdown back and forth doesn't lose what's typed.
+  const [voiceProfile, setVoiceProfile] = useState<CharacterVoiceProfile>(entry?.voiceProfile ?? {})
+
+  function updateVoiceProfile(patch: Partial<CharacterVoiceProfile>): void {
+    setVoiceProfile((v) => ({ ...v, ...patch }))
+  }
+
   const relationshipTargets = allEntries.filter((e) => e.id !== entry?.id)
 
   function updateRelationship(id: string, patch: Partial<CodexRelationship>): void {
@@ -122,6 +150,7 @@ export function CodexEntryForm({
       relationships,
       manuscriptLinks,
       spoilerRevealSceneId,
+      voiceProfile: type === 'character' && Object.keys(voiceProfile).length > 0 ? voiceProfile : undefined,
       createdAt: entry?.createdAt ?? now,
       updatedAt: now,
       history: entry?.history ?? []
@@ -214,6 +243,137 @@ export function CodexEntryForm({
           ))}
           <AddButton onClick={() => setBodyRows((rows) => [...rows, { key: '', value: '' }])}>Add field</AddButton>
         </div>
+
+        {type === 'character' && (
+          <>
+            <SectionLabel>Voice profile</SectionLabel>
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginBottom: 10, lineHeight: 1.5 }}>
+              Used by the Dialogue Editor to compare this character's lines against their established voice and to
+              generate tension-varied alternatives (spec §7.4).
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
+              <Field label="Vocabulary">
+                <input
+                  value={voiceProfile.vocabulary ?? ''}
+                  onChange={(e) => updateVoiceProfile({ vocabulary: e.target.value || undefined })}
+                  style={inputStyle}
+                  placeholder="e.g. plain, working-class"
+                />
+              </Field>
+              <Field label="Rhythm">
+                <input
+                  value={voiceProfile.rhythm ?? ''}
+                  onChange={(e) => updateVoiceProfile({ rhythm: e.target.value || undefined })}
+                  style={inputStyle}
+                  placeholder="e.g. short, clipped sentences"
+                />
+              </Field>
+              <Field label="Education level">
+                <input
+                  value={voiceProfile.educationLevel ?? ''}
+                  onChange={(e) => updateVoiceProfile({ educationLevel: e.target.value || undefined })}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Humor style">
+                <input
+                  value={voiceProfile.humorStyle ?? ''}
+                  onChange={(e) => updateVoiceProfile({ humorStyle: e.target.value || undefined })}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Emotional guardedness">
+                <input
+                  value={voiceProfile.emotionalGuardedness ?? ''}
+                  onChange={(e) => updateVoiceProfile({ emotionalGuardedness: e.target.value || undefined })}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Accent or dialect notes">
+                <input
+                  value={voiceProfile.accentOrDialect ?? ''}
+                  onChange={(e) => updateVoiceProfile({ accentOrDialect: e.target.value || undefined })}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Speech directness">
+                <select
+                  value={voiceProfile.speechDirectness ?? ''}
+                  onChange={(e) =>
+                    updateVoiceProfile({
+                      speechDirectness: (e.target.value || undefined) as CharacterVoiceProfile['speechDirectness']
+                    })
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">Unspecified</option>
+                  {SPEECH_DIRECTNESS_OPTIONS.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Formality level">
+                <select
+                  value={voiceProfile.formalityLevel ?? ''}
+                  onChange={(e) =>
+                    updateVoiceProfile({
+                      formalityLevel: (e.target.value || undefined) as CharacterVoiceProfile['formalityLevel']
+                    })
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">Unspecified</option>
+                  {FORMALITY_OPTIONS.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Power dynamics">
+                <input
+                  value={voiceProfile.powerDynamics ?? ''}
+                  onChange={(e) => updateVoiceProfile({ powerDynamics: e.target.value || undefined })}
+                  style={inputStyle}
+                  placeholder="e.g. defers to authority, needles peers"
+                />
+              </Field>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+              <Field label="Verbal tics (comma-separated)">
+                <input
+                  value={listToText(voiceProfile.verbalTics)}
+                  onChange={(e) => updateVoiceProfile({ verbalTics: textToList(e.target.value) })}
+                  style={inputStyle}
+                  placeholder="e.g. you know, listen, anyway"
+                />
+              </Field>
+              <Field label="Taboo topics (comma-separated)">
+                <input
+                  value={listToText(voiceProfile.tabooTopics)}
+                  onChange={(e) => updateVoiceProfile({ tabooTopics: textToList(e.target.value) })}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Favorite phrases (comma-separated)">
+                <input
+                  value={listToText(voiceProfile.favoritePhrases)}
+                  onChange={(e) => updateVoiceProfile({ favoritePhrases: textToList(e.target.value) })}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Avoided phrases (comma-separated)">
+                <input
+                  value={listToText(voiceProfile.avoidedPhrases)}
+                  onChange={(e) => updateVoiceProfile({ avoidedPhrases: textToList(e.target.value) })}
+                  style={inputStyle}
+                />
+              </Field>
+            </div>
+          </>
+        )}
 
         <SectionLabel>Relationships</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
