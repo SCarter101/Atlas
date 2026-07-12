@@ -173,9 +173,9 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                 style={({ isActive }) => ({
                   padding: '7px 12px',
                   borderRadius: 7,
-                  border: `1px solid ${isActive ? '#A9834E' : '#C9AD82'}`,
-                  background: isActive ? '#C7A876' : '#E4D3AF',
-                  color: isActive ? '#3A2A14' : '#5C4327',
+                  border: `1px solid ${isActive ? 'var(--c-amber)' : 'var(--c-border)'}`,
+                  background: isActive ? 'var(--c-amber-soft)' : 'transparent',
+                  color: isActive ? 'var(--c-amber)' : 'var(--c-ink-soft)',
                   fontSize: 12.5,
                   fontWeight: isActive ? 700 : 600,
                   textDecoration: 'none',
