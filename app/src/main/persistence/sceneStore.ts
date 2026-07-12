@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { SceneMeta } from '@shared/schema/manuscript'
 import type { AtlasDb } from './db'
 import { findSceneLocation, upsertSceneIndex } from './db'
+import { migrateRecord } from './migrations'
 import { sceneFilePaths } from './paths'
 
 export interface SceneReadResult {
@@ -29,7 +30,7 @@ export async function readScene(
     readFile(metaFile, 'utf-8'),
     readFile(proseFile, 'utf-8').catch(() => '')
   ])
-  return { meta: JSON.parse(metaRaw) as SceneMeta, prose }
+  return { meta: migrateRecord('SceneMeta', JSON.parse(metaRaw) as SceneMeta), prose }
 }
 
 export async function writeScene(

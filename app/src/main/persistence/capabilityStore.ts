@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CapabilityManifest, CapabilityType } from '@shared/schema/capability'
+import { migrateRecord } from './migrations'
 import { projectPaths } from './paths'
 
 const TYPE_DIR: Record<CapabilityType, string> = { tool: 'tools', skill: 'skills' }
@@ -22,7 +23,7 @@ export async function listCapabilityManifests(projectRoot: string): Promise<Capa
       if (!entry.isDirectory()) continue
       const manifestPath = join(dirPath, entry.name, 'manifest.json')
       const raw = await readFile(manifestPath, 'utf-8').catch(() => null)
-      if (raw) manifests.push(JSON.parse(raw) as CapabilityManifest)
+      if (raw) manifests.push(migrateRecord('CapabilityManifest', JSON.parse(raw) as CapabilityManifest))
     }
   }
 
