@@ -5,6 +5,7 @@ import { IpcChannel, type FoundationsCodexDraft } from '@shared/ipc'
 import type { AgentGoal, PermissionDecision } from '@shared/schema/agent'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
+import { AgentGoalSchema, CodexEntrySchema, ProjectManifestSeedSchema, SceneWritePatchSchema } from '@shared/validation'
 import { listAgentRuns, loadAgentRun } from '../persistence/agentRunStore'
 import { listCapabilityManifests } from '../persistence/capabilityStore'
 import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persistence/codexStore'
@@ -23,7 +24,8 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   })
 
   ipcMain.handle(IpcChannel.ProjectCreate, async (_evt, path: string, seed) => {
-    const manifest = await createProject(path, seed)
+    const validatedSeed = ProjectManifestSeedSchema.parse(seed)
+    const manifest = await createProject(path, validatedSeed)
     setCurrentProjectSession(await ProjectSession.create(path))
     return manifest
   })
@@ -85,10 +87,11 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(
     IpcChannel.SceneWrite,
     async (_evt, sceneId: string, patch: { meta?: Partial<SceneMeta>; prose?: string }) => {
+      const validatedPatch = SceneWritePatchSchema.parse(patch)
       const session = getCurrentProjectSession()
       const location = findSceneLocation(session.db, sceneId)
       if (!location) throw new Error(`Scene ${sceneId} is not in the project index`)
-      await writeScene(session.projectRoot, session.db, sceneId, patch, location.relativeDir, location.slug)
+      await writeScene(session.projectRoot, session.db, sceneId, validatedPatch, location.relativeDir, location.slug)
     }
   )
 
@@ -101,8 +104,9 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   )
 
   ipcMain.handle(IpcChannel.CodexUpsert, async (_evt, entry: CodexEntry) => {
+    const validatedEntry = CodexEntrySchema.parse(entry)
     const session = getCurrentProjectSession()
-    await upsertCodexEntry(session.projectRoot, session.db, entry)
+    await upsertCodexEntry(session.projectRoot, session.db, validatedEntry)
   })
 
   ipcMain.handle(IpcChannel.CodexDelete, async (_evt, entryId: string, entryType: CodexEntryType) => {
@@ -116,8 +120,9 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   })
 
   ipcMain.handle(IpcChannel.AgentRunStart, async (_evt, goal: AgentGoal) => {
+    const validatedGoal = AgentGoalSchema.parse(goal)
     const session = getCurrentProjectSession()
-    const { runId } = session.agentRuns.start(goal)
+    const { runId } = session.agentRuns.start(validatedGoal)
     // Forward every step to the renderer over a fixed channel; preload
     // filters by runId when re-exposing this as a per-run subscription.
     session.agentRuns.onStep(runId, (step) => {
