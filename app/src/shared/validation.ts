@@ -28,6 +28,7 @@ export const CodexEntryTypeSchema = z.enum([
   'event',
   'world-rule',
   'timeline-item',
+  'plot-thread',
   'relationship',
   'theme',
   'motif',
@@ -113,7 +114,8 @@ const SceneCraftMetaSchema = z.object({
   turningPoint: z.string().optional(),
   outcome: z.string().optional(),
   emotionalShift: z.string().optional(),
-  revealedInformation: z.string().optional()
+  revealedInformation: z.string().optional(),
+  conflictLevel: z.number().optional()
 })
 
 const SceneContinuityMetaSchema = z.object({
@@ -140,6 +142,7 @@ const SceneMetaPatchSchema = z.object({
   locationId: z.string().optional(),
   timeOrDate: z.string().optional(),
   purpose: z.string().optional(),
+  presentCharacterIds: z.array(z.string()).optional(),
   craft: SceneCraftMetaSchema.optional(),
   continuity: SceneContinuityMetaSchema.optional(),
   wordCount: z.number().optional(),

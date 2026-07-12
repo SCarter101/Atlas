@@ -1,6 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CodexEntry } from '@shared/schema/codex'
+import { CharacterPresenceMap } from '../components/CharacterPresenceMap'
+import { ConflictCurveChart } from '../components/ConflictCurveChart'
+import { PlotThreadBoard } from '../components/PlotThreadBoard'
+
+type TimelineTab = 'timeline' | 'plot-threads' | 'character-map' | 'conflict-curve'
+
+const TABS: Array<{ key: TimelineTab; label: string }> = [
+  { key: 'timeline', label: 'Timeline' },
+  { key: 'plot-threads', label: 'Plot Threads' },
+  { key: 'character-map', label: 'Character Map' },
+  { key: 'conflict-curve', label: 'Conflict Curve' }
+]
 
 interface TimelineEvent {
   id: string
@@ -21,10 +33,62 @@ function toTimelineEvent(entry: CodexEntry): TimelineEvent {
   }
 }
 
-// Static timeline mockup over real Codex timeline-item entries — spec §11
-// scopes the functional, manuscript-linked version of this to Phases 3/4;
-// Phase 1/2 only need the static visualization.
+const TAB_META: Record<TimelineTab, { title: string; subtitle: string }> = {
+  timeline: { title: 'Story Timeline', subtitle: 'Anchor events the manuscript resolves against' },
+  'plot-threads': {
+    title: 'Plot Thread Board',
+    subtitle: 'Setups, clues, promises, and payoffs tracked across the manuscript'
+  },
+  'character-map': { title: 'Character Presence Map', subtitle: 'Which characters appear in which chapters' },
+  'conflict-curve': { title: 'Conflict / Tension Curve', subtitle: 'Conflict level by reading order, scene by scene' }
+}
+
+// Extended per spec §11/Phase 3-4 into a tabbed view: the original static
+// Timeline mockup (still reading real Codex timeline-item entries) plus
+// three functional, manuscript-linked story tools — see PlotThreadBoard,
+// CharacterPresenceMap, and ConflictCurveChart.
 export function Timeline(): JSX.Element {
+  const [tab, setTab] = useState<TimelineTab>('timeline')
+  const meta = TAB_META[tab]
+
+  return (
+    <div style={{ padding: '36px 40px 80px' }}>
+      <div style={{ fontFamily: 'Source Serif 4, serif', fontSize: 24, fontWeight: 600, marginBottom: 4 }}>{meta.title}</div>
+      <div style={{ fontSize: 13.5, color: 'var(--c-ink-faint)', marginBottom: 24 }}>{meta.subtitle}</div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 32, borderBottom: '1px solid var(--c-border)' }}>
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={tabButtonStyle(tab === t.key)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'timeline' && <TimelineEventsView />}
+      {tab === 'plot-threads' && <PlotThreadBoard />}
+      {tab === 'character-map' && <CharacterPresenceMap />}
+      {tab === 'conflict-curve' && <ConflictCurveChart />}
+    </div>
+  )
+}
+
+function tabButtonStyle(active: boolean): CSSProperties {
+  return {
+    padding: '9px 14px',
+    border: 'none',
+    borderBottom: `2px solid ${active ? 'var(--c-accent)' : 'transparent'}`,
+    background: 'transparent',
+    color: active ? 'var(--c-ink)' : 'var(--c-ink-faint)',
+    fontSize: 13,
+    fontWeight: active ? 600 : 500,
+    cursor: 'pointer',
+    marginBottom: -1
+  }
+}
+
+// The original static timeline mockup over real Codex timeline-item
+// entries — unchanged behavior, just relocated into its own tab.
+function TimelineEventsView(): JSX.Element {
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const navigate = useNavigate()
 
@@ -35,10 +99,7 @@ export function Timeline(): JSX.Element {
   }, [])
 
   return (
-    <div style={{ padding: '36px 40px 80px' }}>
-      <div style={{ fontFamily: 'Source Serif 4, serif', fontSize: 24, fontWeight: 600, marginBottom: 4 }}>Story Timeline</div>
-      <div style={{ fontSize: 13.5, color: 'var(--c-ink-faint)', marginBottom: 48 }}>Anchor events the manuscript resolves against</div>
-
+    <>
       {events.length === 0 ? (
         <div>
           <div style={{ color: 'var(--c-ink-soft)', fontSize: 14, marginBottom: 14, lineHeight: 1.6 }}>
@@ -93,7 +154,7 @@ export function Timeline(): JSX.Element {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 

@@ -6,6 +6,7 @@ export type CodexEntryType =
   | 'event'
   | 'world-rule'
   | 'timeline-item'
+  | 'plot-thread'
   | 'relationship'
   | 'theme'
   | 'motif'
