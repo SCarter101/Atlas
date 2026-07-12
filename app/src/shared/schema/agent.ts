@@ -1,3 +1,5 @@
+import type { SceneMeta } from './manuscript'
+
 export type AgentRole = 'Generator' | 'Dev-Editor' | 'Line-Editor' | 'Dialoguer' | 'World-Builder'
 
 export type ModelProvider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'lm-studio'
@@ -69,6 +71,29 @@ export interface Citation {
   sourceUrl?: string
   note: string
   reliability?: 'low' | 'medium' | 'high'
+}
+
+// Payload shape for `kind: 'editorial-finding'` suggestions (Story Editor /
+// Dev-Editor). Previously only inline-typed at the point of use
+// (simulator.ts's simulateStructuralFindings, EditorialFindingCard.tsx's
+// render cast) — pulled out here so both sides share one definition.
+// `craftConceptIds` is optional and references `CRAFT_CONCEPTS` in
+// renderer/src/lib/craftReference.ts (spec Phase 4 ~line 847: findings should
+// link to concise in-app craft explainers, not become a writing course).
+export interface EditorialFindingPayload {
+  title: string
+  body: string
+  severity: string
+  craftConceptIds?: string[]
+}
+
+// Payload shape for `kind: 'metadata-proposal'` suggestions. Spec Phase 4
+// (~line 183): agents may propose scene metadata based on the current draft,
+// but the writer must approve changes — this is the "proposal" the writer
+// reviews via MetadataProposalCard.tsx before it's ever written to disk.
+export interface MetadataProposalPayload {
+  proposedMeta: Partial<SceneMeta>
+  rationale: string
 }
 
 export interface SuggestionRef {
