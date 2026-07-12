@@ -1,5 +1,7 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { CodexEntry, CodexEntryType } from '@shared/schema/codex'
+import { detectContradictions } from '@shared/codexLogic'
+import { CodexEntryForm } from '../components/CodexEntryForm'
 import { useAtlasStore } from '../state/store'
 
 const STATUS_COLOR: Record<CodexEntry['status'], string> = {
@@ -9,7 +11,7 @@ const STATUS_COLOR: Record<CodexEntry['status'], string> = {
   contradicted: 'var(--c-red)'
 }
 
-const TYPE_LABEL: Record<CodexEntryType, string> = {
+export const TYPE_LABEL: Record<CodexEntryType, string> = {
   character: 'Character',
   location: 'Location',
   faction: 'Faction',
@@ -46,6 +48,7 @@ export function CodexView(): JSX.Element {
   const [entries, setEntries] = useState<CodexEntry[]>([])
   const [filter, setFilter] = useState<CodexEntryType | 'All'>('All')
   const [refiningId, setRefiningId] = useState<string | null>(null)
+  const [formEntry, setFormEntry] = useState<CodexEntry | null | 'new'>(null)
 
   function refresh(): void {
     void window.atlas.codex.list().then(setEntries)
@@ -55,6 +58,8 @@ export function CodexView(): JSX.Element {
 
   const pending = entries.filter(isPending)
   const resolved = entries.filter((e) => !isPending(e) && (filter === 'All' || e.type === filter))
+
+  const contradictions = useMemo(() => detectContradictions(entries), [entries])
 
   const canonCount = entries.filter((e) => e.status === 'canon').length
   const completenessPct = entries.length ? Math.round((canonCount / entries.length) * 100) : 0
@@ -69,6 +74,12 @@ export function CodexView(): JSX.Element {
     refresh()
   }
 
+  async function deleteEntry(entry: CodexEntry): Promise<void> {
+    if (!window.confirm(`Delete "${entry.name}" from the Codex? This can't be undone.`)) return
+    await window.atlas.codex.delete(entry.id, entry.type)
+    refresh()
+  }
+
   return (
     <div style={{ maxWidth: 820, margin: '0 auto', padding: '36px 40px 80px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
@@ -78,13 +89,18 @@ export function CodexView(): JSX.Element {
             The living knowledgebase behind {manifest?.title ?? 'this project'}
           </div>
         </div>
-        <div style={{ textAlign: 'right', minWidth: 140 }}>
-          <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 6 }}>
-            Completeness
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20 }}>
+          <div style={{ textAlign: 'right', minWidth: 140 }}>
+            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 6 }}>
+              Completeness
+            </div>
+            <div style={{ height: 6, width: 140, borderRadius: 3, background: 'var(--c-border)', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${completenessPct}%`, background: 'var(--c-accent)', borderRadius: 3 }} />
+            </div>
           </div>
-          <div style={{ height: 6, width: 140, borderRadius: 3, background: 'var(--c-border)', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${completenessPct}%`, background: 'var(--c-accent)', borderRadius: 3 }} />
-          </div>
+          <button onClick={() => setFormEntry('new')} style={newEntryButtonStyle}>
+            New Entry
+          </button>
         </div>
       </div>
 
@@ -177,43 +193,153 @@ export function CodexView(): JSX.Element {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {resolved.map((entry) => (
-          <div
+          <ResolvedEntryRow
             key={entry.id}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 16,
-              padding: '14px 16px',
-              borderRadius: 10,
-              border: entry.isPrivate ? '1px dashed var(--c-border-strong)' : '1px solid var(--c-border)',
-              background: 'var(--c-surface-raised)'
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--c-ink-faint)' }}>
-                {TYPE_LABEL[entry.type]}
-                {entry.isPrivate && entry.type !== 'private-author-note' ? ' · Private' : ''}
-              </div>
-              <div style={{ fontFamily: 'Source Serif 4, serif', fontWeight: 600, fontSize: 15 }}>{entry.name}</div>
-            </div>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                padding: '3px 9px',
-                borderRadius: 10,
-                background: 'var(--c-surface)',
-                color: STATUS_COLOR[entry.status],
-                textTransform: 'capitalize',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {entry.status}
-            </span>
-          </div>
+            entry={entry}
+            allEntries={entries}
+            contradictionReasons={contradictions.get(entry.id)}
+            onEdit={() => setFormEntry(entry)}
+            onDelete={() => void deleteEntry(entry)}
+          />
         ))}
       </div>
+
+      {formEntry !== null && (
+        <CodexEntryForm
+          entry={formEntry === 'new' ? null : formEntry}
+          allEntries={entries}
+          onClose={() => setFormEntry(null)}
+          onSaved={() => {
+            setFormEntry(null)
+            refresh()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function ResolvedEntryRow({
+  entry,
+  allEntries,
+  contradictionReasons,
+  onEdit,
+  onDelete
+}: {
+  entry: CodexEntry
+  allEntries: CodexEntry[]
+  contradictionReasons: string[] | undefined
+  onEdit: () => void
+  onDelete: () => void
+}): JSX.Element {
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  const byId = new Map(allEntries.map((e) => [e.id, e]))
+  const hasDetails = entry.relationships.length > 0 || entry.manuscriptLinks.length > 0
+  const sortedHistory = [...entry.history].sort((a, b) => b.changedAt.localeCompare(a.changedAt))
+
+  return (
+    <div
+      style={{
+        padding: '14px 16px',
+        borderRadius: 10,
+        border: entry.isPrivate ? '1px dashed var(--c-border-strong)' : '1px solid var(--c-border)',
+        background: 'var(--c-surface-raised)'
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--c-ink-faint)' }}>
+            {TYPE_LABEL[entry.type]}
+            {entry.isPrivate && entry.type !== 'private-author-note' ? ' · Private' : ''}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontFamily: 'Source Serif 4, serif', fontWeight: 600, fontSize: 15 }}>{entry.name}</div>
+            {contradictionReasons && contradictionReasons.length > 0 && (
+              <span
+                title={contradictionReasons.join('; ')}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '2px 7px',
+                  borderRadius: 8,
+                  background: 'var(--c-red)',
+                  color: '#fff',
+                  cursor: 'default'
+                }}
+              >
+                Contradiction
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: '3px 9px',
+              borderRadius: 10,
+              background: 'var(--c-surface)',
+              color: STATUS_COLOR[entry.status],
+              textTransform: 'capitalize',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {entry.status}
+          </span>
+          <button onClick={onEdit} style={rowButtonStyle}>
+            Edit
+          </button>
+          <button onClick={onDelete} style={{ ...rowButtonStyle, color: 'var(--c-red)' }}>
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+        {hasDetails && (
+          <button onClick={() => setDetailsOpen((v) => !v)} style={disclosureButtonStyle}>
+            {detailsOpen ? 'Hide details ▾' : 'Details ▸'}
+          </button>
+        )}
+        {sortedHistory.length > 0 && (
+          <button onClick={() => setHistoryOpen((v) => !v)} style={disclosureButtonStyle}>
+            {historyOpen ? 'Hide history ▾' : `History (${sortedHistory.length}) ▸`}
+          </button>
+        )}
+      </div>
+
+      {detailsOpen && hasDetails && (
+        <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--c-ink-soft)' }}>
+          {entry.relationships.length > 0 && (
+            <div style={{ marginBottom: entry.manuscriptLinks.length > 0 ? 8 : 0 }}>
+              <span style={{ color: 'var(--c-ink-faint)' }}>Relationships: </span>
+              {entry.relationships
+                .map((rel) => `${rel.kind || 'related to'} ${byId.get(rel.targetEntryId)?.name ?? rel.targetEntryId}`)
+                .join(', ')}
+            </div>
+          )}
+          {entry.manuscriptLinks.length > 0 && (
+            <div>
+              <span style={{ color: 'var(--c-ink-faint)' }}>Manuscript links: </span>
+              {entry.manuscriptLinks.length} scene{entry.manuscriptLinks.length === 1 ? '' : 's'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {historyOpen && sortedHistory.length > 0 && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {sortedHistory.map((version) => (
+            <div key={version.versionId} style={{ fontSize: 11.5, color: 'var(--c-ink-soft)' }}>
+              <span style={{ color: 'var(--c-ink-faint)' }}>{new Date(version.changedAt).toLocaleString()}</span>{' '}
+              · {version.changedBy} · {version.diffSummary}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -228,4 +354,36 @@ function proposalButtonStyle(bg: string, color: string, outlined = false): CSSPr
     fontSize: 12.5,
     cursor: 'pointer'
   }
+}
+
+const newEntryButtonStyle: CSSProperties = {
+  padding: '7px 16px',
+  borderRadius: 8,
+  border: 'none',
+  background: 'var(--c-accent)',
+  color: '#fff',
+  fontSize: 12.5,
+  fontWeight: 600,
+  cursor: 'pointer',
+  height: 'fit-content'
+}
+
+const rowButtonStyle: CSSProperties = {
+  padding: '5px 10px',
+  borderRadius: 7,
+  border: '1px solid var(--c-border)',
+  background: 'transparent',
+  color: 'var(--c-ink-soft)',
+  fontSize: 12,
+  cursor: 'pointer'
+}
+
+const disclosureButtonStyle: CSSProperties = {
+  fontSize: 11.5,
+  padding: '3px 9px',
+  borderRadius: 14,
+  background: 'transparent',
+  border: '1px dashed var(--c-border-strong)',
+  color: 'var(--c-ink-faint)',
+  cursor: 'pointer'
 }
