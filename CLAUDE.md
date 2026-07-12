@@ -204,6 +204,18 @@ circular-import crash between `CodexView.tsx` and `CodexEntryForm.tsx` from Wave
 'TYPE_LABEL' before initialization" on every launch. Fixed by extracting the constant to
 `renderer/src/lib/codexLabels.ts`. See the "Wave variant" note above.
 
+*Post-Phase-3 fixes (user testing):* `state/store.ts`'s `setSuggestionState()` only ever
+applied manuscript changes for `tracked-change` (Line Editor) suggestions — accepting a
+Generator `insertion` suggestion flipped its UI state to accepted but never touched the
+scene's prose, silently discarding Generator's output. This predates Phase 3 (Generator
+was wired in Round 2) but was only caught by live testing. Now `insertion` suggestions
+append their text to the scene on accept, same snapshot-before-write pattern as
+tracked-change. Also fixed: `openSampleProject()`/`openProjectAtPath()`/
+`createProjectFromFoundations()` never cleared `activeSuggestions`/`queuedSuggestions`/
+`lastAgentSummary` on open, so reopening the sample project after exiting to Landing
+re-appended the same seeded suggestions (same ids) a second time — a real "duplicate
+key" React warning, not a rendering-only issue. All three now reset that state on open.
+
 **Explicitly deferred from Phase 3** (confirmed scope decision, not an oversight):
 capability recommendation drafts from agent-detected repeated processes; the full
 production capability review/compare/rollback workflow beyond basic
