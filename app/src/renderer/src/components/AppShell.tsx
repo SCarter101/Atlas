@@ -1,8 +1,15 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import type { ManuscriptTree } from '@shared/schema/manuscript'
+import type { Theme } from '@shared/schema/project'
 import { CommandPalette } from './CommandPalette'
 import { useAtlasStore } from '../state/store'
+
+const THEME_OPTIONS: { value: Theme; label: string }[] = [
+  { value: 'paper', label: 'Paper' },
+  { value: 'night', label: 'Night' },
+  { value: 'typewriter', label: 'Typewriter' }
+]
 
 const LEFT_NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -30,7 +37,7 @@ const MOCK_SNAPSHOTS = [
 export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   const manifest = useAtlasStore((s) => s.manifest)
   const theme = useAtlasStore((s) => s.theme)
-  const toggleTheme = useAtlasStore((s) => s.toggleTheme)
+  const setTheme = useAtlasStore((s) => s.setTheme)
   const exitToLanding = useAtlasStore((s) => s.exitToLanding)
   const focusMode = useAtlasStore((s) => s.focusMode)
   const activeSceneId = useAtlasStore((s) => s.activeSceneId)
@@ -215,32 +222,23 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
               </span>
             </button>
             <div style={{ display: 'flex', alignItems: 'center', borderRadius: 7, border: '1px solid var(--c-border)', overflow: 'hidden' }}>
-              <button
-                onClick={() => theme !== 'paper' && toggleTheme()}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: theme === 'paper' ? 'var(--c-accent)' : 'transparent',
-                  color: theme === 'paper' ? '#fff' : 'var(--c-ink-soft)'
-                }}
-              >
-                Paper
-              </button>
-              <button
-                onClick={() => theme !== 'night' && toggleTheme()}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: theme === 'night' ? 'var(--c-accent)' : 'transparent',
-                  color: theme === 'night' ? '#fff' : 'var(--c-ink-soft)'
-                }}
-              >
-                Night
-              </button>
+              {THEME_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => theme !== option.value && setTheme(option.value)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: theme === option.value ? 'var(--c-accent)' : 'transparent',
+                    color: theme === option.value ? '#fff' : 'var(--c-ink-soft)',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
             <NavLink
               to="/export"

@@ -10,7 +10,7 @@ interface Command {
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element | null {
   const navigate = useNavigate()
-  const toggleTheme = useAtlasStore((s) => s.toggleTheme)
+  const setTheme = useAtlasStore((s) => s.setTheme)
   const toggleFocusMode = useAtlasStore((s) => s.toggleFocusMode)
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -35,7 +35,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     { label: 'Go to Tool & Skill Library', group: 'Navigate', run: () => navigate('/library') },
     { label: 'Go to Export', group: 'Navigate', run: () => navigate('/export') },
     { label: 'Go to Settings', group: 'Navigate', run: () => navigate('/settings') },
-    { label: 'Toggle Paper / Night theme', group: 'View', run: toggleTheme },
+    { label: 'Switch to Paper theme', group: 'View', run: () => setTheme('paper') },
+    { label: 'Switch to Night theme', group: 'View', run: () => setTheme('night') },
+    { label: 'Switch to Typewriter theme', group: 'View', run: () => setTheme('typewriter') },
     { label: 'Toggle distraction-free mode', group: 'View', run: () => { navigate('/manuscript'); toggleFocusMode() } }
   ]
 
