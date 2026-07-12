@@ -42,6 +42,16 @@ const atlasBridge: AtlasBridge = {
     cancel: (runId: string) => ipcRenderer.invoke(IpcChannel.AgentRunCancel, runId),
     list: () => ipcRenderer.invoke(IpcChannel.AgentRunsList),
     get: (runId) => ipcRenderer.invoke(IpcChannel.AgentRunGet, runId)
+  },
+  retrieval: {
+    search: (query, opts) => ipcRenderer.invoke(IpcChannel.RetrievalSearch, query, opts)
+  },
+  summaries: {
+    getChapter: (chapterId) => ipcRenderer.invoke(IpcChannel.SummariesGetChapter, chapterId),
+    getScene: (sceneId) => ipcRenderer.invoke(IpcChannel.SummariesGetScene, sceneId)
+  },
+  context: {
+    warnings: (goal) => ipcRenderer.invoke(IpcChannel.ContextWarnings, goal)
   }
 }
 

@@ -3,6 +3,7 @@ import type { CapabilityManifest } from './schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { ProjectManifest } from './schema/project'
 import type { ManuscriptTree, SceneMeta } from './schema/manuscript'
+import type { ChapterSummary, ContextWarning, RetrievalResult, SceneSummary } from './schema/retrieval'
 
 // Channel names shared between preload's contextBridge exposure and main's
 // ipcMain handlers, so a typo can't silently create two different strings.
@@ -30,7 +31,11 @@ export const IpcChannel = {
   AgentRunRespondToPermission: 'agent-run:respond-to-permission',
   AgentRunCancel: 'agent-run:cancel',
   AgentRunsList: 'agent-runs:list',
-  AgentRunGet: 'agent-runs:get'
+  AgentRunGet: 'agent-runs:get',
+  RetrievalSearch: 'retrieval:search',
+  SummariesGetChapter: 'summaries:get-chapter',
+  SummariesGetScene: 'summaries:get-scene',
+  ContextWarnings: 'context:warnings'
 } as const
 
 export interface SceneReadResult {
@@ -106,5 +111,15 @@ export interface AtlasBridge {
     cancel(runId: string): Promise<void>
     list(): Promise<AgentRunSummary[]>
     get(runId: string): Promise<AgentRunRecord>
+  }
+  retrieval: {
+    search(query: string, opts?: { kind?: string; limit?: number }): Promise<RetrievalResult[]>
+  }
+  summaries: {
+    getChapter(chapterId: string): Promise<ChapterSummary>
+    getScene(sceneId: string): Promise<SceneSummary>
+  }
+  context: {
+    warnings(goal: AgentGoal): Promise<ContextWarning[]>
   }
 }

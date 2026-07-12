@@ -15,6 +15,9 @@ import { readManuscriptTree } from '../persistence/manuscriptStore'
 import { createProject, deleteProject, listProjects, openProject, sampleProjectRoot } from '../persistence/projectStore'
 import { readScene, writeScene } from '../persistence/sceneStore'
 import { seedCottonmouthProject } from '../persistence/seedSampleProject'
+import { chapterSummaryExists, getOrGenerateChapterSummary, getOrGenerateSceneSummary } from '../persistence/summaryStore'
+import { computeContextWarnings } from '../retrieval/contextWarnings'
+import { ensureIndexed, search } from '../retrieval/search'
 import { getCurrentProjectSession, ProjectSession, setCurrentProjectSession } from '../projectSession'
 
 export function registerIpcHandlers(getWebContents: () => WebContents): void {
@@ -152,5 +155,52 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.AgentRunGet, async (_evt, runId: string) => {
     const session = getCurrentProjectSession()
     return loadAgentRun(session.projectRoot, runId)
+  })
+
+  ipcMain.handle(IpcChannel.RetrievalSearch, async (_evt, query: string, opts?: { kind?: string; limit?: number }) => {
+    const session = getCurrentProjectSession()
+    await ensureIndexed(session.db, session.projectRoot)
+    return search(session.db, query, opts)
+  })
+
+  ipcMain.handle(IpcChannel.SummariesGetScene, async (_evt, sceneId: string) => {
+    const session = getCurrentProjectSession()
+    const { prose } = await readScene(session.projectRoot, session.db, sceneId)
+    return getOrGenerateSceneSummary(session.projectRoot, sceneId, prose)
+  })
+
+  ipcMain.handle(IpcChannel.SummariesGetChapter, async (_evt, chapterId: string) => {
+    const session = getCurrentProjectSession()
+    const tree = await readManuscriptTree(session.projectRoot)
+    const chapter = tree.books.flatMap((b) => b.parts.flatMap((p) => p.chapters)).find((c) => c.id === chapterId)
+    if (!chapter) throw new Error(`Chapter ${chapterId} is not in the project index`)
+
+    const sceneSummaries = await Promise.all(
+      chapter.scenes.map(async (scene) => {
+        const { prose } = await readScene(session.projectRoot, session.db, scene.id)
+        return getOrGenerateSceneSummary(session.projectRoot, scene.id, prose)
+      })
+    )
+    return getOrGenerateChapterSummary(session.projectRoot, chapterId, sceneSummaries)
+  })
+
+  ipcMain.handle(IpcChannel.ContextWarnings, async (_evt, goal: AgentGoal) => {
+    const session = getCurrentProjectSession()
+    const codexEntries = await listCodexEntries(session.projectRoot)
+
+    const sceneId = goal.scope.sceneIds?.[0]
+    if (!sceneId) return computeContextWarnings({ codexEntries, hasChapterSummary: false })
+
+    const tree = await readManuscriptTree(session.projectRoot)
+    const scenesWithChapter = tree.books.flatMap((b) =>
+      b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes.map((scene) => ({ scene, chapterId: c.id }))))
+    )
+    const found = scenesWithChapter.find((s) => s.scene.id === sceneId)
+
+    return computeContextWarnings({
+      scene: found?.scene,
+      codexEntries,
+      hasChapterSummary: found ? chapterSummaryExists(session.projectRoot, found.chapterId) : false
+    })
   })
 }
