@@ -8,6 +8,8 @@ const atlasBridge: AtlasBridge = {
     open: (path) => ipcRenderer.invoke(IpcChannel.ProjectOpen, path),
     create: (path, seed) => ipcRenderer.invoke(IpcChannel.ProjectCreate, path, seed),
     openSample: () => ipcRenderer.invoke(IpcChannel.ProjectOpenSample),
+    list: () => ipcRenderer.invoke(IpcChannel.ProjectList),
+    delete: (projectRoot) => ipcRenderer.invoke(IpcChannel.ProjectDelete, projectRoot),
     createFromFoundations: (title, genrePrimary, entries) =>
       ipcRenderer.invoke(IpcChannel.ProjectCreateFromFoundations, title, genrePrimary, entries)
   },

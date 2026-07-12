@@ -1,10 +1,28 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import type { ProjectManifest } from '@shared/schema/project'
 import { useAtlasStore } from '../state/store'
+
+interface ProjectListEntry {
+  projectRoot: string
+  manifest: ProjectManifest
+}
 
 export function Landing(): JSX.Element {
   const openSampleProject = useAtlasStore((s) => s.openSampleProject)
+  const openProjectAtPath = useAtlasStore((s) => s.openProjectAtPath)
   const startNewProject = useAtlasStore((s) => s.startNewProject)
   const navigate = useNavigate()
+
+  const [projects, setProjects] = useState<ProjectListEntry[]>([])
+
+  const refreshProjects = (): void => {
+    void window.atlas.project.list().then(setProjects)
+  }
+
+  useEffect(() => {
+    refreshProjects()
+  }, [])
 
   return (
     <div
@@ -42,15 +60,15 @@ export function Landing(): JSX.Element {
         <div
           style={{
             width: '100%',
-            maxWidth: 760,
+            maxWidth: 920,
             position: 'relative',
             borderRadius: 20,
             overflow: 'hidden',
             backgroundImage: "url('/assets/writers-desk.png')",
-            backgroundSize: 'cover',
+            backgroundSize: 'contain',
             backgroundPosition: 'center',
-            padding: '40px 32px',
-            minHeight: 340,
+            padding: '52px 40px',
+            aspectRatio: '1402 / 1122',
             boxShadow: '0 20px 48px rgba(0,0,0,0.22)'
           }}
         >
@@ -131,6 +149,84 @@ export function Landing(): JSX.Element {
               </div>
               <div style={{ fontSize: 12, color: 'rgba(245,241,234,0.68)' }}>Start with a guided Story Foundations setup</div>
             </button>
+
+            {projects.map(({ projectRoot, manifest }) => {
+              const sublineParts: string[] = []
+              if (manifest.genrePrimary) sublineParts.push(manifest.genrePrimary)
+              if (manifest.targetWordCount) sublineParts.push(`${manifest.targetWordCount.toLocaleString()} word target`)
+
+              return (
+                <div
+                  key={projectRoot}
+                  style={{
+                    textAlign: 'left',
+                    padding: 22,
+                    borderRadius: 14,
+                    border: '1px solid rgba(255,255,255,0.14)',
+                    background: 'rgba(28,24,20,0.72)',
+                    backdropFilter: 'blur(2px)',
+                    fontFamily: 'Public Sans, sans-serif',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                >
+                  <div style={{ width: 36, height: 36, borderRadius: 9, background: 'var(--c-accent-soft)', marginBottom: 14 }} />
+                  <div
+                    style={{
+                      fontFamily: 'Source Serif 4, serif',
+                      fontSize: 17,
+                      fontWeight: 600,
+                      color: '#F5F1EA',
+                      marginBottom: 4
+                    }}
+                  >
+                    {manifest.title}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(245,241,234,0.68)', marginBottom: 14 }}>
+                    {sublineParts.length > 0 ? sublineParts.join(' · ') : 'In progress'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+                    <button
+                      onClick={() => {
+                        void openProjectAtPath(projectRoot)
+                      }}
+                      style={{
+                        flex: 1,
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: '1px solid rgba(255,255,255,0.25)',
+                        background: 'rgba(255,255,255,0.08)',
+                        color: '#F5F1EA',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        fontFamily: 'Public Sans, sans-serif'
+                      }}
+                    >
+                      Open
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!window.confirm(`Delete "${manifest.title}"? This cannot be undone.`)) return
+                        void window.atlas.project.delete(projectRoot).then(refreshProjects)
+                      }}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: '1px solid rgba(255,255,255,0.14)',
+                        background: 'transparent',
+                        color: 'rgba(245,241,234,0.68)',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        fontFamily: 'Public Sans, sans-serif'
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>

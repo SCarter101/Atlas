@@ -56,6 +56,7 @@ interface AtlasState {
   sceneProseVersion: number
 
   openSampleProject: () => Promise<void>
+  openProjectAtPath: (path: string) => Promise<void>
   startNewProject: () => void
   createProjectFromFoundations: (title: string, genrePrimary: string | undefined, entries: FoundationsCodexDraft[]) => Promise<void>
   exitToLanding: () => void
@@ -176,6 +177,12 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
         ]
       }))
     }
+  },
+
+  openProjectAtPath: async (path) => {
+    const manifest = await window.atlas.project.open(path)
+    set({ projectRoot: path, manifest, theme: manifest.theme === 'night' ? 'night' : 'paper', stage: 'app' })
+    await get().refreshManuscriptTree()
   },
 
   startNewProject: () => set({ stage: 'onboarding' }),
