@@ -99,7 +99,20 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
 
   openSampleProject: async () => {
     const { projectRoot, manifest } = await window.atlas.project.openSample()
-    set({ projectRoot, manifest, theme: manifest.theme === 'night' ? 'night' : 'paper', stage: 'app' })
+    // Reset suggestion state from any previously-open project before
+    // reseeding — without this, reopening the sample after exiting to
+    // Landing appended the same seed suggestions (same ids) a second time,
+    // producing literal duplicate React keys, and any leftover suggestions
+    // from a different project would incorrectly carry over.
+    set({
+      projectRoot,
+      manifest,
+      theme: manifest.theme === 'night' ? 'night' : 'paper',
+      stage: 'app',
+      activeSuggestions: [],
+      queuedSuggestions: [],
+      lastAgentSummary: null
+    })
     await get().refreshManuscriptTree()
 
     const scenes = allScenes(get().manuscriptTree)
@@ -181,7 +194,15 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
 
   openProjectAtPath: async (path) => {
     const manifest = await window.atlas.project.open(path)
-    set({ projectRoot: path, manifest, theme: manifest.theme === 'night' ? 'night' : 'paper', stage: 'app' })
+    set({
+      projectRoot: path,
+      manifest,
+      theme: manifest.theme === 'night' ? 'night' : 'paper',
+      stage: 'app',
+      activeSuggestions: [],
+      queuedSuggestions: [],
+      lastAgentSummary: null
+    })
     await get().refreshManuscriptTree()
   },
 
@@ -189,7 +210,16 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
 
   createProjectFromFoundations: async (title, genrePrimary, entries) => {
     const { projectRoot, manifest } = await window.atlas.project.createFromFoundations(title, genrePrimary, entries)
-    set({ projectRoot, manifest, theme: manifest.theme === 'night' ? 'night' : 'paper', stage: 'app', activeSceneId: null })
+    set({
+      projectRoot,
+      manifest,
+      theme: manifest.theme === 'night' ? 'night' : 'paper',
+      stage: 'app',
+      activeSceneId: null,
+      activeSuggestions: [],
+      queuedSuggestions: [],
+      lastAgentSummary: null
+    })
     await get().refreshManuscriptTree()
   },
 
@@ -322,16 +352,29 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   setSuggestionState: async (id, state) => {
     const suggestion = get().activeSuggestions.find((sg) => sg.id === id)
 
-    // Accepting a tracked change is the one action that should actually
-    // touch the manuscript — otherwise "Accept" is cosmetic and the whole
-    // suggestion contract is theater. Only tracked-change has a literal
-    // before/after text to apply; editorial findings and other kinds are
-    // reviewed, not auto-applied.
-    if (state === 'accepted' && suggestion?.kind === 'tracked-change' && suggestion.targetSceneId) {
-      const payload = suggestion.payload as { before: string; after: string }
-      const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
-      if (prose.includes(payload.before)) {
-        const nextProse = prose.replace(payload.before, payload.after)
+    // Accepting a suggestion that carries literal manuscript text should
+    // actually touch the manuscript — otherwise "Accept" is cosmetic and the
+    // whole suggestion contract is theater. tracked-change (Line Editor)
+    // replaces a before/after span; insertion (Generator continuations)
+    // appends the generated text — previously only tracked-change was
+    // wired, so accepting a Generator suggestion silently did nothing to
+    // the scene. Other kinds (editorial findings, dialogue alternatives,
+    // codex additions) are reports/options, not a single literal text to
+    // apply automatically.
+    if (state === 'accepted' && suggestion?.targetSceneId) {
+      if (suggestion.kind === 'tracked-change') {
+        const payload = suggestion.payload as { before: string; after: string }
+        const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
+        if (prose.includes(payload.before)) {
+          const nextProse = prose.replace(payload.before, payload.after)
+          await window.atlas.snapshots.create(suggestion.targetSceneId, prose, 'Before suggestion accepted')
+          await window.atlas.scenes.write(suggestion.targetSceneId, { prose: nextProse })
+          set((s) => ({ sceneProseVersion: s.sceneProseVersion + 1 }))
+        }
+      } else if (suggestion.kind === 'insertion') {
+        const payload = suggestion.payload as { text: string }
+        const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
+        const nextProse = prose.trim().length > 0 ? `${prose}\n\n${payload.text}` : payload.text
         await window.atlas.snapshots.create(suggestion.targetSceneId, prose, 'Before suggestion accepted')
         await window.atlas.scenes.write(suggestion.targetSceneId, { prose: nextProse })
         set((s) => ({ sceneProseVersion: s.sceneProseVersion + 1 }))
