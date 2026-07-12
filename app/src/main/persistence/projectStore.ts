@@ -1,10 +1,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { ProjectManifest } from '@shared/schema/project'
+import { migrateRecord } from './migrations'
 import { projectPaths } from './paths'
 
 export async function openProject(projectRoot: string): Promise<ProjectManifest> {
   const raw = await readFile(projectPaths(projectRoot).manifest, 'utf-8')
-  return JSON.parse(raw) as ProjectManifest
+  return migrateRecord('ProjectManifest', JSON.parse(raw) as ProjectManifest)
 }
 
 export async function createProject(

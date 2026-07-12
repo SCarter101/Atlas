@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { AtlasDb } from './db'
 import { deleteCodexIndex, upsertCodexIndex } from './db'
+import { migrateRecord } from './migrations'
 import { CODEX_TYPE_DIRS, projectPaths } from './paths'
 
 export async function listCodexEntries(
@@ -20,7 +21,7 @@ export async function listCodexEntries(
     for (const file of files) {
       if (!file.endsWith('.json')) continue
       const raw = await readFile(join(dirPath, file), 'utf-8')
-      const entry = JSON.parse(raw) as CodexEntry
+      const entry = migrateRecord('CodexEntry', JSON.parse(raw) as CodexEntry)
       if (filter?.status && entry.status !== filter.status) continue
       entries.push(entry)
     }
