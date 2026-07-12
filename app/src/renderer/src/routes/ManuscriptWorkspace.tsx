@@ -10,6 +10,9 @@ import { DialogueAlternativeCard } from '../components/DialogueAlternativeCard'
 import { CodexAdditionCard } from '../components/CodexAdditionCard'
 import { PermissionDialog } from '../components/PermissionDialog'
 import { SceneMetadataPanel } from '../components/SceneMetadataPanel'
+import { ReadAloudControl } from '../components/ReadAloudControl'
+import { SprintTimer, SprintTimerCompactPill, useSprintTimer } from '../components/SprintTimer'
+import { countWords } from '../lib/textStats'
 import { useAtlasStore } from '../state/store'
 
 const SAVE_DEBOUNCE_MS = 800
@@ -82,6 +85,12 @@ export function ManuscriptWorkspace(): JSX.Element {
     }, SAVE_DEBOUNCE_MS)
   }
 
+  // Called unconditionally (before the early return below) and kept alive
+  // for the lifetime of this route component — see the comment on
+  // useSprintTimer for why a running sprint must not live inside a
+  // component that gets mounted/unmounted as focusMode toggles.
+  const sprint = useSprintTimer(prose)
+
   if (!activeSceneId) {
     return (
       <div style={{ maxWidth: 420, margin: '80px auto', padding: '0 32px', textAlign: 'center' }}>
@@ -133,9 +142,13 @@ export function ManuscriptWorkspace(): JSX.Element {
               activeScene?.title
             )}
           </div>
-          <button onClick={toggleFocusMode} style={pillButtonStyle}>
-            Distraction-free
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ReadAloudControl sceneId={activeSceneId} prose={prose} />
+            <SprintTimer sprint={sprint} />
+            <button onClick={toggleFocusMode} style={pillButtonStyle}>
+              Distraction-free
+            </button>
+          </div>
         </div>
       )}
 
@@ -263,6 +276,34 @@ export function ManuscriptWorkspace(): JSX.Element {
           }}
         >
           Press <strong>Esc</strong> to exit distraction-free mode
+        </div>
+      )}
+
+      {/* A running/just-finished sprint stays visible even with the toolbar
+          hidden — see SprintTimerCompactPill's comment. */}
+      {focusMode && <SprintTimerCompactPill sprint={sprint} />}
+
+      {/* Word count is otherwise shown in AppShell's bottom bar, which
+          distraction-free mode hides along with the rest of the chrome.
+          Spec: "Word count may appear on hover or keyboard focus" — hidden
+          by default via the .focus-word-count class in tokens.css. */}
+      {focusMode && (
+        <div
+          tabIndex={0}
+          className="focus-word-count"
+          style={{
+            position: 'absolute',
+            bottom: 16,
+            right: 16,
+            fontSize: 11.5,
+            color: 'var(--c-ink-faint)',
+            background: 'var(--c-surface)',
+            border: '1px solid var(--c-border)',
+            borderRadius: 999,
+            padding: '5px 14px'
+          }}
+        >
+          {countWords(prose)} words
         </div>
       )}
 

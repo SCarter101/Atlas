@@ -2,8 +2,22 @@ import { create } from 'zustand'
 import type { AgentGoal, AgentRole, AgentStep, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import type { FoundationsCodexDraft } from '@shared/ipc'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
-import type { ProjectManifest } from '@shared/schema/project'
+import type { ProjectManifest, Theme } from '@shared/schema/project'
 import type { SessionApproval } from '@shared/schema/capability'
+
+// Single source of truth for both validation and the cycle order used by
+// toggleTheme below.
+const THEMES: Theme[] = ['paper', 'night', 'typewriter']
+
+// manifest.theme comes off disk via JSON.parse, so even though the type
+// says Theme, a manifest written by an older build (back when only
+// 'paper'/'night' existed) or hand-edited is safest treated as untrusted —
+// fall back to 'paper' rather than handing an unrecognized value straight
+// to a [data-theme=...] attribute, which would silently resolve to no
+// theme block at all.
+function normalizeTheme(theme: Theme | undefined): Theme {
+  return theme && THEMES.includes(theme) ? theme : 'paper'
+}
 
 interface PendingPermission {
   runId: string
@@ -31,7 +45,7 @@ interface AtlasState {
   manuscriptTree: ManuscriptTree | null
   activeSceneId: string | null
   sceneSaveState: 'saved' | 'saving'
-  theme: 'paper' | 'night'
+  theme: Theme
   focusMode: boolean
   agentModels: Record<AgentRole, string>
   lmStudioFallback: boolean
@@ -63,6 +77,7 @@ interface AtlasState {
   refreshManuscriptTree: () => Promise<void>
   setActiveScene: (sceneId: string) => void
   setSceneSaveState: (state: 'saved' | 'saving') => void
+  setTheme: (theme: Theme) => void
   toggleTheme: () => void
   toggleFocusMode: () => void
   setAgentModel: (role: AgentRole, model: string) => void
@@ -107,7 +122,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     set({
       projectRoot,
       manifest,
-      theme: manifest.theme === 'night' ? 'night' : 'paper',
+      theme: normalizeTheme(manifest.theme),
       stage: 'app',
       activeSuggestions: [],
       queuedSuggestions: [],
@@ -197,7 +212,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     set({
       projectRoot: path,
       manifest,
-      theme: manifest.theme === 'night' ? 'night' : 'paper',
+      theme: normalizeTheme(manifest.theme),
       stage: 'app',
       activeSuggestions: [],
       queuedSuggestions: [],
@@ -213,7 +228,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     set({
       projectRoot,
       manifest,
-      theme: manifest.theme === 'night' ? 'night' : 'paper',
+      theme: normalizeTheme(manifest.theme),
       stage: 'app',
       activeSceneId: null,
       activeSuggestions: [],
@@ -234,7 +249,17 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
 
   setSceneSaveState: (state) => set({ sceneSaveState: state }),
 
-  toggleTheme: () => set((s) => ({ theme: s.theme === 'paper' ? 'night' : 'paper' })),
+  setTheme: (theme) => set({ theme }),
+
+  // Cycles Paper → Night → Typewriter → Paper — kept for the command
+  // palette's single "cycle theme" entry; AppShell's 3-way pill control
+  // uses setTheme directly to jump to a specific theme instead.
+  toggleTheme: () =>
+    set((s) => {
+      const currentIndex = THEMES.indexOf(s.theme)
+      const nextTheme = THEMES[(currentIndex + 1) % THEMES.length]
+      return { theme: nextTheme }
+    }),
 
   toggleFocusMode: () =>
     set((s) => {

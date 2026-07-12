@@ -1,10 +1,13 @@
 /* Ported from the Phase 1 prototype (Atlas.dc.html THEMES) — see
-   "Atlas Architecture and Data Contracts.md". Paper is default; Night is
-   opted into via a [data-theme="night"] attribute. Custom properties
-   cascade to descendants from wherever they're set, so the plain (non
-   :root-scoped) attribute selectors below work whether data-theme lands on
-   <html> or on a nested wrapper div (as AppShell and Landing do). Typewriter
-   theme is a Phase 4 concern per spec §10. */
+   "Atlas Architecture and Data Contracts.md". Paper is default; Night and
+   Typewriter are opted into via a [data-theme="night"/"typewriter"]
+   attribute. Custom properties cascade to descendants from wherever they're
+   set, so the plain (non :root-scoped) attribute selectors below work
+   whether data-theme lands on <html> or on a nested wrapper div (as
+   AppShell and Landing do). Typewriter (spec §10, Phase 4) is a
+   monospace-flavored, high-contrast, minimal-ornamentation theme — a
+   literal typewritten page rather than a color scheme, so its accent is
+   ink itself rather than a separate hue. */
 
 :root,
 [data-theme='paper'] {
@@ -47,6 +50,52 @@
   --c-red-soft: rgba(217, 122, 122, 0.14);
   --c-green: #7fbf8e;
   --c-green-soft: rgba(127, 191, 142, 0.14);
+}
+
+[data-theme='typewriter'] {
+  --c-bg: #f4f1e8;
+  --c-surface: #ece7d8;
+  --c-surface-raised: #faf8f0;
+  --c-ink: #1c1a15;
+  --c-ink-soft: rgba(28, 26, 21, 0.64);
+  --c-ink-faint: rgba(28, 26, 21, 0.42);
+  --c-border: rgba(28, 26, 21, 0.22);
+  --c-border-strong: rgba(28, 26, 21, 0.38);
+  --c-accent: #24211b;
+  --c-accent-soft: rgba(36, 33, 27, 0.1);
+  --c-accent-text: #24211b;
+  --c-page-bg: #faf7ee;
+  --c-amber: #8a5a12;
+  --c-amber-soft: rgba(138, 90, 18, 0.12);
+  --c-red: #8a3131;
+  --c-red-soft: rgba(138, 49, 49, 0.1);
+  --c-green: #3c6b40;
+  --c-green-soft: rgba(60, 107, 64, 0.12);
+}
+
+/* Typewriter's monospace flavor extends beyond custom properties, so it
+   can't be expressed purely via the token blocks above — body sits outside
+   the AppShell wrapper div that data-theme is set on (only <html> is a
+   proper ancestor of <body>), hence the html-scoped selector here mirroring
+   the useEffect in AppShell.tsx that keeps <html>'s attribute in sync. */
+html[data-theme='typewriter'] body {
+  font-family:
+    'Courier New',
+    ui-monospace,
+    'Cascadia Mono',
+    'JetBrains Mono',
+    monospace;
+  letter-spacing: 0.02em;
+}
+
+[data-theme='typewriter'] .manuscript-page {
+  font-family:
+    'Courier New',
+    ui-monospace,
+    'Cascadia Mono',
+    'JetBrains Mono',
+    monospace;
+  letter-spacing: 0.015em;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -92,4 +141,19 @@ select:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
+}
+
+/* Distraction-free mode hides all chrome, including the word count normally
+   shown in AppShell's bottom bar (spec: "Word count may appear on hover or
+   keyboard focus"). Invisible by default; a hover or keyboard focus reveals
+   it without permanently reintroducing chrome. */
+.focus-word-count {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.focus-word-count:hover,
+.focus-word-count:focus-within,
+.focus-word-count:focus {
+  opacity: 1;
 }
