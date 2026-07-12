@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AgentGoal, AgentRole } from '@shared/schema/agent'
+import { encodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { PreflightDialog } from './PreflightDialog'
+import { WorldBuilderInterview } from './WorldBuilderInterview'
 import { useAtlasStore } from '../state/store'
 
 interface AgentDef {
@@ -29,6 +31,7 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   const currentRunSteps = useAtlasStore((s) => s.currentRunSteps)
   const [expandedRole, setExpandedRole] = useState<AgentRole | null>(null)
   const [preflight, setPreflight] = useState<{ agent: AgentDef; selectionText: string } | null>(null)
+  const [interviewOpen, setInterviewOpen] = useState(false)
   const navigate = useNavigate()
 
   const runInFlight =
@@ -36,7 +39,11 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
       ? { agentRole: currentRunGoal.agentRole, runId: currentRunGoal.runId, stepCount: currentRunSteps.length, goal: currentRunGoal }
       : null
 
-  function startRun(agent: AgentDef, selectionText: string): void {
+  // Shared by both the "Invoke on scene" flow (a raw manuscript selection)
+  // and the World Builder interview flow (a marker-encoded interview
+  // payload, see startInterviewRun below) — both just need an AgentGoal
+  // built and dispatched the same way.
+  function runAgent(agent: AgentDef, selectionText: string, userIntent: string): void {
     const runId = crypto.randomUUID()
     const goal: AgentGoal = {
       runId,
@@ -46,7 +53,7 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
       // reachable seam (see main/agent/providers/) for a future integration,
       // not something any goal built here should route through today.
       modelRef: { provider: 'anthropic', modelId: agentModels[agent.role], viaOpenRouter: false },
-      userIntent: `Send selected text to ${agent.name}`,
+      userIntent,
       scope: { sceneIds: [sceneId], selectionText },
       constraints: {
         maxTurns: 4,
@@ -60,6 +67,14 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
     startAgentRun(goal)
     void window.atlas.agentRuns.start(goal)
     window.atlas.agentRuns.onStep(runId, (step) => handleAgentStep(runId, step))
+  }
+
+  function startRun(agent: AgentDef, selectionText: string): void {
+    runAgent(agent, selectionText, `Send selected text to ${agent.name}`)
+  }
+
+  function startInterviewRun(agent: AgentDef, answers: WorldBuilderInterviewAnswers): void {
+    runAgent(agent, encodeWorldBuilderInterview(answers), `Run World Builder interview for a ${genreTemplateLabel(answers.genreTemplate)}`)
   }
 
   return (
@@ -193,6 +208,25 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
                         Configure
                       </button>
                     </div>
+                    {agent.role === 'World-Builder' && (
+                      <button
+                        onClick={() => setInterviewOpen(true)}
+                        style={{
+                          width: '100%',
+                          marginTop: 8,
+                          padding: '7px 0',
+                          borderRadius: 7,
+                          border: '1px solid var(--c-border)',
+                          background: 'var(--c-accent-soft)',
+                          color: 'var(--c-accent-text)',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Start world interview
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -211,6 +245,17 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
             setPreflight(null)
           }}
           onCancel={() => setPreflight(null)}
+        />
+      )}
+
+      {interviewOpen && (
+        <WorldBuilderInterview
+          onSubmit={(answers) => {
+            const worldBuilder = AGENTS.find((a) => a.role === 'World-Builder')
+            if (worldBuilder) startInterviewRun(worldBuilder, answers)
+            setInterviewOpen(false)
+          }}
+          onCancel={() => setInterviewOpen(false)}
         />
       )}
     </div>

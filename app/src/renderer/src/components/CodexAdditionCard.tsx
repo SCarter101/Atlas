@@ -3,6 +3,13 @@ import type { AgentRole, SuggestionRef } from '@shared/schema/agent'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { useAtlasStore } from '../state/store'
 
+const RELIABILITY_LABEL: Record<'low' | 'medium' | 'high' | 'author-stated', string> = {
+  low: 'low reliability',
+  medium: 'medium reliability',
+  high: 'high reliability',
+  'author-stated': 'from your interview answers'
+}
+
 const STATE_BADGE: Record<SuggestionRef['state'], { bg: string; color: string; label: string }> = {
   pending: { bg: 'var(--c-amber-soft)', color: 'var(--c-amber)', label: 'Open' },
   accepted: { bg: 'var(--c-green-soft)', color: 'var(--c-green)', label: 'Accepted' },
@@ -39,7 +46,13 @@ export function CodexAdditionCard({ suggestion }: { suggestion: SuggestionRef })
     entryType: string
     name: string
     summary: string
-    citations?: { note: string; reliability?: 'low' | 'medium' | 'high' }[]
+    // 'author-stated' is distinct from the low/medium/high research-quality
+    // tiers — it marks a proposal synthesized directly from the writer's own
+    // World Builder interview answers (see deriveWorldBuilderProposals in
+    // main/agent/simulator.ts), never fabricated or web-researched, so it
+    // shouldn't be lumped in with (or mistaken for) a "low reliability"
+    // guess the way the plain single-selection flow's proposals are.
+    citations?: { note: string; reliability?: 'low' | 'medium' | 'high' | 'author-stated' }[]
   }
   const isResolved = suggestion.state === 'accepted' || suggestion.state === 'rejected'
   const badge = STATE_BADGE[suggestion.state]
@@ -93,7 +106,7 @@ export function CodexAdditionCard({ suggestion }: { suggestion: SuggestionRef })
           {payload.citations.map((c, i) => (
             <div key={i} style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', lineHeight: 1.4 }}>
               {c.note}
-              {c.reliability ? ` (reliability: ${c.reliability})` : ''}
+              {c.reliability ? ` (${RELIABILITY_LABEL[c.reliability]})` : ''}
             </div>
           ))}
         </div>
