@@ -19,6 +19,8 @@ import { saveAgentRun } from '../persistence/agentRunStore'
 import { listCodexEntries } from '../persistence/codexStore'
 import { readScene } from '../persistence/sceneStore'
 import { configuredMcpServers } from '@shared/mcp'
+import type { CodexEntryType } from '@shared/schema/codex'
+import { decodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { listCapabilities } from '../capabilities/registry'
 import { runSandboxed } from '../capabilities/sandbox'
 import { getSeedTool } from '../capabilities/seedTools'
@@ -752,14 +754,25 @@ export class AgentRunManager {
     if (await this.guardToolCall(goal, 'World Builder')) return
 
     const selection = goal.scope.selectionText ?? ''
-    const toolInput = { selection }
+
+    // A goal built from the World Builder interview wizard (see
+    // WorldBuilderInterview.tsx / AgentRail.tsx) carries the compiled
+    // interview answers marker-encoded into selectionText rather than a raw
+    // manuscript selection — decodeWorldBuilderInterview() returns null for
+    // an ordinary selection (or anything malformed), which is the signal to
+    // fall back to the original single-selection proper-noun-guess flow.
+    const interview = decodeWorldBuilderInterview(selection)
+    const modelCallContextText = interview ? interviewContextText(interview) : selection
+    const toolInput = interview ? { interviewGenreTemplate: interview.genreTemplate } : { selection }
     if (
       await this.guardDuplicateAction(goal, 'World Builder', toolSignature('global.tools.world-research@1.0.0', toolInput))
     ) {
       return
     }
 
-    const suggestions = simulateCodexAdditions(selection, goal.scope.sceneIds?.[0])
+    const suggestions = interview
+      ? deriveWorldBuilderProposals(interview, goal.scope.sceneIds?.[0])
+      : simulateCodexAdditions(selection, goal.scope.sceneIds?.[0])
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.world-research@1.0.0',
@@ -774,7 +787,7 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
-    const modelCall = await this.runModelCallStep(goal, selection)
+    const modelCall = await this.runModelCallStep(goal, modelCallContextText)
     if (await this.guardModelCall(goal, 'World Builder', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1070,4 +1083,174 @@ function simulateCodexAdditions(selection: string, sceneId?: string): Suggestion
       state: 'pending'
     }
   ]
+}
+
+// Concatenates the interview's free-text answers into one context string for
+// the (simulated) model-call token/cost estimate — deliberately the answer
+// text alone, not the marker-prefixed JSON blob stored in
+// AgentGoal.scope.selectionText, so budget math reflects what a real
+// synthesis call would actually be fed rather than JSON syntax overhead.
+function interviewContextText(interview: WorldBuilderInterviewAnswers): string {
+  return [
+    interview.worldGrounding,
+    interview.sensoryDetail,
+    interview.characterImpact,
+    interview.plotPressure,
+    interview.consistencyFacts,
+    interview.flexibleRules
+  ]
+    .filter((t) => t.trim().length > 0)
+    .join(' ')
+}
+
+// Per genre template, the CodexEntryType used for the "how this world's
+// social/political structure bears on the story" proposal (spec §7.5:
+// "propose ... political systems, religions, economies, and cultural
+// norms when necessary" — there is no dedicated CodexEntryType for those,
+// so 'faction' is the closest existing fit for a social-structure entry,
+// except historical-setting, where a 'timeline-item' — the setting's real
+// (or real-feeling) historical throughline — is the more natural fit.
+const SOCIETY_ENTRY_TYPE: Record<WorldBuilderInterviewAnswers['genreTemplate'], CodexEntryType> = {
+  'fantasy-kingdom': 'faction',
+  'sci-fi-colony': 'faction',
+  'space-opera-setting': 'faction',
+  'crime-city': 'faction',
+  'thriller-environment': 'faction',
+  'historical-setting': 'timeline-item',
+  'contemporary-town': 'faction',
+  custom: 'faction'
+}
+
+function worldBuilderCitation(topic: string): { note: string; reliability: 'author-stated' } {
+  return {
+    // Distinct from simulateCodexAdditions' 'low'-reliability regex guess
+    // above: this is synthesized directly from what the writer told the
+    // interview, not fabricated or web-researched, so it gets its own
+    // provenance label rather than being (mis)represented as a low-quality
+    // research citation. See CodexAdditionCard.tsx for how this renders.
+    note: `Synthesized directly from your World Builder interview answer on "${topic}" — not researched or fabricated.`,
+    reliability: 'author-stated'
+  }
+}
+
+function worldBuilderProposal(
+  runId: string,
+  sceneId: string | undefined,
+  entryType: CodexEntryType,
+  name: string,
+  summary: string,
+  citations: Array<{ note: string; reliability: 'author-stated' }>
+): SuggestionRef {
+  return {
+    id: randomUUID(),
+    agentRole: 'World-Builder',
+    kind: 'codex-addition',
+    targetSceneId: sceneId,
+    payload: { entryType, name, summary, citations },
+    provenance: { capabilityId: 'global.tools.world-research', capabilityVersion: '1.0.0', runId },
+    state: 'pending'
+  }
+}
+
+// Turns a compiled World Builder interview into 2-4 proposed Codex entries
+// (spec §7.5: "propose maps, timelines, family trees, political systems,
+// religions, economies, and cultural norms when necessary" — plural, not a
+// single guess). Two entries (world rules, location) are always proposed
+// since the interview always covers those topics; the social-structure and
+// timeline entries are only added when the writer's answers actually
+// support them, matching the spec's "when necessary" qualifier rather than
+// padding out to 4 unconditionally. Exported so
+// simulator.worldBuilder.test.ts can exercise it directly as a pure
+// function, the same way detectDuplicateAction is tested above.
+export function deriveWorldBuilderProposals(
+  interview: WorldBuilderInterviewAnswers,
+  sceneId?: string
+): SuggestionRef[] {
+  const runId = randomUUID()
+  const genreLabel = genreTemplateLabel(interview.genreTemplate)
+
+  const consistency = interview.consistencyFacts.trim()
+  const flexible = interview.flexibleRules.trim()
+  const grounding = interview.worldGrounding.trim()
+  const sensory = interview.sensoryDetail.trim()
+  const impact = interview.characterImpact.trim()
+  const pressure = interview.plotPressure.trim()
+
+  const proposals: SuggestionRef[] = []
+
+  // 1. World-rule entry — always proposed.
+  proposals.push(
+    worldBuilderProposal(
+      runId,
+      sceneId,
+      'world-rule',
+      `${genreLabel} — World Rules`,
+      [
+        consistency
+          ? `Must remain consistent: ${consistency}`
+          : 'No consistency constraints captured yet — revisit this entry once you know what can never contradict itself.',
+        flexible ? `Flexible, tentative, or locked: ${flexible}` : ''
+      ]
+        .filter(Boolean)
+        .join(' '),
+      [worldBuilderCitation('what facts must remain consistent')]
+    )
+  )
+
+  // 2. Location entry — always proposed. Reuses the same proper-noun guess
+  // simulateCodexAdditions uses above for a plausible entry name when the
+  // writer's answer doesn't make one obvious.
+  const properNoun = grounding.match(/\b[A-Z][a-zA-Z'-]{2,}\b/)?.[0]
+  proposals.push(
+    worldBuilderProposal(
+      runId,
+      sceneId,
+      'location',
+      properNoun ?? `${genreLabel} Setting`,
+      [
+        grounding || `A ${genreLabel.toLowerCase()} not yet described in detail.`,
+        sensory ? `Sensory detail: ${sensory}` : ''
+      ]
+        .filter(Boolean)
+        .join(' '),
+      [worldBuilderCitation('what kind of world grounds this story')]
+    )
+  )
+
+  // 3. Social-structure entry — only when the writer gave something to
+  // draw on.
+  const societyType = SOCIETY_ENTRY_TYPE[interview.genreTemplate]
+  if (impact.length > 0 || pressure.length > 0) {
+    proposals.push(
+      worldBuilderProposal(
+        runId,
+        sceneId,
+        societyType,
+        `${genreLabel} — Social Order`,
+        [impact ? `Affects characters: ${impact}` : '', pressure ? `Plot pressure: ${pressure}` : '']
+          .filter(Boolean)
+          .join(' '),
+        [worldBuilderCitation('how this world affects your characters and the plot')]
+      )
+    )
+  }
+
+  // 4. Timeline entry — only when the plot-pressure answer is substantial
+  // enough to suggest a real temporal throughline worth tracking as its own
+  // entry, rather than proposing one from a one-line answer.
+  if (pressure.length > 40) {
+    const timelineType: CodexEntryType = societyType === 'timeline-item' ? 'faction' : 'timeline-item'
+    proposals.push(
+      worldBuilderProposal(
+        runId,
+        sceneId,
+        timelineType,
+        `${genreLabel} — Timeline Pressure`,
+        `Pressure on the plot's timeline: ${pressure}`,
+        [worldBuilderCitation('what pressures this world places on the plot')]
+      )
+    )
+  }
+
+  return proposals.slice(0, 4)
 }
