@@ -1,8 +1,10 @@
+import { useNavigate } from 'react-router-dom'
 import { useAtlasStore } from '../state/store'
 
 export function Landing(): JSX.Element {
   const openSampleProject = useAtlasStore((s) => s.openSampleProject)
   const startNewProject = useAtlasStore((s) => s.startNewProject)
+  const navigate = useNavigate()
 
   return (
     <div
@@ -69,7 +71,14 @@ export function Landing(): JSX.Element {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
             <button
-              onClick={() => void openSampleProject()}
+              onClick={() => {
+                // Spec §2 Phase 1 acceptance criteria: the sample project's
+                // default opening state must be the Manuscript view with its
+                // open Story Editor report and tracked changes visible, not
+                // the Dashboard — the "/" route's default redirect goes to
+                // /dashboard, so this explicit navigate is needed here.
+                void openSampleProject().then(() => navigate('/manuscript'))
+              }}
               style={{
                 textAlign: 'left',
                 padding: 22,
