@@ -88,7 +88,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             border: 'none',
             borderBottom: '1px solid var(--c-border)',
             fontSize: 14,
-            outline: 'none',
             background: 'transparent',
             color: 'var(--c-ink)'
           }}
