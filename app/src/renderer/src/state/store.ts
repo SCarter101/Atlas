@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AgentGoal, AgentRole, AgentStep, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
+import type { AgentGoal, AgentRole, AgentStep, MetadataProposalPayload, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import type { FoundationsCodexDraft } from '@shared/ipc'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest } from '@shared/schema/project'
@@ -378,6 +378,19 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
         await window.atlas.snapshots.create(suggestion.targetSceneId, prose, 'Before suggestion accepted')
         await window.atlas.scenes.write(suggestion.targetSceneId, { prose: nextProse })
         set((s) => ({ sceneProseVersion: s.sceneProseVersion + 1 }))
+      } else if (suggestion.kind === 'metadata-proposal') {
+        // Spec Phase 4 (~line 183): the writer must approve before proposed
+        // metadata is applied — this only runs on accept. Reuses the same
+        // scenes.write({ meta }) call SceneWritePatch already supports (the
+        // same IPC channel scenes.write uses for prose, just the `meta`
+        // field) and the same snapshot-before-write pattern as the other two
+        // branches, then refreshes the tree so SceneMetadataPanel picks up
+        // the new values immediately.
+        const payload = suggestion.payload as MetadataProposalPayload
+        const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
+        await window.atlas.snapshots.create(suggestion.targetSceneId, prose, 'Before suggestion accepted')
+        await window.atlas.scenes.write(suggestion.targetSceneId, { meta: payload.proposedMeta })
+        await get().refreshManuscriptTree()
       }
     }
 

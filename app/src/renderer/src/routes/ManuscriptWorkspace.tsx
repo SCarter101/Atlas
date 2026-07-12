@@ -9,6 +9,7 @@ import { EditorialFindingCard } from '../components/EditorialFindingCard'
 import { GeneratorSuggestionCard } from '../components/GeneratorSuggestionCard'
 import { DialogueAlternativeCard } from '../components/DialogueAlternativeCard'
 import { CodexAdditionCard } from '../components/CodexAdditionCard'
+import { MetadataProposalCard } from '../components/MetadataProposalCard'
 import { PermissionDialog } from '../components/PermissionDialog'
 import { SceneMetadataPanel } from '../components/SceneMetadataPanel'
 import { useAtlasStore } from '../state/store'
@@ -125,6 +126,7 @@ export function ManuscriptWorkspace(): JSX.Element {
   const insertions = sceneSuggestions.filter((s) => s.kind === 'insertion')
   const dialogueAlternatives = sceneSuggestions.filter((s) => s.kind === 'dialogue-alternative')
   const codexAdditions = sceneSuggestions.filter((s) => s.kind === 'codex-addition')
+  const metadataProposals = sceneSuggestions.filter((s) => s.kind === 'metadata-proposal')
   const orderedSuggestions = orderSuggestionsForReview(sceneSuggestions)
 
   useEffect(() => {
@@ -294,7 +296,8 @@ export function ManuscriptWorkspace(): JSX.Element {
               trackedChanges.length > 0 ||
               insertions.length > 0 ||
               dialogueAlternatives.length > 0 ||
-              codexAdditions.length > 0) && (
+              codexAdditions.length > 0 ||
+              metadataProposals.length > 0) && (
               <div>
                 <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 10 }}>
                   Comments &amp; Tracked Changes
@@ -361,7 +364,7 @@ export function ManuscriptWorkspace(): JSX.Element {
                 )}
 
                 {codexAdditions.length > 0 && (
-                  <div>
+                  <div style={{ marginBottom: metadataProposals.length > 0 ? 16 : 0 }}>
                     <SectionHeader
                       label={`${ROLE_NAME[codexAdditions[0].agentRole]} — Codex Additions`}
                       items={codexAdditions}
@@ -371,6 +374,17 @@ export function ManuscriptWorkspace(): JSX.Element {
                       <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>
                         <CodexAdditionCard suggestion={s} />
                       </div>
+                    ))}
+                  </div>
+                )}
+
+                {metadataProposals.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
+                      {ROLE_NAME[metadataProposals[0].agentRole]} — Proposed Metadata
+                    </div>
+                    {metadataProposals.map((s) => (
+                      <MetadataProposalCard key={s.id} suggestion={s} />
                     ))}
                   </div>
                 )}

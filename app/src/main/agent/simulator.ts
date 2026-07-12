@@ -4,6 +4,8 @@ import type {
   AgentResult,
   AgentRunRecord,
   AgentStep,
+  EditorialFindingPayload,
+  MetadataProposalPayload,
   ModelCallSummary,
   ModelRef,
   PermissionDecision,
@@ -11,9 +13,11 @@ import type {
   SuggestionRef,
   ToolCall
 } from '@shared/schema/agent'
+import type { SceneCraftMeta, SceneMeta } from '@shared/schema/manuscript'
 import type { AtlasDb } from '../persistence/db'
 import { saveAgentRun } from '../persistence/agentRunStore'
 import { listCodexEntries } from '../persistence/codexStore'
+import { readScene } from '../persistence/sceneStore'
 import { configuredMcpServers } from '@shared/mcp'
 import { listCapabilities } from '../capabilities/registry'
 import { runSandboxed } from '../capabilities/sandbox'
@@ -535,6 +539,14 @@ export class AgentRunManager {
     // replacing them.
     const contradictionNote = await this.checkCodexContradictions(goal)
 
+    // Phase 4 (spec ~line 183): Story Editor may also propose scene metadata
+    // based on the current draft, but the writer must approve — so this is
+    // only ever a pending `metadata-proposal` suggestion, never a direct
+    // write. Reads the target scene's real current metadata to decide what's
+    // worth proposing (see proposeSceneMetadataPatch); silently skipped if
+    // there's no target scene or it can't be read (e.g. not yet indexed).
+    const metadataSuggestion = await this.proposeMetadataSuggestion(goal, selection)
+
     const toolCall: ToolCall = {
       toolId: 'global.tools.structural-analysis@1.0.0',
       input: toolInput,
@@ -558,11 +570,13 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
+    const allSuggestions = metadataSuggestion ? [...suggestions, metadataSuggestion] : suggestions
+
     const result: AgentResult = {
       summary: `Story Editor found ${suggestions.length} structural note${suggestions.length === 1 ? '' : 's'}.${
         contradictionNote ? ` ${contradictionNote.summary}` : ''
-      }`,
-      proposedManuscriptChanges: suggestions,
+      }${metadataSuggestion ? ' Also proposed a scene metadata update for the writer to review.' : ''}`,
+      proposedManuscriptChanges: allSuggestions,
       warnings: contradictionNote ? [contradictionNote.summary] : undefined
     }
     this.emit(goal.runId, {
@@ -601,6 +615,31 @@ export class AgentRunManager {
       return {
         summary: `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} detected in the Codex.`,
         contradictions
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  // Reads the target scene's real current SceneMeta and, if there is one,
+  // derives a metadata-proposal suggestion from it via
+  // proposeSceneMetadataPatch (the pure, testable heuristic below). No
+  // target scene, or a scene that can't be read (not yet indexed, e.g. in
+  // tests that don't seed one), simply means no proposal this run.
+  private async proposeMetadataSuggestion(goal: AgentGoal, selection: string): Promise<SuggestionRef | undefined> {
+    const sceneId = goal.scope.sceneIds?.[0]
+    if (!sceneId) return undefined
+    try {
+      const { meta } = await readScene(this.projectRoot, this.db, sceneId)
+      const { proposedMeta, rationale } = proposeSceneMetadataPatch(meta, selection)
+      return {
+        id: randomUUID(),
+        agentRole: 'Dev-Editor',
+        kind: 'metadata-proposal',
+        targetSceneId: sceneId,
+        payload: { proposedMeta, rationale } satisfies MetadataProposalPayload,
+        provenance: { capabilityId: 'global.tools.structural-analysis', capabilityVersion: '1.0.0', runId: goal.runId },
+        state: 'pending'
       }
     } catch {
       return undefined
@@ -869,22 +908,28 @@ function simulateGeneratorContinuation(selection: string, sceneId?: string): Sug
 
 // Heuristic structural pass styled on the Phase 1 prototype's Story Editor
 // sample findings — a single deterministic check (dialogue presence) with a
-// generic pacing note as the fallback, not a real model call.
+// generic pacing note as the fallback, not a real model call. Each canned
+// finding is tagged with `craftConceptIds` referencing
+// renderer/src/lib/craftReference.ts's CRAFT_CONCEPTS (spec Phase 4 ~line
+// 847), so EditorialFindingCard.tsx can offer a short reference chip instead
+// of leaving the finding unexplained.
 function simulateStructuralFindings(selection: string, sceneId?: string): SuggestionRef[] {
   const runId = randomUUID()
   const trimmed = selection.trim()
   const hasDialogue = /["“”]/.test(trimmed)
 
-  const finding = hasDialogue
+  const finding: EditorialFindingPayload = hasDialogue
     ? {
         title: 'Pacing check',
         body: 'This passage alternates dialogue and action — confirm the beat lands where intended before moving on to the next scene.',
-        severity: 'low'
+        severity: 'low',
+        craftConceptIds: ['pacing', 'scene-turns']
       }
     : {
         title: 'No dialogue in this passage',
         body: 'This selection reads as pure narration with no dialogue. If characters are present, consider whether a line of dialogue would ground the reader more directly in the scene.',
-        severity: trimmed.length > 0 ? 'medium' : 'low'
+        severity: trimmed.length > 0 ? 'medium' : 'low',
+        craftConceptIds: ['point-of-view', 'pacing']
       }
 
   return [
@@ -898,6 +943,64 @@ function simulateStructuralFindings(selection: string, sceneId?: string): Sugges
       state: 'pending'
     }
   ]
+}
+
+// Deterministic, testable heuristic behind the Dev-Editor role's
+// metadata-proposal suggestion (spec Phase 4 ~line 183: agents may propose
+// metadata based on the current draft, but the writer must approve). Not a
+// real model call — walks a fixed priority order of SceneCraftMeta fields,
+// proposes a value for the first one that's still empty on the target scene,
+// and derives a short placeholder value from the selection's last sentence
+// (or a generic prompt when there's nothing to anchor on). Deliberately
+// simple, matching the house style of simulateStructuralFindings /
+// simulateGeneratorContinuation above.
+const CRAFT_FIELD_PRIORITY: (keyof SceneCraftMeta)[] = [
+  'stakes',
+  'turningPoint',
+  'characterDesire',
+  'externalGoal',
+  'internalConflict',
+  'opposition',
+  'outcome',
+  'emotionalShift',
+  'revealedInformation'
+]
+
+const CRAFT_FIELD_LABEL: Record<keyof SceneCraftMeta, string> = {
+  characterDesire: 'character desire',
+  externalGoal: 'external goal',
+  internalConflict: 'internal conflict',
+  opposition: 'opposition',
+  stakes: 'stakes',
+  turningPoint: 'turning point',
+  outcome: 'outcome',
+  emotionalShift: 'emotional shift',
+  revealedInformation: 'revealed information'
+}
+
+export function proposeSceneMetadataPatch(
+  meta: SceneMeta,
+  selection: string
+): { proposedMeta: Partial<SceneMeta>; rationale: string } {
+  const craft = meta.craft ?? {}
+  const targetField = CRAFT_FIELD_PRIORITY.find((field) => !craft[field]) ?? CRAFT_FIELD_PRIORITY[0]
+  const wasEmpty = !craft[targetField]
+
+  const trimmed = selection.trim()
+  const sentences = trimmed.split(/(?<=[.!?])\s+/).filter(Boolean)
+  const anchor = sentences[sentences.length - 1] ?? trimmed
+
+  const value =
+    anchor.length > 0
+      ? `Placeholder, review before accepting: ${anchor}`
+      : `Placeholder — no selection to draw from; fill in the scene's ${CRAFT_FIELD_LABEL[targetField]} directly.`
+
+  return {
+    proposedMeta: { craft: { ...craft, [targetField]: value } },
+    rationale: wasEmpty
+      ? `This scene's "${CRAFT_FIELD_LABEL[targetField]}" field is empty — this passage suggests a starting point.`
+      : `Every Story Craft field already has a value, so "${CRAFT_FIELD_LABEL[targetField]}" was re-evaluated against this passage — confirm or refine before accepting.`
+  }
 }
 
 // Deterministic string-transform "alternatives" — a stand-in for a real

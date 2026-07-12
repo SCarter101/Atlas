@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import type { AgentRole, SuggestionRef } from '@shared/schema/agent'
+import type { AgentRole, EditorialFindingPayload, SuggestionRef } from '@shared/schema/agent'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { useAtlasStore } from '../state/store'
+import { CRAFT_CONCEPTS } from '../lib/craftReference'
 
 const STATE_BADGE: Record<SuggestionRef['state'], { bg: string; color: string; label: string }> = {
   pending: { bg: 'var(--c-amber-soft)', color: 'var(--c-amber)', label: 'Open' },
@@ -40,7 +41,7 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
 
-  const payload = suggestion.payload as { title: string; body: string; severity: string }
+  const payload = suggestion.payload as EditorialFindingPayload
   // 'rejected'/'fixed' are terminal — no further action. 'accepted' still
   // gets one action (Mark Fixed): accepting a finding only acknowledges it,
   // it doesn't touch the manuscript (see store.ts's setSuggestionState), so
@@ -49,6 +50,8 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
   const isTerminal = suggestion.state === 'rejected' || suggestion.state === 'fixed'
   const isResolved = isTerminal || suggestion.state === 'accepted'
   const badge = STATE_BADGE[suggestion.state]
+  const craftConcepts = (payload.craftConceptIds ?? []).map((id) => CRAFT_CONCEPTS[id]).filter(Boolean)
+  const [openConceptId, setOpenConceptId] = useState<string | null>(null)
 
   return (
     <div
@@ -86,6 +89,46 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
       </div>
       <div style={{ fontSize: 12, color: 'var(--c-ink-soft)', lineHeight: 1.5, marginBottom: 10 }}>{payload.body}</div>
       <div style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', marginBottom: 10 }}>Severity: {payload.severity}</div>
+
+      {craftConcepts.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {craftConcepts.map((concept) => (
+              <button
+                key={concept.id}
+                onClick={() => setOpenConceptId((cur) => (cur === concept.id ? null : concept.id))}
+                style={{
+                  fontSize: 10.5,
+                  padding: '3px 9px',
+                  borderRadius: 12,
+                  border: '1px solid var(--c-border)',
+                  background: openConceptId === concept.id ? 'var(--c-accent-soft)' : 'transparent',
+                  color: openConceptId === concept.id ? 'var(--c-accent-text)' : 'var(--c-ink-faint)',
+                  cursor: 'pointer'
+                }}
+              >
+                {concept.label} {openConceptId === concept.id ? '▾' : '▸'}
+              </button>
+            ))}
+          </div>
+          {openConceptId && craftConcepts.some((c) => c.id === openConceptId) && (
+            <div
+              style={{
+                marginTop: 6,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: 'var(--c-surface)',
+                border: '1px solid var(--c-border)',
+                fontSize: 11.5,
+                color: 'var(--c-ink-soft)',
+                lineHeight: 1.5
+              }}
+            >
+              {craftConcepts.find((c) => c.id === openConceptId)?.explainer}
+            </div>
+          )}
+        </div>
+      )}
 
       {!isResolved && refining && (
         <>
