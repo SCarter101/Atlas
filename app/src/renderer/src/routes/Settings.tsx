@@ -45,6 +45,8 @@ export function Settings(): JSX.Element {
   const toggleLmStudioFallback = useAtlasStore((s) => s.toggleLmStudioFallback)
   const advancedMode = useAtlasStore((s) => s.advancedMode)
   const toggleAdvancedMode = useAtlasStore((s) => s.toggleAdvancedMode)
+  const sessionApprovals = useAtlasStore((s) => s.sessionApprovals)
+  const revokeSessionApproval = useAtlasStore((s) => s.revokeSessionApproval)
 
   const [apiKey, setApiKey] = useState('')
 
@@ -156,6 +158,61 @@ export function Settings(): JSX.Element {
               onChange={toggleLmStudioFallback}
             />
             <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginTop: 6 }}>Connection status: not connected</div>
+          </Section>
+
+          {/* Spec §13/§10: session-scoped capability approvals must remain
+              visible and revocable for the life of the session. */}
+          <Section title="Session approvals">
+            {sessionApprovals.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>
+                No session approvals yet — they'll appear here after you choose "Approve for session" on a permission
+                request.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {sessionApprovals.map((approval) => (
+                  <div
+                    key={approval.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '12px 16px',
+                      borderRadius: 10,
+                      border: '1px solid var(--c-border)',
+                      background: 'var(--c-surface-raised)'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{approval.capabilityId}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--c-ink-soft)' }}>
+                        {approval.actionType} · {approval.dataScope}
+                        {approval.destination ? ` · ${approval.destination}` : ''}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--c-ink-faint)', marginTop: 2 }}>
+                        Granted {new Date(approval.grantedAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => revokeSessionApproval(approval.id)}
+                      style={{
+                        padding: '7px 14px',
+                        borderRadius: 7,
+                        border: '1px solid var(--c-border)',
+                        background: 'transparent',
+                        color: 'var(--c-ink-soft)',
+                        fontSize: 12.5,
+                        cursor: 'pointer',
+                        flexShrink: 0
+                      }}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </Section>
 
           <PromptEditorSection />
