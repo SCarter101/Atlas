@@ -41,7 +41,11 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
     const goal: AgentGoal = {
       runId,
       agentRole: agent.role,
-      modelRef: { provider: 'openrouter', modelId: agentModels[agent.role], viaOpenRouter: true },
+      // Provider is 'anthropic' (not 'openrouter'/'lm-studio') because model
+      // calls are simulated in this build — those two providers are a real,
+      // reachable seam (see main/agent/providers/) for a future integration,
+      // not something any goal built here should route through today.
+      modelRef: { provider: 'anthropic', modelId: agentModels[agent.role], viaOpenRouter: false },
       userIntent: `Send selected text to ${agent.name}`,
       scope: { sceneIds: [sceneId], selectionText },
       constraints: {

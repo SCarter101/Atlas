@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { is } from './is'
+import { installSeedCapabilities } from './capabilities/seedTools'
 import { registerIpcHandlers } from './ipc/handlers'
 
 // Built main entry lives at out/main/index.js, so __dirname is out/main both
@@ -56,11 +57,22 @@ function createWindow(): BrowserWindow {
   return window
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   // app.getName() / OS-level naming (e.g. macOS menu bar). Windows taskbar
   // grouping additionally needs an explicit AppUserModelID.
   app.setName('Atlas')
   app.setAppUserModelId('com.atlas.desktop')
+
+  // Spec §7 Phase 3 development-mode seed capabilities — idempotent (see
+  // installSeedCapabilities' existsSync guard), so this is safe to run on
+  // every launch. Failure here (e.g. an unwritable userData path) is logged
+  // and swallowed rather than crashing the app — the Tool & Skill Library
+  // just starts without the three seed tools in that case.
+  try {
+    await installSeedCapabilities()
+  } catch (err) {
+    console.error('[capabilities] failed to install seed capabilities', err)
+  }
   // NOTE: in unpackaged dev mode (`npm run dev`), Windows will still show
   // "Electron.exe" as the underlying binary's file description in some
   // places (e.g. hovering the taskbar icon) — that string is embedded in

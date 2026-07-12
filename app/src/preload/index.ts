@@ -26,7 +26,14 @@ const atlasBridge: AtlasBridge = {
     delete: (entryId, entryType) => ipcRenderer.invoke(IpcChannel.CodexDelete, entryId, entryType)
   },
   capabilities: {
-    list: () => ipcRenderer.invoke(IpcChannel.CapabilitiesList)
+    list: () => ipcRenderer.invoke(IpcChannel.CapabilitiesList),
+    create: (manifest) => ipcRenderer.invoke(IpcChannel.CapabilitiesCreate, manifest),
+    update: (manifest) => ipcRenderer.invoke(IpcChannel.CapabilitiesUpdate, manifest),
+    setLifecycleState: (id, state) => ipcRenderer.invoke(IpcChannel.CapabilitiesSetLifecycleState, id, state)
+  },
+  permissions: {
+    list: () => ipcRenderer.invoke(IpcChannel.PermissionsList),
+    revoke: (id) => ipcRenderer.invoke(IpcChannel.PermissionsRevoke, id)
   },
   agentRuns: {
     start: (goal) => ipcRenderer.invoke(IpcChannel.AgentRunStart, goal),

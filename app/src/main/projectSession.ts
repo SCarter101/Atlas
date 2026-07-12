@@ -1,6 +1,7 @@
 import type { AtlasDb } from './persistence/db'
 import { openIndexDb } from './persistence/db'
 import { AgentRunManager } from './agent/simulator'
+import { SessionApprovalStore } from './permissions/sessionApprovals'
 
 // Atlas opens one project at a time in this build (matches the Phase 2
 // scope — multi-project/multi-window is not required yet). This object is
@@ -10,12 +11,14 @@ export class ProjectSession {
   private constructor(
     readonly projectRoot: string,
     readonly db: AtlasDb,
-    readonly agentRuns: AgentRunManager
+    readonly agentRuns: AgentRunManager,
+    readonly approvals: SessionApprovalStore
   ) {}
 
   static async create(projectRoot: string): Promise<ProjectSession> {
     const db = await openIndexDb(projectRoot)
-    return new ProjectSession(projectRoot, db, new AgentRunManager(projectRoot, db))
+    const approvals = new SessionApprovalStore()
+    return new ProjectSession(projectRoot, db, new AgentRunManager(projectRoot, db, approvals), approvals)
   }
 
   close(): void {
