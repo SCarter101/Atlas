@@ -75,7 +75,7 @@ function diffRows(
         field: key,
         label: FIELD_LABEL[key] ?? key,
         proposedValue: String(value),
-        currentValue: currentCraft ? currentCraft[key as keyof SceneCraftMeta] : undefined
+        currentValue: currentCraft ? currentCraft[key as keyof SceneCraftMeta]?.toString() : undefined
       })
     }
   }

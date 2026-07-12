@@ -988,7 +988,11 @@ const CRAFT_FIELD_LABEL: Record<keyof SceneCraftMeta, string> = {
   turningPoint: 'turning point',
   outcome: 'outcome',
   emotionalShift: 'emotional shift',
-  revealedInformation: 'revealed information'
+  revealedInformation: 'revealed information',
+  // Not part of CRAFT_FIELD_PRIORITY — conflictLevel is a numeric 1-5 rating
+  // (Phase 4 visual story tools), not a text field this heuristic proposes.
+  // Only present here to keep this Record exhaustive over SceneCraftMeta.
+  conflictLevel: 'conflict level'
 }
 
 export function proposeSceneMetadataPatch(
