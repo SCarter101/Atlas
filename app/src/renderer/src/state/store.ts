@@ -40,6 +40,7 @@ interface AtlasState {
   pendingPermission: PendingPermission | null
   sessionApprovals: SessionApproval[]
   activeSuggestions: SuggestionRef[]
+  queuedSuggestions: SuggestionRef[]
   lastAgentSummary: string | null
 
   // Full trace of the most recent agent run — feeds the routing
@@ -89,6 +90,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   pendingPermission: null,
   sessionApprovals: [],
   activeSuggestions: [],
+  queuedSuggestions: [],
   lastAgentSummary: null,
   currentRunGoal: null,
   currentRunSteps: [],
@@ -197,7 +199,23 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
 
   toggleTheme: () => set((s) => ({ theme: s.theme === 'paper' ? 'night' : 'paper' })),
 
-  toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
+  toggleFocusMode: () =>
+    set((s) => {
+      if (!s.focusMode) return { focusMode: true }
+
+      // Exiting distraction-free mode: flush anything that queued silently
+      // while focused (spec §10) into the visible suggestion list.
+      const queueCount = s.queuedSuggestions.length
+      return {
+        focusMode: false,
+        activeSuggestions: [...s.activeSuggestions, ...s.queuedSuggestions],
+        queuedSuggestions: [],
+        lastAgentSummary:
+          queueCount > 0
+            ? `While you were focused, ${queueCount} suggestion${queueCount === 1 ? '' : 's'} arrived.`
+            : s.lastAgentSummary
+      }
+    }),
 
   setAgentModel: (role, model) => set((s) => ({ agentModels: { ...s.agentModels, [role]: model } })),
 
@@ -233,10 +251,20 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     }
     if (step.kind === 'result') {
       const result = step.detail as { summary: string; proposedManuscriptChanges?: SuggestionRef[] }
-      set((s) => ({
-        lastAgentSummary: result.summary,
-        activeSuggestions: [...s.activeSuggestions, ...(result.proposedManuscriptChanges ?? [])]
-      }))
+
+      // Spec §10: suggestions arriving during distraction-free mode queue
+      // silently and only surface after the writer exits focus mode — no
+      // lastAgentSummary update here, or "silently" wouldn't be true.
+      if (get().focusMode) {
+        set((s) => ({
+          queuedSuggestions: [...s.queuedSuggestions, ...(result.proposedManuscriptChanges ?? [])]
+        }))
+      } else {
+        set((s) => ({
+          lastAgentSummary: result.summary,
+          activeSuggestions: [...s.activeSuggestions, ...(result.proposedManuscriptChanges ?? [])]
+        }))
+      }
     }
   },
 
