@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { AgentRole } from '@shared/schema/agent'
+import { configuredMcpServers } from '@shared/mcp'
 import { useAtlasStore } from '../state/store'
 
 const MODEL_OPTIONS = ['Claude Opus 4', 'Claude Sonnet 4', 'GPT-4.1', 'Gemini 1.5 Pro', 'Local (LM Studio)']
@@ -212,6 +213,50 @@ export function Settings(): JSX.Element {
                   </div>
                 ))}
               </div>
+            )}
+          </Section>
+
+          {/* Spec §8/§15 Phase 2: MCP-compatible adapter architecture exists
+              so external tools can be discovered and invoked without the
+              runtime depending on MCP directly — but production MCP
+              connectivity is explicitly out of scope for this phase. */}
+          <Section title="MCP Servers">
+            {configuredMcpServers.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>
+                No MCP servers configured — this build ships the adapter architecture (spec §8) without any
+                servers wired up.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {configuredMcpServers.map((server) => (
+                    <div
+                      key={server.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '12px 16px',
+                        borderRadius: 10,
+                        border: '1px solid var(--c-border)',
+                        background: 'var(--c-surface-raised)'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{server.name}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--c-ink-soft)' }}>
+                          {server.transport} · {server.transport === 'stdio' ? server.command : server.url}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginTop: 10 }}>
+                  These are configured adapters, not live connections — production MCP connectivity isn't
+                  implemented in this build (spec §15, Phase 2).
+                </div>
+              </>
             )}
           </Section>
 
