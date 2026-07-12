@@ -166,3 +166,28 @@ export function upsertAgentRunIndex(
   )
   atlasDb.persist()
 }
+
+export function listAgentRunIndex(
+  atlasDb: AtlasDb
+): { runId: string; agentRole: string; status: string; startedAt: string; endedAt?: string }[] {
+  const stmt = atlasDb.db.prepare(
+    `SELECT run_id as runId, agent_role as agentRole, status, started_at as startedAt, ended_at as endedAt
+     FROM agent_runs ORDER BY started_at DESC`
+  )
+  const rows: { runId: string; agentRole: string; status: string; startedAt: string; endedAt?: string }[] = []
+  try {
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as unknown as {
+        runId: string
+        agentRole: string
+        status: string
+        startedAt: string
+        endedAt: string | null
+      }
+      rows.push({ ...row, endedAt: row.endedAt ?? undefined })
+    }
+    return rows
+  } finally {
+    stmt.free()
+  }
+}

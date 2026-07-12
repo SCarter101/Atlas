@@ -1,4 +1,4 @@
-import type { AgentGoal, AgentStep, PermissionDecision } from './schema/agent'
+import type { AgentGoal, AgentRole, AgentRunRecord, AgentRunStatus, AgentStep, PermissionDecision } from './schema/agent'
 import type { CapabilityManifest } from './schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { ProjectManifest } from './schema/project'
@@ -24,7 +24,9 @@ export const IpcChannel = {
   AgentRunStart: 'agent-run:start',
   AgentRunStep: 'agent-run:step',
   AgentRunRespondToPermission: 'agent-run:respond-to-permission',
-  AgentRunCancel: 'agent-run:cancel'
+  AgentRunCancel: 'agent-run:cancel',
+  AgentRunsList: 'agent-runs:list',
+  AgentRunGet: 'agent-runs:get'
 } as const
 
 export interface SceneReadResult {
@@ -40,6 +42,17 @@ export interface SceneWritePatch {
 export interface CodexListFilter {
   type?: CodexEntryType
   status?: FactStatus
+}
+
+// Lightweight summary for the agent-runs history list — the full
+// AgentRunRecord (with its steps[]) is only fetched on demand via
+// agentRuns.get() when a run is opened.
+export interface AgentRunSummary {
+  runId: string
+  agentRole: AgentRole
+  status: AgentRunStatus
+  startedAt: string
+  endedAt?: string
 }
 
 // A minimal draft shape the Story Foundations UI builds from free-text
@@ -85,5 +98,7 @@ export interface AtlasBridge {
     onStep(runId: string, onStep: (step: AgentStep) => void): () => void
     respondToPermission(runId: string, requestId: string, decision: PermissionDecision): Promise<void>
     cancel(runId: string): Promise<void>
+    list(): Promise<AgentRunSummary[]>
+    get(runId: string): Promise<AgentRunRecord>
   }
 }
