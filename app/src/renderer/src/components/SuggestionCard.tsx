@@ -1,6 +1,26 @@
 import { useState } from 'react'
-import type { SuggestionRef } from '@shared/schema/agent'
+import type { AgentRole, SuggestionRef } from '@shared/schema/agent'
+import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { useAtlasStore } from '../state/store'
+
+// Role -> stable icon / display name, per spec §10 "Universal AI Suggestion
+// Contract" — every suggestion must be attributed to its originating agent.
+// Mirrors AgentRail.tsx / ManuscriptWorkspace.tsx's ROLE_NAME; duplicated
+// locally on purpose to keep this file isolated.
+const ROLE_ICON: Record<AgentRole, IconKind> = {
+  Generator: 'nib',
+  'Dev-Editor': 'compass',
+  'Line-Editor': 'loupe',
+  Dialoguer: 'quote',
+  'World-Builder': 'globe'
+}
+const ROLE_NAME: Record<AgentRole, string> = {
+  Generator: 'Generator',
+  'Dev-Editor': 'Story Editor',
+  'Line-Editor': 'Line Editor',
+  Dialoguer: 'Dialogue Editor',
+  'World-Builder': 'World Builder'
+}
 
 // Every agent suggestion goes through this one component and the same
 // Accept / Reject / Refine actions, regardless of originating agent — see
@@ -24,6 +44,23 @@ export function SuggestionCard({ suggestion }: { suggestion: SuggestionRef }): J
         opacity: isResolved ? 0.55 : 1
       }}
     >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <div
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: '50%',
+            background: 'var(--c-accent-soft)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}
+        >
+          <AssistantIcon kind={ROLE_ICON[suggestion.agentRole]} color="var(--c-accent)" size={10} />
+        </div>
+        <span style={{ fontSize: 10.5, color: 'var(--c-ink-faint)' }}>{ROLE_NAME[suggestion.agentRole]}</span>
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <span
           style={{
