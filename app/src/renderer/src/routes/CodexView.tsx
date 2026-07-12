@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { CodexEntry, CodexEntryType } from '@shared/schema/codex'
 import { detectContradictions } from '@shared/codexLogic'
 import { CodexEntryForm } from '../components/CodexEntryForm'
+import { TYPE_LABEL } from '../lib/codexLabels'
 import { useAtlasStore } from '../state/store'
 
 const STATUS_COLOR: Record<CodexEntry['status'], string> = {
@@ -9,23 +10,6 @@ const STATUS_COLOR: Record<CodexEntry['status'], string> = {
   tentative: 'var(--c-amber)',
   deprecated: 'var(--c-ink-faint)',
   contradicted: 'var(--c-red)'
-}
-
-export const TYPE_LABEL: Record<CodexEntryType, string> = {
-  character: 'Character',
-  location: 'Location',
-  faction: 'Faction',
-  object: 'Object',
-  event: 'Event',
-  'world-rule': 'World Rule',
-  'timeline-item': 'Timeline',
-  relationship: 'Relationship',
-  theme: 'Theme',
-  motif: 'Motif',
-  'research-note': 'Research Note',
-  'historical-reference': 'Historical Reference',
-  'scene-note': 'Scene Note',
-  'private-author-note': 'Private Note'
 }
 
 const FILTERS: Array<CodexEntryType | 'All'> = [

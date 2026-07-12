@@ -7,7 +7,7 @@ import type {
   ManuscriptLink
 } from '@shared/schema/codex'
 import type { ManuscriptTree } from '@shared/schema/manuscript'
-import { TYPE_LABEL } from '../routes/CodexView'
+import { TYPE_LABEL } from '../lib/codexLabels'
 import { useAtlasStore } from '../state/store'
 
 const ALL_TYPES = Object.keys(TYPE_LABEL) as CodexEntryType[]
