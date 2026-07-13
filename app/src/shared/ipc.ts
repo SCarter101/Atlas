@@ -1,6 +1,7 @@
 import type { AgentGoal, AgentRole, AgentRunRecord, AgentRunStatus, AgentStep, PermissionDecision } from './schema/agent'
 import type { CapabilityManifest, LifecycleState, SessionApproval } from './schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
+import type { CodexCandidate } from './schema/import'
 import type { ProjectManifest } from './schema/project'
 import type { ManuscriptTree, SceneMeta } from './schema/manuscript'
 import type { ChapterSummary, ContextWarning, RetrievalResult, SceneSummary } from './schema/retrieval'
@@ -29,6 +30,7 @@ export const IpcChannel = {
   CodexDelete: 'codex:delete',
   ExportManuscript: 'export:manuscript',
   ExportCodex: 'export:codex',
+  ImportManuscript: 'import:manuscript',
   CapabilitiesList: 'capabilities:list',
   CapabilitiesCreate: 'capabilities:create',
   CapabilitiesUpdate: 'capabilities:update',
@@ -75,6 +77,16 @@ export interface ExportResult {
   ok: boolean
   filePath?: string
   canceled?: boolean
+  error?: string
+}
+
+export type { CodexCandidate }
+
+export interface ImportManuscriptResult {
+  canceled: boolean
+  projectRoot?: string
+  manifest?: ProjectManifest
+  codexCandidates?: CodexCandidate[]
   error?: string
 }
 
@@ -129,6 +141,9 @@ export interface AtlasBridge {
   export: {
     manuscript(format: ManuscriptExportFormat): Promise<ExportResult>
     codex(format: CodexExportFormat): Promise<ExportResult>
+  }
+  import: {
+    manuscript(): Promise<ImportManuscriptResult>
   }
   capabilities: {
     list(): Promise<CapabilityManifest[]>

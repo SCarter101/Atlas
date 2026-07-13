@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
+import { ImportReview } from './components/ImportReview'
 import { Landing } from './routes/Landing'
 import { StoryFoundations } from './routes/StoryFoundations'
 import { Dashboard } from './routes/Dashboard'
@@ -43,6 +44,7 @@ export default function App(): JSX.Element {
         <Route path="/agent-runs" element={<AgentRunsView />} />
         <Route path="/library" element={<Library />} />
         <Route path="/export" element={<Export />} />
+        <Route path="/codex-import-review" element={<ImportReview />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </AppShell>

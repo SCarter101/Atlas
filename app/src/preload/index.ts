@@ -29,6 +29,9 @@ const atlasBridge: AtlasBridge = {
     manuscript: (format) => ipcRenderer.invoke(IpcChannel.ExportManuscript, format),
     codex: (format) => ipcRenderer.invoke(IpcChannel.ExportCodex, format)
   },
+  import: {
+    manuscript: () => ipcRenderer.invoke(IpcChannel.ImportManuscript)
+  },
   capabilities: {
     list: () => ipcRenderer.invoke(IpcChannel.CapabilitiesList),
     create: (manifest) => ipcRenderer.invoke(IpcChannel.CapabilitiesCreate, manifest),

@@ -9,7 +9,7 @@ import type {
   PermissionRequest,
   SuggestionRef
 } from '@shared/schema/agent'
-import type { FoundationsCodexDraft } from '@shared/ipc'
+import type { CodexCandidate, FoundationsCodexDraft } from '@shared/ipc'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest, Theme } from '@shared/schema/project'
 import type { SessionApproval } from '@shared/schema/capability'
@@ -59,6 +59,7 @@ interface AtlasState {
   agentModels: Record<AgentRole, string>
   lmStudioFallback: boolean
   advancedMode: boolean
+  pendingImportCandidates: CodexCandidate[]
 
   pendingPermission: PendingPermission | null
   sessionApprovals: SessionApproval[]
@@ -93,6 +94,8 @@ interface AtlasState {
   setAgentModel: (role: AgentRole, model: string) => void
   toggleLmStudioFallback: () => void
   toggleAdvancedMode: () => void
+  setPendingImportCandidates: (candidates: CodexCandidate[]) => void
+  clearPendingImportCandidates: () => void
   startAgentRun: (goal: AgentGoal) => void
   handleAgentStep: (runId: string, step: AgentStep) => void
   resolvePermission: (decision: 'approved-once' | 'approved-session' | 'denied') => void
@@ -112,6 +115,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   agentModels: { ...DEFAULT_AGENT_MODELS },
   lmStudioFallback: true,
   advancedMode: false,
+  pendingImportCandidates: [],
 
   pendingPermission: null,
   sessionApprovals: [],
@@ -136,7 +140,8 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       stage: 'app',
       activeSuggestions: [],
       queuedSuggestions: [],
-      lastAgentSummary: null
+      lastAgentSummary: null,
+      pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
 
@@ -226,7 +231,8 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       stage: 'app',
       activeSuggestions: [],
       queuedSuggestions: [],
-      lastAgentSummary: null
+      lastAgentSummary: null,
+      pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
   },
@@ -243,7 +249,8 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       activeSceneId: null,
       activeSuggestions: [],
       queuedSuggestions: [],
-      lastAgentSummary: null
+      lastAgentSummary: null,
+      pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
   },
@@ -305,6 +312,10 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   toggleLmStudioFallback: () => set((s) => ({ lmStudioFallback: !s.lmStudioFallback })),
 
   toggleAdvancedMode: () => set((s) => ({ advancedMode: !s.advancedMode })),
+
+  setPendingImportCandidates: (candidates) => set({ pendingImportCandidates: candidates }),
+
+  clearPendingImportCandidates: () => set({ pendingImportCandidates: [] }),
 
   startAgentRun: (goal) => set({ currentRunGoal: goal, currentRunSteps: [] }),
 

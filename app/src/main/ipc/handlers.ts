@@ -34,6 +34,7 @@ import { getCurrentProjectSession, ProjectSession, setCurrentProjectSession } fr
 import { loadCodex, loadManuscript } from '../export/loadProjectData'
 import { renderCodex } from '../export/renderCodex'
 import { renderManuscript } from '../export/renderManuscript'
+import { importManuscriptFromFile } from '../import/importManuscript'
 import { projectPaths } from '../persistence/paths'
 
 const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ['md', 'txt', 'pdf', 'docx', 'epub']
@@ -195,6 +196,21 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
       return { ok: true, filePath: result.filePath }
     } catch (err) {
       return { ok: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle(IpcChannel.ImportManuscript, async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'Manuscript', extensions: ['md', 'markdown', 'txt', 'docx'] }]
+      })
+      if (result.canceled || !result.filePaths[0]) return { canceled: true }
+
+      const { projectRoot, manifest, codexCandidates } = await importManuscriptFromFile(result.filePaths[0])
+      return { canceled: false, projectRoot, manifest, codexCandidates }
+    } catch (err) {
+      return { canceled: false, error: String(err) }
     }
   })
 

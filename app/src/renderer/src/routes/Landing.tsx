@@ -12,9 +12,11 @@ export function Landing(): JSX.Element {
   const openSampleProject = useAtlasStore((s) => s.openSampleProject)
   const openProjectAtPath = useAtlasStore((s) => s.openProjectAtPath)
   const startNewProject = useAtlasStore((s) => s.startNewProject)
+  const setPendingImportCandidates = useAtlasStore((s) => s.setPendingImportCandidates)
   const navigate = useNavigate()
 
   const [projects, setProjects] = useState<ProjectListEntry[]>([])
+  const [importError, setImportError] = useState<string | null>(null)
 
   const refreshProjects = (): void => {
     void window.atlas.project.list().then(setProjects)
@@ -88,6 +90,22 @@ export function Landing(): JSX.Element {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+            {importError && (
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                  padding: 12,
+                  borderRadius: 8,
+                  border: '1px solid rgba(255,160,160,0.55)',
+                  background: 'rgba(90,20,20,0.45)',
+                  color: '#FFE6E2',
+                  fontSize: 13
+                }}
+              >
+                {importError}
+              </div>
+            )}
+
             <button
               onClick={() => {
                 // Spec §2 Phase 1 acceptance criteria: the sample project's
@@ -148,6 +166,53 @@ export function Landing(): JSX.Element {
                 New Project
               </div>
               <div style={{ fontSize: 12, color: 'rgba(245,241,234,0.68)' }}>Start with a guided Story Foundations setup</div>
+            </button>
+
+            <button
+              onClick={() => {
+                setImportError(null)
+                void window.atlas.import.manuscript().then(async (result) => {
+                  if (result.canceled) return
+                  if (result.error || !result.projectRoot) {
+                    setImportError(result.error ?? 'Import failed.')
+                    return
+                  }
+                  await openProjectAtPath(result.projectRoot)
+                  setPendingImportCandidates(result.codexCandidates ?? [])
+                  navigate('/codex-import-review')
+                })
+              }}
+              style={{
+                textAlign: 'left',
+                padding: 22,
+                borderRadius: 14,
+                border: '1px dashed rgba(255,255,255,0.35)',
+                background: 'rgba(28,24,20,0.5)',
+                backdropFilter: 'blur(2px)',
+                cursor: 'pointer',
+                fontFamily: 'Public Sans, sans-serif'
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 9,
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 18,
+                  color: '#F5F1EA',
+                  marginBottom: 14
+                }}
+              >
+                IM
+              </div>
+              <div style={{ fontFamily: 'Source Serif 4, serif', fontSize: 17, fontWeight: 600, color: '#F5F1EA', marginBottom: 4 }}>
+                Import Manuscript
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(245,241,234,0.68)' }}>Create a project from Markdown, text, or Word</div>
             </button>
 
             {projects.map(({ projectRoot, manifest }) => {
