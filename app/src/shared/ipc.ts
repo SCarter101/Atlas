@@ -67,7 +67,9 @@ export const IpcChannel = {
   PromptsSet: 'prompts:set',
   PromptsReset: 'prompts:reset',
   UsageSummary: 'usage:summary',
-  ModelsCatalog: 'models:catalog'
+  ModelsCatalog: 'models:catalog',
+  ConsentGrant: 'consent:grant',
+  ConsentSetRequireAuth: 'consent:set-require-auth'
 } as const
 
 export interface SceneReadResult {
@@ -219,5 +221,15 @@ export interface AtlasBridge {
   }
   models: {
     catalog(): Promise<OpenRouterCatalogEntry[]>
+  }
+  // Phase 6: main-side cloud-consent tracking (see
+  // main/permissions/cloudConsent.ts). The consent *dialog* itself stays
+  // renderer-side (CloudConsentDialog / store.ts's requestCloudConsent) —
+  // this bridge just mirrors the writer's decision into the main process so
+  // the AgentRunStart IPC handler can enforce it even for a run started via
+  // a direct bridge call that bypassed the renderer's own gate.
+  consent: {
+    grant(decision: 'authorized-once' | 'authorized-session', runId: string): Promise<void>
+    setRequireAuth(value: boolean): Promise<void>
   }
 }

@@ -98,6 +98,10 @@ const atlasBridge: AtlasBridge = {
   },
   models: {
     catalog: () => ipcRenderer.invoke(IpcChannel.ModelsCatalog)
+  },
+  consent: {
+    grant: (decision, runId) => ipcRenderer.invoke(IpcChannel.ConsentGrant, decision, runId),
+    setRequireAuth: (value) => ipcRenderer.invoke(IpcChannel.ConsentSetRequireAuth, value)
   }
 }
 

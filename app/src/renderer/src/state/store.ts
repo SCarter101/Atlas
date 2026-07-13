@@ -407,7 +407,16 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   toggleAdvancedMode: () => set((s) => ({ advancedMode: !s.advancedMode })),
 
   toggleRequireCloudAuth: () =>
-    set((s) => ({ privacySettings: { ...s.privacySettings, requireCloudAuth: !s.privacySettings.requireCloudAuth } })),
+    set((s) => {
+      const next = !s.privacySettings.requireCloudAuth
+      // Phase 6: sync to the main-process CloudConsentSessionStore (see
+      // main/permissions/cloudConsent.ts) so AgentRunStart's IPC-level guard
+      // reflects the writer's actual current setting, not just the
+      // renderer-side default it was constructed with. Fire-and-forget, same
+      // reasoning as the consent.grant() call in AgentRail.tsx.
+      void window.atlas.consent.setRequireAuth(next).catch(() => {})
+      return { privacySettings: { ...s.privacySettings, requireCloudAuth: next } }
+    }),
 
   toggleWarnCloudUnpublished: () =>
     set((s) => ({ privacySettings: { ...s.privacySettings, warnCloudUnpublished: !s.privacySettings.warnCloudUnpublished } })),

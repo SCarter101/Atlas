@@ -35,6 +35,7 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   const currentRunGoal = useAtlasStore((s) => s.currentRunGoal)
   const currentRunSteps = useAtlasStore((s) => s.currentRunSteps)
   const advancedMode = useAtlasStore((s) => s.advancedMode)
+  const lmStudioFallback = useAtlasStore((s) => s.lmStudioFallback)
   const [expandedRole, setExpandedRole] = useState<AgentRole | null>(null)
   const [preflight, setPreflight] = useState<{ agent: AgentDef; selectionText: string } | null>(null)
   const [interviewOpen, setInterviewOpen] = useState(false)
@@ -75,6 +76,13 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
         setPrivacyMessage('Cloud model run cancelled.')
         return false
       }
+      // Phase 6: mirror the decision main-side so AgentRunStart's IPC-level
+      // consent guard (see main/permissions/cloudConsent.ts) doesn't reject
+      // the run we're about to start. Fire-and-forget — this is a UX
+      // convenience sync, not something worth blocking the run over if it
+      // fails. `decision` is already narrowed to exclude 'cancelled' here by
+      // the early return above.
+      void window.atlas.consent.grant(decision, goal.runId).catch(() => {})
     }
 
     setPrivacyMessage(null)
@@ -99,7 +107,8 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
         maxElapsedMs: 30000,
         allowedCapabilityCategories: ['line-editing']
       },
-      generateAlternatives: agent.role === 'Generator' && advancedMode && generateAlternatives ? true : undefined
+      generateAlternatives: agent.role === 'Generator' && advancedMode && generateAlternatives ? true : undefined,
+      lmStudioFallback
     }
 
     if (!(await authorizeRun(goal))) return

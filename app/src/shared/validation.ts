@@ -230,7 +230,8 @@ export const AgentGoalSchema = z.object({
     maxCostUsd: z.number().optional(),
     allowedCapabilityCategories: z.array(z.string())
   }),
-  generateAlternatives: z.boolean().optional()
+  generateAlternatives: z.boolean().optional(),
+  lmStudioFallback: z.boolean().optional()
 })
 
 type _AgentGoalCheck = z.infer<typeof AgentGoalSchema> extends AgentGoal ? true : never
