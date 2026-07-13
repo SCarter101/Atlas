@@ -57,7 +57,10 @@ export const IpcChannel = {
   BackupCreate: 'backup:create',
   BackupList: 'backup:list',
   BackupRestore: 'backup:restore',
-  SessionRecoveryStatus: 'session:recovery-status'
+  SessionRecoveryStatus: 'session:recovery-status',
+  SecretsSet: 'secrets:set',
+  SecretsHas: 'secrets:has',
+  SecretsClear: 'secrets:clear'
 } as const
 
 export interface SceneReadResult {
@@ -193,5 +196,10 @@ export interface AtlasBridge {
     list(): Promise<BackupMeta[]>
     restore(backupId: string): Promise<{ restoredProjectRoot: string }>
     recoveryStatus(): Promise<{ recoveryAvailable: boolean }>
+  }
+  secrets: {
+    set(name: string, value: string): Promise<{ ok: boolean; error?: string }>
+    has(name: string): Promise<boolean>
+    clear(name: string): Promise<void>
   }
 }

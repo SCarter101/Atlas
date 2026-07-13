@@ -177,6 +177,7 @@ const SceneMetaPatchSchema = z.object({
   timeOrDate: z.string().optional(),
   purpose: z.string().optional(),
   presentCharacterIds: z.array(z.string()).optional(),
+  localModelOnly: z.boolean().optional(),
   craft: SceneCraftMetaSchema.optional(),
   continuity: SceneContinuityMetaSchema.optional(),
   wordCount: z.number().optional(),

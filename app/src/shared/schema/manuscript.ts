@@ -66,6 +66,7 @@ export interface SceneMeta {
   // presence map. povCharacterId also counts as "present" for that map even
   // if a scene's author never duplicates it in here.
   presentCharacterIds?: string[]
+  localModelOnly?: boolean
 
   // Tier 2 — Story Craft, expanded on demand
   craft?: SceneCraftMeta

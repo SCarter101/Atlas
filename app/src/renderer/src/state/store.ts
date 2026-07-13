@@ -13,6 +13,7 @@ import type { CodexCandidate, FoundationsCodexDraft } from '@shared/ipc'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest, Theme } from '@shared/schema/project'
 import type { SessionApproval } from '@shared/schema/capability'
+import { describeProvider, type PrivacyModelRef } from '@shared/privacy'
 
 // Single source of truth for both validation and the cycle order used by
 // toggleTheme below.
@@ -31,6 +32,19 @@ function normalizeTheme(theme: Theme | undefined): Theme {
 interface PendingPermission {
   runId: string
   request: PermissionRequest
+}
+
+export type CloudConsentDecision = 'authorized-once' | 'authorized-session' | 'cancelled'
+
+export interface PendingCloudConsent {
+  providerLabel: string
+  warnCloudUnpublished: boolean
+  resolve: (decision: CloudConsentDecision) => void
+}
+
+export interface PrivacySettings {
+  requireCloudAuth: boolean
+  warnCloudUnpublished: boolean
 }
 
 // Per-agent model assignment shown in Settings and read by AgentRail — a
@@ -60,9 +74,12 @@ interface AtlasState {
   agentModels: Record<AgentRole, string>
   lmStudioFallback: boolean
   advancedMode: boolean
+  privacySettings: PrivacySettings
+  cloudAuthGrantedThisSession: boolean
   pendingImportCandidates: CodexCandidate[]
 
   pendingPermission: PendingPermission | null
+  pendingCloudConsent: PendingCloudConsent | null
   sessionApprovals: SessionApproval[]
   activeSuggestions: SuggestionRef[]
   queuedSuggestions: SuggestionRef[]
@@ -95,6 +112,10 @@ interface AtlasState {
   setAgentModel: (role: AgentRole, model: string) => void
   toggleLmStudioFallback: () => void
   toggleAdvancedMode: () => void
+  toggleRequireCloudAuth: () => void
+  toggleWarnCloudUnpublished: () => void
+  requestCloudConsent: (modelRef: PrivacyModelRef) => Promise<CloudConsentDecision>
+  resolveCloudConsent: (decision: CloudConsentDecision) => void
   setPendingImportCandidates: (candidates: CodexCandidate[]) => void
   clearPendingImportCandidates: () => void
   startAgentRun: (goal: AgentGoal) => void
@@ -117,9 +138,12 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   agentModels: { ...DEFAULT_AGENT_MODELS },
   lmStudioFallback: true,
   advancedMode: false,
+  privacySettings: { requireCloudAuth: true, warnCloudUnpublished: true },
+  cloudAuthGrantedThisSession: false,
   pendingImportCandidates: [],
 
   pendingPermission: null,
+  pendingCloudConsent: null,
   sessionApprovals: [],
   activeSuggestions: [],
   queuedSuggestions: [],
@@ -143,6 +167,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       activeSuggestions: [],
       queuedSuggestions: [],
       lastAgentSummary: null,
+      cloudAuthGrantedThisSession: false,
       pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
@@ -234,12 +259,13 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       activeSuggestions: [],
       queuedSuggestions: [],
       lastAgentSummary: null,
+      cloudAuthGrantedThisSession: false,
       pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
   },
 
-  startNewProject: () => set({ stage: 'onboarding' }),
+  startNewProject: () => set({ stage: 'onboarding', cloudAuthGrantedThisSession: false }),
 
   createProjectFromFoundations: async (title, genrePrimary, entries) => {
     const { projectRoot, manifest } = await window.atlas.project.createFromFoundations(title, genrePrimary, entries)
@@ -252,6 +278,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       activeSuggestions: [],
       queuedSuggestions: [],
       lastAgentSummary: null,
+      cloudAuthGrantedThisSession: false,
       pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
@@ -315,6 +342,33 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   toggleLmStudioFallback: () => set((s) => ({ lmStudioFallback: !s.lmStudioFallback })),
 
   toggleAdvancedMode: () => set((s) => ({ advancedMode: !s.advancedMode })),
+
+  toggleRequireCloudAuth: () =>
+    set((s) => ({ privacySettings: { ...s.privacySettings, requireCloudAuth: !s.privacySettings.requireCloudAuth } })),
+
+  toggleWarnCloudUnpublished: () =>
+    set((s) => ({ privacySettings: { ...s.privacySettings, warnCloudUnpublished: !s.privacySettings.warnCloudUnpublished } })),
+
+  requestCloudConsent: (modelRef) =>
+    new Promise((resolve) => {
+      set({
+        pendingCloudConsent: {
+          providerLabel: describeProvider(modelRef),
+          warnCloudUnpublished: get().privacySettings.warnCloudUnpublished,
+          resolve
+        }
+      })
+    }),
+
+  resolveCloudConsent: (decision) => {
+    const pending = get().pendingCloudConsent
+    if (!pending) return
+    pending.resolve(decision)
+    set({
+      pendingCloudConsent: null,
+      cloudAuthGrantedThisSession: decision === 'authorized-session' ? true : get().cloudAuthGrantedThisSession
+    })
+  },
 
   setPendingImportCandidates: (candidates) => set({ pendingImportCandidates: candidates }),
 

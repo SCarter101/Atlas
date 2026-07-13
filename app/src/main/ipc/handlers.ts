@@ -37,6 +37,7 @@ import { renderManuscript } from '../export/renderManuscript'
 import { importManuscriptFromFile } from '../import/importManuscript'
 import { createBackup, getSessionRecoveryStatus, listBackups, markProjectSessionOpened, restoreBackup } from '../persistence/backupStore'
 import { projectPaths } from '../persistence/paths'
+import { clearSecret, hasSecret, setSecret } from '../security/keyVault'
 
 const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ['md', 'txt', 'pdf', 'docx', 'epub']
 const CODEX_EXPORT_FORMATS: CodexExportFormat[] = ['json', 'codex-md', 'series-bible', 'series-bible-pdf', 'series-bible-epub']
@@ -393,6 +394,21 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   })
 
   ipcMain.handle(IpcChannel.SessionRecoveryStatus, async () => getSessionRecoveryStatus())
+
+  ipcMain.handle(IpcChannel.SecretsSet, async (_evt, name: string, value: string) => {
+    try {
+      await setSecret(name, value)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle(IpcChannel.SecretsHas, async (_evt, name: string) => hasSecret(name))
+
+  ipcMain.handle(IpcChannel.SecretsClear, async (_evt, name: string) => {
+    await clearSecret(name)
+  })
 }
 
 function safeFileName(value: string): string {

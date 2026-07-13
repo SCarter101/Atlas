@@ -13,6 +13,7 @@ import { CodexAdditionCard } from '../components/CodexAdditionCard'
 import { MetadataProposalCard } from '../components/MetadataProposalCard'
 import { CapabilityRecommendationCard } from '../components/CapabilityRecommendationCard'
 import { PermissionDialog } from '../components/PermissionDialog'
+import { CloudConsentDialog } from '../components/CloudConsentDialog'
 import { SceneMetadataPanel } from '../components/SceneMetadataPanel'
 import { ReadAloudControl } from '../components/ReadAloudControl'
 import { SprintTimer, SprintTimerCompactPill, useSprintTimer } from '../components/SprintTimer'
@@ -553,6 +554,7 @@ export function ManuscriptWorkspace(): JSX.Element {
       )}
 
       <PermissionDialog />
+      <CloudConsentDialog />
     </div>
   )
 }

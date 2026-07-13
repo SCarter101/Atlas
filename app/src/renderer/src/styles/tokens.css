@@ -19,9 +19,11 @@
   --c-ink-faint: rgba(42, 36, 31, 0.4);
   --c-border: rgba(42, 36, 31, 0.14);
   --c-border-strong: rgba(42, 36, 31, 0.28);
+  --c-overlay: rgba(42, 36, 31, 0.35);
   --c-accent: #28486b;
   --c-accent-soft: rgba(40, 72, 107, 0.1);
   --c-accent-text: #1d3a57;
+  --c-on-accent: #ffffff;
   --c-page-bg: #fffefb;
   --c-amber: #96650f;
   --c-amber-soft: rgba(150, 101, 15, 0.12);
@@ -40,9 +42,11 @@
   --c-ink-faint: rgba(241, 236, 228, 0.42);
   --c-border: rgba(241, 236, 228, 0.14);
   --c-border-strong: rgba(241, 236, 228, 0.28);
+  --c-overlay: rgba(0, 0, 0, 0.55);
   --c-accent: #8fb2d6;
   --c-accent-soft: rgba(143, 178, 214, 0.14);
   --c-accent-text: #afcbe8;
+  --c-on-accent: #1e1b18;
   --c-page-bg: #242020;
   --c-amber: #d8a94e;
   --c-amber-soft: rgba(216, 169, 78, 0.14);
@@ -61,9 +65,11 @@
   --c-ink-faint: rgba(28, 26, 21, 0.42);
   --c-border: rgba(28, 26, 21, 0.22);
   --c-border-strong: rgba(28, 26, 21, 0.38);
+  --c-overlay: rgba(28, 26, 21, 0.35);
   --c-accent: #24211b;
   --c-accent-soft: rgba(36, 33, 27, 0.1);
   --c-accent-text: #24211b;
+  --c-on-accent: #faf8f0;
   --c-page-bg: #faf7ee;
   --c-amber: #8a5a12;
   --c-amber-soft: rgba(138, 90, 18, 0.12);

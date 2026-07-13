@@ -34,6 +34,10 @@ export function SceneMetadataPanel({ scene }: { scene: SceneMeta }): JSX.Element
     void updateSceneMeta(scene.id, { craft: { ...scene.craft, conflictLevel: level } })
   }
 
+  function toggleLocalModelOnly(): void {
+    void updateSceneMeta(scene.id, { localModelOnly: !scene.localModelOnly })
+  }
+
   const craftFields = fieldsFor(scene.craft, {
     characterDesire: 'Desire',
     externalGoal: 'External goal',
@@ -70,6 +74,9 @@ export function SceneMetadataPanel({ scene }: { scene: SceneMeta }): JSX.Element
         {presentCharacters.map((c) => (
           <Pill key={c.id}>{c.name}</Pill>
         ))}
+        <ToggleChip onClick={toggleLocalModelOnly} selected={scene.localModelOnly === true}>
+          Local model only
+        </ToggleChip>
         <ToggleChip onClick={() => setPresenceEditorOpen((v) => !v)}>
           {presenceEditorOpen ? 'Hide characters ▾' : presentCharacters.length > 0 ? 'Edit characters ▸' : 'Characters present ▸'}
         </ToggleChip>
@@ -220,17 +227,29 @@ function Pill({ children }: { children: ReactNode }): JSX.Element {
   )
 }
 
-function ToggleChip({ children, onClick, style }: { children: ReactNode; onClick: () => void; style?: CSSProperties }): JSX.Element {
+function ToggleChip({
+  children,
+  onClick,
+  selected,
+  style
+}: {
+  children: ReactNode
+  onClick: () => void
+  selected?: boolean
+  style?: CSSProperties
+}): JSX.Element {
   return (
     <button
       onClick={onClick}
+      title={selected ? 'Local model only - never send this scene to a cloud model' : undefined}
       style={{
         fontSize: 11.5,
         padding: '4px 10px',
         borderRadius: 14,
-        background: 'transparent',
-        border: '1px dashed var(--c-border-strong)',
-        color: 'var(--c-ink-faint)',
+        background: selected ? 'var(--c-amber-soft)' : 'transparent',
+        border: selected ? '1px solid var(--c-amber)' : '1px dashed var(--c-border-strong)',
+        color: selected ? 'var(--c-amber)' : 'var(--c-ink-faint)',
+        fontWeight: selected ? 600 : 400,
         cursor: 'pointer',
         ...style
       }}

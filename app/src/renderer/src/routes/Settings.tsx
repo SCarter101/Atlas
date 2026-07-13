@@ -52,10 +52,15 @@ export function Settings(): JSX.Element {
   const toggleLmStudioFallback = useAtlasStore((s) => s.toggleLmStudioFallback)
   const advancedMode = useAtlasStore((s) => s.advancedMode)
   const toggleAdvancedMode = useAtlasStore((s) => s.toggleAdvancedMode)
+  const privacySettings = useAtlasStore((s) => s.privacySettings)
+  const toggleRequireCloudAuth = useAtlasStore((s) => s.toggleRequireCloudAuth)
+  const toggleWarnCloudUnpublished = useAtlasStore((s) => s.toggleWarnCloudUnpublished)
   const sessionApprovals = useAtlasStore((s) => s.sessionApprovals)
   const revokeSessionApproval = useAtlasStore((s) => s.revokeSessionApproval)
 
   const [apiKey, setApiKey] = useState('')
+  const [apiKeySaved, setApiKeySaved] = useState(false)
+  const [apiKeyMessage, setApiKeyMessage] = useState<string | null>(null)
   const [backupLabel, setBackupLabel] = useState('')
   const [backups, setBackups] = useState<BackupMeta[]>([])
   const [backupBusy, setBackupBusy] = useState(false)
@@ -63,6 +68,34 @@ export function Settings(): JSX.Element {
 
   async function refreshBackups(): Promise<void> {
     setBackups(await window.atlas.backups.list())
+  }
+
+  async function refreshOpenRouterKeyState(): Promise<void> {
+    setApiKeySaved(await window.atlas.secrets.has('openrouter-api-key'))
+  }
+
+  async function handleSaveOpenRouterKey(): Promise<void> {
+    const trimmed = apiKey.trim()
+    if (!trimmed) {
+      setApiKeyMessage('Enter a key before saving.')
+      return
+    }
+
+    const result = await window.atlas.secrets.set('openrouter-api-key', trimmed)
+    if (result.ok) {
+      setApiKey('')
+      setApiKeySaved(true)
+      setApiKeyMessage('Key saved.')
+    } else {
+      setApiKeyMessage(result.error === 'encryption-unavailable' ? 'Encryption unavailable; key was not saved.' : `Save failed: ${result.error}`)
+    }
+  }
+
+  async function handleClearOpenRouterKey(): Promise<void> {
+    await window.atlas.secrets.clear('openrouter-api-key')
+    setApiKey('')
+    setApiKeySaved(false)
+    setApiKeyMessage('Key cleared.')
   }
 
   async function handleCreateBackup(): Promise<void> {
@@ -92,6 +125,7 @@ export function Settings(): JSX.Element {
 
   useEffect(() => {
     void refreshBackups()
+    void refreshOpenRouterKeyState()
   }, [])
 
   return (
@@ -251,11 +285,33 @@ export function Settings(): JSX.Element {
         )}
       </Section>
 
+      <Section title="Privacy">
+        <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', lineHeight: 1.5, marginBottom: 14 }}>
+          Atlas gates cloud-classified model runs before they start. Model calls are simulated in this build, so these
+          controls exercise authorization and local persistence without real network transmission.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <ToggleRow
+            label="Require authorization before using a cloud-classified model"
+            checked={privacySettings.requireCloudAuth}
+            onChange={toggleRequireCloudAuth}
+          />
+          <ToggleRow
+            label="Warn when unpublished manuscript content may be included"
+            checked={privacySettings.warnCloudUnpublished}
+            onChange={toggleWarnCloudUnpublished}
+          />
+        </div>
+      </Section>
+
       {advancedMode && (
         <>
           <Section title="OpenRouter">
             <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', marginBottom: 10 }}>
               Bring your own OpenRouter API key so cloud models can be routed per-agent above.
+            </div>
+            <div style={{ fontSize: 12.5, color: apiKeySaved ? 'var(--c-green)' : 'var(--c-ink-faint)', marginBottom: 8 }}>
+              {apiKeySaved ? 'Key saved ✓' : 'Not set'}
             </div>
             <input
               type="password"
@@ -273,9 +329,24 @@ export function Settings(): JSX.Element {
                 marginBottom: 6
               }}
             />
-            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)' }}>
-              Not saved anywhere in this build — spec §13 requires a backend vault, not raw local storage, and that
-              vault isn't implemented yet.
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <button
+                onClick={() => void handleSaveOpenRouterKey()}
+                style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: 'var(--c-accent)', color: 'var(--c-on-accent)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Save key
+              </button>
+              <button
+                onClick={() => void handleClearOpenRouterKey()}
+                style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink-soft)', fontSize: 12.5, cursor: 'pointer' }}
+              >
+                Clear
+              </button>
+            </div>
+            {apiKeyMessage && <div style={{ fontSize: 12, color: 'var(--c-ink-soft)', marginBottom: 6 }}>{apiKeyMessage}</div>}
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', lineHeight: 1.5 }}>
+              Stored encrypted through the OS keychain via Electron safeStorage. Never transmitted in this simulated
+              build.
             </div>
           </Section>
 

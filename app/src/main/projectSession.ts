@@ -2,6 +2,7 @@ import type { AtlasDb } from './persistence/db'
 import { openIndexDb } from './persistence/db'
 import { AgentRunManager } from './agent/simulator'
 import { SessionApprovalStore } from './permissions/sessionApprovals'
+import { removeProjectSessionLock } from './persistence/backupStore'
 
 // Atlas opens one project at a time in this build (matches the Phase 2
 // scope — multi-project/multi-window is not required yet). This object is
@@ -23,6 +24,7 @@ export class ProjectSession {
 
   close(): void {
     this.db.persist()
+    removeProjectSessionLock(this.projectRoot)
   }
 }
 

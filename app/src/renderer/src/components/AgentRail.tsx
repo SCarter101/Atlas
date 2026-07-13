@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AgentGoal, AgentRole } from '@shared/schema/agent'
+import { isCloudModel } from '@shared/privacy'
 import { encodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { PreflightDialog } from './PreflightDialog'
@@ -27,12 +28,17 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   const startAgentRun = useAtlasStore((s) => s.startAgentRun)
   const activeSuggestions = useAtlasStore((s) => s.activeSuggestions)
   const agentModels = useAtlasStore((s) => s.agentModels)
+  const manuscriptTree = useAtlasStore((s) => s.manuscriptTree)
+  const privacySettings = useAtlasStore((s) => s.privacySettings)
+  const cloudAuthGrantedThisSession = useAtlasStore((s) => s.cloudAuthGrantedThisSession)
+  const requestCloudConsent = useAtlasStore((s) => s.requestCloudConsent)
   const currentRunGoal = useAtlasStore((s) => s.currentRunGoal)
   const currentRunSteps = useAtlasStore((s) => s.currentRunSteps)
   const advancedMode = useAtlasStore((s) => s.advancedMode)
   const [expandedRole, setExpandedRole] = useState<AgentRole | null>(null)
   const [preflight, setPreflight] = useState<{ agent: AgentDef; selectionText: string } | null>(null)
   const [interviewOpen, setInterviewOpen] = useState(false)
+  const [privacyMessage, setPrivacyMessage] = useState<string | null>(null)
   // Opt-in "Generate Alternatives" mode (Required UI Features: "Enable
   // multiple drafts only as an optional advanced feature") — only exposed
   // for Generator, and only when Advanced Mode is on (see Settings.tsx's
@@ -51,7 +57,31 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   // and the World Builder interview flow (a marker-encoded interview
   // payload, see startInterviewRun below) — both just need an AgentGoal
   // built and dispatched the same way.
-  function runAgent(agent: AgentDef, selectionText: string, userIntent: string): void {
+  async function authorizeRun(goal: AgentGoal): Promise<boolean> {
+    const targetSceneIds = goal.scope.sceneIds ?? []
+    const targetScenes = (manuscriptTree?.books ?? [])
+      .flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
+      .filter((scene) => targetSceneIds.includes(scene.id))
+    const cloudModel = isCloudModel(goal.modelRef)
+
+    if (cloudModel && targetScenes.some((scene) => scene.localModelOnly)) {
+      setPrivacyMessage('This scene is marked local-model-only; switch that agent to a local model or clear the flag.')
+      return false
+    }
+
+    if (cloudModel && privacySettings.requireCloudAuth && !cloudAuthGrantedThisSession) {
+      const decision = await requestCloudConsent(goal.modelRef)
+      if (decision === 'cancelled') {
+        setPrivacyMessage('Cloud model run cancelled.')
+        return false
+      }
+    }
+
+    setPrivacyMessage(null)
+    return true
+  }
+
+  async function runAgent(agent: AgentDef, selectionText: string, userIntent: string): Promise<void> {
     const runId = crypto.randomUUID()
     const goal: AgentGoal = {
       runId,
@@ -73,17 +103,19 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
       generateAlternatives: agent.role === 'Generator' && advancedMode && generateAlternatives ? true : undefined
     }
 
+    if (!(await authorizeRun(goal))) return
+
     startAgentRun(goal)
     void window.atlas.agentRuns.start(goal)
     window.atlas.agentRuns.onStep(runId, (step) => handleAgentStep(runId, step))
   }
 
   function startRun(agent: AgentDef, selectionText: string): void {
-    runAgent(agent, selectionText, `Send selected text to ${agent.name}`)
+    void runAgent(agent, selectionText, `Send selected text to ${agent.name}`)
   }
 
   function startInterviewRun(agent: AgentDef, answers: WorldBuilderInterviewAnswers): void {
-    runAgent(agent, encodeWorldBuilderInterview(answers), `Run World Builder interview for a ${genreTemplateLabel(answers.genreTemplate)}`)
+    void runAgent(agent, encodeWorldBuilderInterview(answers), `Run World Builder interview for a ${genreTemplateLabel(answers.genreTemplate)}`)
   }
 
   return (
@@ -91,6 +123,22 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
       <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 4 }}>
         Agents
       </div>
+      {privacyMessage && (
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.45,
+            color: 'var(--c-amber)',
+            background: 'var(--c-amber-soft)',
+            border: '1px solid var(--c-border)',
+            borderRadius: 8,
+            padding: '8px 10px',
+            marginBottom: 8
+          }}
+        >
+          {privacyMessage}
+        </div>
+      )}
       {AGENTS.map((agent) => {
         const pendingCount = activeSuggestions.filter((s) => s.agentRole === agent.role && s.state === 'pending').length
         const isExpanded = expandedRole === agent.role
