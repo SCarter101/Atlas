@@ -429,10 +429,23 @@ export class AgentRunManager {
       if (!(await lmStudio.isAvailable())) {
         throw new ModelCallFailure('LM Studio fallback is unavailable.', 'fallback-unavailable')
       }
-      return await lmStudio.runModelCall({
-        ...input,
-        modelRef: { provider: 'lm-studio', modelId: 'local-fallback', viaOpenRouter: false }
-      })
+      try {
+        return await lmStudio.runModelCall({
+          ...input,
+          modelRef: { provider: 'lm-studio', modelId: 'local-fallback', viaOpenRouter: false }
+        })
+      } catch (fallbackErr) {
+        // The fallback call itself can still fail after isAvailable() passed
+        // (e.g. the model errors mid-request) — that failure must also
+        // become a recoverable 'paused' run, not fall through to the
+        // generic unhandled-error path, which is what happened before this
+        // was wrapped: an un-rethrown AtlasError from here skipped the
+        // ModelCallFailure branch in start()'s catch entirely.
+        throw new ModelCallFailure(
+          String(fallbackErr instanceof Error ? fallbackErr.message : fallbackErr),
+          'fallback-failed'
+        )
+      }
     }
   }
 

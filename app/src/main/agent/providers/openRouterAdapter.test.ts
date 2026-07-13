@@ -122,6 +122,46 @@ describe('OpenRouterAdapter.runModelCall', () => {
     await expect(adapter.runModelCall(input())).rejects.toMatchObject({ code: 'OPENROUTER_BAD_RESPONSE' })
   })
 
+  it('throws OPENROUTER_BAD_RESPONSE when a 200 response has content but no usage object at all', async () => {
+    // OpenRouter always includes usage accounting by default — a response
+    // missing it entirely is an anomaly worth failing loudly on, rather than
+    // silently recording a real paid call as $0/0 tokens (see the Codex
+    // adversarial-review finding this test was added to close).
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'ok' } }] })))
+    const adapter = new OpenRouterAdapter()
+    await expect(adapter.runModelCall(input())).rejects.toMatchObject({ code: 'OPENROUTER_BAD_RESPONSE' })
+  })
+
+  it('throws OPENROUTER_BAD_RESPONSE when usage is present but token counts are missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'ok' } }], usage: { cost: 0.001 } }))
+    )
+    const adapter = new OpenRouterAdapter()
+    await expect(adapter.runModelCall(input())).rejects.toMatchObject({ code: 'OPENROUTER_BAD_RESPONSE' })
+  })
+
+  it('accepts usage with token counts but no cost field, defaulting cost to 0', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          choices: [{ message: { content: 'free model output' } }],
+          usage: { prompt_tokens: 5, completion_tokens: 3 }
+        })
+      )
+    )
+    const adapter = new OpenRouterAdapter()
+    const summary = await adapter.runModelCall(input())
+    expect(summary).toEqual({
+      modelRef: input().modelRef,
+      inputTokens: 5,
+      outputTokens: 3,
+      estimatedCostUsd: 0,
+      outputText: 'free model output'
+    })
+  })
+
   it('reports isAvailable() as true unconditionally', async () => {
     const adapter = new OpenRouterAdapter()
     await expect(adapter.isAvailable()).resolves.toBe(true)

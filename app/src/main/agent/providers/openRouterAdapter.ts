@@ -104,9 +104,22 @@ export class OpenRouterAdapter implements ProviderAdapter {
       throw new AtlasError('OpenRouter returned an unexpected response shape.', 'OPENROUTER_BAD_RESPONSE')
     }
 
-    const inputTokens = body.usage?.prompt_tokens ?? 0
-    const outputTokens = body.usage?.completion_tokens ?? 0
-    const estimatedCostUsd = body.usage?.cost ?? 0
+    // OpenRouter includes usage accounting in every chat-completion response
+    // by default (verified against live docs — see the module comment
+    // above), so a successful response with content but no token counts is
+    // a genuinely unexpected shape, not a benign omission. Money-spending
+    // correctness matters here: silently defaulting missing token counts to
+    // 0 would let a real paid call slip past maxCostUsd budget checks and
+    // record incorrect usage totals, so fail loudly instead. `cost` alone
+    // is still allowed to be absent (e.g. a free/promotional model) without
+    // treating the whole response as malformed.
+    if (typeof body.usage?.prompt_tokens !== 'number' || typeof body.usage?.completion_tokens !== 'number') {
+      throw new AtlasError('OpenRouter response was missing expected usage accounting.', 'OPENROUTER_BAD_RESPONSE')
+    }
+
+    const inputTokens = body.usage.prompt_tokens
+    const outputTokens = body.usage.completion_tokens
+    const estimatedCostUsd = body.usage.cost ?? 0
 
     return { modelRef: input.modelRef, inputTokens, outputTokens, estimatedCostUsd, outputText }
   }

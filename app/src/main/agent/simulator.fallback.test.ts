@@ -143,4 +143,28 @@ describe('AgentRunManager — real-adapter model-call fallback (Phase 6)', () =>
     const result = resultStep.detail as { summary: string; warnings?: string[] }
     expect(result.warnings).toContain('fallback-unavailable')
   })
+
+  it('ends the run paused (not error) when LM Studio is available but its own completion call fails', async () => {
+    // Regression test for a Codex adversarial-review finding: isAvailable()
+    // passing doesn't guarantee the actual chat-completion call succeeds. An
+    // un-rethrown failure here used to skip the ModelCallFailure branch in
+    // start()'s catch entirely, ending the run 'error' instead of the
+    // intended recoverable 'paused'.
+    const fetchMock = vi.fn((url: string) => {
+      if (url === OPENROUTER_CHAT_URL) return Promise.reject(new Error('ECONNREFUSED'))
+      if (url === LM_STUDIO_MODELS_URL) return Promise.resolve(new Response('{}', { status: 200 }))
+      if (url === LM_STUDIO_CHAT_URL) return Promise.resolve(new Response('server error', { status: 500 }))
+      throw new Error(`unexpected fetch to ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeGoal({ runId: 'run-fallback-itself-fails', lmStudioFallback: true })
+    const steps = await runToCompletion(manager, goal)
+
+    expect(steps.some((s) => s.kind === 'model-call')).toBe(false)
+    const resultStep = steps.find((s) => s.kind === 'result')!
+    const result = resultStep.detail as { summary: string; warnings?: string[] }
+    expect(result.warnings).toContain('fallback-failed')
+  })
 })

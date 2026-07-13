@@ -78,11 +78,20 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
       }
       // Phase 6: mirror the decision main-side so AgentRunStart's IPC-level
       // consent guard (see main/permissions/cloudConsent.ts) doesn't reject
-      // the run we're about to start. Fire-and-forget — this is a UX
-      // convenience sync, not something worth blocking the run over if it
-      // fails. `decision` is already narrowed to exclude 'cancelled' here by
-      // the early return above.
-      void window.atlas.consent.grant(decision, goal.runId).catch(() => {})
+      // the run we're about to start. This must be awaited, not
+      // fire-and-forget: authorizeRun()'s caller starts the run immediately
+      // after this returns, and without awaiting, the agentRuns.start IPC
+      // call had no ordering guarantee relative to this one completing on
+      // the main side — a real (if narrow) race that could spuriously
+      // reject a just-approved run. `decision` is already narrowed to
+      // exclude 'cancelled' here by the early return above.
+      try {
+        await window.atlas.consent.grant(decision, goal.runId)
+      } catch {
+        // Best-effort sync — if it fails, AgentRunStart's own main-side
+        // guard is still the accurate source of truth and will reject the
+        // run with a clear error rather than silently proceeding.
+      }
     }
 
     setPrivacyMessage(null)
