@@ -3,6 +3,7 @@ import type {
   AgentGoal,
   AgentRole,
   AgentStep,
+  CapabilityRecommendationPayload,
   InsertionPayload,
   MetadataProposalPayload,
   PermissionRequest,
@@ -437,6 +438,20 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
         await window.atlas.scenes.write(suggestion.targetSceneId, { meta: payload.proposedMeta })
         await get().refreshManuscriptTree()
       }
+    }
+
+    // capability-recommendation is not scene-scoped (no targetSceneId), so it
+    // can't live inside the block above — accepting one installs the draft
+    // manifest as a real project-scoped capability via the same
+    // `capabilities:create` IPC Library.tsx's "New Capability" form uses.
+    // Centralizing this here (rather than in CapabilityRecommendationCard's
+    // own Accept button) means the individual Accept button and the
+    // per-section "Accept all" batch action both take this same path —
+    // otherwise batch-accepting a Recommended Capabilities section would
+    // silently flip suggestion state without ever installing anything.
+    if (state === 'accepted' && suggestion?.kind === 'capability-recommendation') {
+      const payload = suggestion.payload as CapabilityRecommendationPayload
+      await window.atlas.capabilities.create(payload.draftManifest)
     }
 
     // Drafts sharing a draftGroupId (the opt-in "Generate Alternatives" mode

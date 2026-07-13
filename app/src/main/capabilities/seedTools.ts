@@ -130,7 +130,11 @@ function buildSeedManifests(now: string): CapabilityManifest[] {
       name: 'Codex Contradiction Check',
       description: 'Scans Codex entries for marked or inferred contradictions.',
       sideEffects: 'reads-project',
-      compatibleAgentRoles: ['Dev-Editor'],
+      // World-Builder also runs this (see checkWorldBuilderContradictions in
+      // main/agent/simulator.ts) against its own proposed new entries plus
+      // the existing Codex, to catch a proposed fact conflicting with
+      // something already tracked before the writer ever reviews it.
+      compatibleAgentRoles: ['Dev-Editor', 'World-Builder'],
       inputSchema: {
         type: 'object',
         properties: { entries: { type: 'array', items: { type: 'object' } } },

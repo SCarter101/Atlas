@@ -11,6 +11,7 @@ import { DraftComparisonView } from '../components/DraftComparisonView'
 import { DialogueAlternativeCard } from '../components/DialogueAlternativeCard'
 import { CodexAdditionCard } from '../components/CodexAdditionCard'
 import { MetadataProposalCard } from '../components/MetadataProposalCard'
+import { CapabilityRecommendationCard } from '../components/CapabilityRecommendationCard'
 import { PermissionDialog } from '../components/PermissionDialog'
 import { SceneMetadataPanel } from '../components/SceneMetadataPanel'
 import { ReadAloudControl } from '../components/ReadAloudControl'
@@ -157,6 +158,7 @@ export function ManuscriptWorkspace(): JSX.Element {
   const dialogueAlternatives = sceneSuggestions.filter((s) => s.kind === 'dialogue-alternative')
   const codexAdditions = sceneSuggestions.filter((s) => s.kind === 'codex-addition')
   const metadataProposals = sceneSuggestions.filter((s) => s.kind === 'metadata-proposal')
+  const capabilityRecommendations = sceneSuggestions.filter((s) => s.kind === 'capability-recommendation')
   const orderedSuggestions = orderSuggestionsForReview(sceneSuggestions)
 
   useEffect(() => {
@@ -345,7 +347,8 @@ export function ManuscriptWorkspace(): JSX.Element {
               insertions.length > 0 ||
               dialogueAlternatives.length > 0 ||
               codexAdditions.length > 0 ||
-              metadataProposals.length > 0) && (
+              metadataProposals.length > 0 ||
+              capabilityRecommendations.length > 0) && (
               <div>
                 <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 10 }}>
                   Comments &amp; Tracked Changes
@@ -415,7 +418,7 @@ export function ManuscriptWorkspace(): JSX.Element {
                 )}
 
                 {codexAdditions.length > 0 && (
-                  <div style={{ marginBottom: metadataProposals.length > 0 ? 16 : 0 }}>
+                  <div style={{ marginBottom: metadataProposals.length > 0 || capabilityRecommendations.length > 0 ? 16 : 0 }}>
                     <SectionHeader
                       label={`${ROLE_NAME[codexAdditions[0].agentRole]} — Codex Additions`}
                       items={codexAdditions}
@@ -430,12 +433,27 @@ export function ManuscriptWorkspace(): JSX.Element {
                 )}
 
                 {metadataProposals.length > 0 && (
-                  <div>
+                  <div style={{ marginBottom: capabilityRecommendations.length > 0 ? 16 : 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 8 }}>
                       {ROLE_NAME[metadataProposals[0].agentRole]} — Proposed Metadata
                     </div>
                     {metadataProposals.map((s) => (
                       <MetadataProposalCard key={s.id} suggestion={s} />
+                    ))}
+                  </div>
+                )}
+
+                {capabilityRecommendations.length > 0 && (
+                  <div>
+                    <SectionHeader
+                      label={`${ROLE_NAME[capabilityRecommendations[0].agentRole]} — Recommended Capabilities`}
+                      items={capabilityRecommendations}
+                      onAcceptAll={acceptAllInSection}
+                    />
+                    {capabilityRecommendations.map((s) => (
+                      <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>
+                        <CapabilityRecommendationCard suggestion={s} />
+                      </div>
                     ))}
                   </div>
                 )}

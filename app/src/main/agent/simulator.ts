@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto'
 import type {
   AgentGoal,
   AgentResult,
+  AgentRole,
   AgentRunRecord,
   AgentStep,
+  CapabilityRecommendationPayload,
   DialogueAlternativeOption,
   DialogueAlternativePayload,
   DialogueTensionTier,
@@ -17,15 +19,18 @@ import type {
   SuggestionRef,
   ToolCall
 } from '@shared/schema/agent'
+import type { CapabilityManifest } from '@shared/schema/capability'
 import type { SceneCraftMeta, SceneMeta } from '@shared/schema/manuscript'
-import type { CharacterVoiceProfile, CodexEntryType } from '@shared/schema/codex'
+import type { CharacterVoiceProfile, CodexEntry, CodexEntryType } from '@shared/schema/codex'
+import type { RetrievalResult } from '@shared/schema/retrieval'
 import type { AtlasDb } from '../persistence/db'
-import { saveAgentRun } from '../persistence/agentRunStore'
+import { loadAgentRun, listAgentRuns, saveAgentRun } from '../persistence/agentRunStore'
 import { listCodexEntries } from '../persistence/codexStore'
 import { readScene } from '../persistence/sceneStore'
 import { configuredMcpServers } from '@shared/mcp'
 import { decodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { listCapabilities } from '../capabilities/registry'
+import { ensureIndexed, search } from '../retrieval/search'
 import { runSandboxed } from '../capabilities/sandbox'
 import { getSeedTool } from '../capabilities/seedTools'
 import { buildSessionApproval, SessionApprovalStore } from '../permissions/sessionApprovals'
@@ -69,6 +74,69 @@ function toolSignature(toolId: string, input: unknown): string {
 export function detectDuplicateAction(recentSignatures: string[], newSignature: string, threshold = 3): boolean {
   const occurrences = recentSignatures.filter((s) => s === newSignature).length
   return occurrences >= threshold - 1
+}
+
+export interface RepeatedToolPatternMatch {
+  toolId: string
+  occurrences: number
+  runIds: string[]
+}
+
+// Spec Phase 4 ("Capability recommendations based on repeated real writing
+// workflows") — distinct from detectDuplicateAction above, which aborts a
+// single run that repeats itself *within* that run. This looks *across*
+// separate completed runs over time: did this role reach for the same tool
+// in `threshold`-or-more distinct past runs? A real emergent workflow, not a
+// runaway loop.
+//
+// Grouping is deliberately coarser than toolSignature() (toolId + input) —
+// two calls' inputs (a selection, a scene id) almost never match verbatim
+// across separate runs, so signature-level grouping would essentially never
+// fire. The brief for this feature explicitly allows "simple exact-match on
+// toolId... fine to start," so a run counts toward toolId's occurrence total
+// at most once (a run that calls the same tool twice shouldn't inflate the
+// count — that's detectDuplicateAction's job within that run).
+export async function detectRepeatedToolPattern(
+  projectRoot: string,
+  db: AtlasDb,
+  agentRole: AgentRole,
+  threshold = 3
+): Promise<RepeatedToolPatternMatch | undefined> {
+  const completedRuns = listAgentRuns(projectRoot, db).filter(
+    (r) => r.agentRole === agentRole && r.status === 'completed'
+  )
+
+  const runIdsByToolId = new Map<string, Set<string>>()
+  for (const runMeta of completedRuns) {
+    let record: AgentRunRecord
+    try {
+      record = await loadAgentRun(projectRoot, runMeta.runId)
+    } catch {
+      // The run index and the on-disk run file can drift (e.g. a deleted
+      // agent-runs/*.json) — skip rather than fail the whole detection pass.
+      continue
+    }
+
+    const toolIdsThisRun = new Set<string>()
+    for (const step of record.steps) {
+      if (step.kind !== 'tool-call') continue
+      toolIdsThisRun.add((step.detail as ToolCall).toolId)
+    }
+    for (const toolId of toolIdsThisRun) {
+      const runIds = runIdsByToolId.get(toolId) ?? new Set<string>()
+      runIds.add(runMeta.runId)
+      runIdsByToolId.set(toolId, runIds)
+    }
+  }
+
+  let best: RepeatedToolPatternMatch | undefined
+  for (const [toolId, runIds] of runIdsByToolId) {
+    if (runIds.size < threshold) continue
+    if (!best || runIds.size > best.occurrences) {
+      best = { toolId, occurrences: runIds.size, runIds: [...runIds] }
+    }
+  }
+  return best
 }
 
 interface PendingPermission {
@@ -382,10 +450,16 @@ export class AgentRunManager {
 
     const suggestions = simulateLineEditFindings(selection, goal.scope.sceneIds?.[0])
 
+    // The one real thing Line Editor does in this build: run the real
+    // word-count tool on the passage being edited (see checkWordCount above)
+    // and fold the count into the tool-call output and result summary —
+    // augmenting, not replacing, the simulated findings.
+    const wordCountResult = await this.checkWordCount('Line-Editor', selection)
+
     const toolCall: ToolCall = {
       toolId: 'global.tools.line-edit-scan@1.0.0',
       input: toolInput,
-      output: suggestions
+      output: wordCountResult ? { findings: suggestions, wordCount: wordCountResult } : suggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -405,11 +479,12 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
+    const wordCountNote = wordCountResult ? ` (scanned a ${wordCountResult.wordCount}-word passage)` : ''
     const result: AgentResult = {
       summary:
         suggestions.length > 0
-          ? `Line Editor found ${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'}.`
-          : 'Line Editor found no issues in this selection.',
+          ? `Line Editor found ${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'}${wordCountNote}.`
+          : `Line Editor found no issues in this selection${wordCountNote}.`,
       proposedManuscriptChanges: suggestions
     }
     this.emit(goal.runId, {
@@ -469,10 +544,18 @@ export class AgentRunManager {
       goal.generateAlternatives ? 3 : 1
     )
 
+    // The one real thing Generator does in this build: run the real
+    // word-count tool on the primary (first) draft (see checkWordCount
+    // above) and fold the count into the tool-call output and result
+    // summary — an unstated "a continuation" becomes a stated "a 42-word
+    // continuation," without changing what was actually generated.
+    const primaryDraftText = (suggestions[0]?.payload as InsertionPayload | undefined)?.text ?? ''
+    const wordCountResult = await this.checkWordCount('Generator', primaryDraftText)
+
     const toolCall: ToolCall = {
       toolId: 'global.tools.prose-continuation@1.0.0',
       input: toolInput,
-      output: suggestions
+      output: wordCountResult ? { drafts: suggestions, wordCount: wordCountResult } : suggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -492,8 +575,11 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
+    const wordCountNote = wordCountResult
+      ? ` Generated a ${wordCountResult.wordCount}-word continuation${suggestions.length > 1 ? ' (first draft)' : ''}.`
+      : ''
     const result: AgentResult = {
-      summary: `Generator drafted ${suggestions.length} continuation${suggestions.length === 1 ? '' : 's'}.`,
+      summary: `Generator drafted ${suggestions.length} continuation${suggestions.length === 1 ? '' : 's'}.${wordCountNote}`,
       proposedManuscriptChanges: suggestions
     }
     this.emit(goal.runId, {
@@ -584,12 +670,26 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
-    const allSuggestions = metadataSuggestion ? [...suggestions, metadataSuggestion] : suggestions
+    // Spec Phase 4 ("Capability recommendations based on repeated real
+    // writing workflows"): checked once per Dev-Editor run, at the end,
+    // against this role's own run history — natural spot since Dev-Editor
+    // already has the most real-tool machinery of the five roles (the
+    // Codex contradiction check above). A hit surfaces as its own pending
+    // suggestion the writer can approve/reject like anything else.
+    const recommendation = await this.maybeRecommendCapability(goal)
+
+    const allSuggestions = [
+      ...suggestions,
+      ...(metadataSuggestion ? [metadataSuggestion] : []),
+      ...(recommendation ? [recommendation] : [])
+    ]
 
     const result: AgentResult = {
       summary: `Story Editor found ${suggestions.length} structural note${suggestions.length === 1 ? '' : 's'}.${
         contradictionNote ? ` ${contradictionNote.summary}` : ''
-      }${metadataSuggestion ? ' Also proposed a scene metadata update for the writer to review.' : ''}`,
+      }${metadataSuggestion ? ' Also proposed a scene metadata update for the writer to review.' : ''}${
+        recommendation ? ' Also recommended a new capability based on a repeated tool-call pattern.' : ''
+      }`,
       proposedManuscriptChanges: allSuggestions,
       warnings: contradictionNote ? [contradictionNote.summary] : undefined
     }
@@ -629,6 +729,197 @@ export class AgentRunManager {
       return {
         summary: `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} detected in the Codex.`,
         contradictions
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  // Shared real-tool call for Generator and Line Editor: discover the real
+  // word-count capability via the registry and, if it's enabled and
+  // compatible with `role`, actually run it (through the sandbox) against
+  // `text` — the same discover/confirm/invoke shape checkCodexContradictions
+  // uses above, just with the simplest of the three seed tools. Returns
+  // undefined (never throws) whenever the capability isn't installed/enabled
+  // for this role, matching the "augment, don't replace" pattern: callers
+  // fold the count into an existing tool-call's output and summary, they
+  // never gate on it.
+  private async checkWordCount(role: AgentRole, text: string): Promise<{ wordCount: number } | undefined> {
+    try {
+      const capabilities = await listCapabilities(this.projectRoot)
+      const capability = capabilities.find(
+        (c) => c.id === 'global.tools.word-count' && c.lifecycleState === 'enabled' && c.compatibleAgentRoles.includes(role)
+      )
+      if (!capability) return undefined
+
+      const tool = getSeedTool(capability.id)
+      if (!tool) return undefined
+
+      const { output, error } = await runSandboxed(tool, { text })
+      if (error || !output) return undefined
+
+      return output as { wordCount: number }
+    } catch {
+      return undefined
+    }
+  }
+
+  // Dialoguer's real tool call. codex-search has no matching SandboxedTool
+  // (see the comment above buildSeedManifests in seedTools.ts — it needs a
+  // live AtlasDb the vm.Script sandbox can't safely receive), so this calls
+  // ensureIndexed()/search() from retrieval/search.ts directly instead of
+  // going through runSandboxed(), same as that comment instructs. Still
+  // gated on the same registry discover/confirm-compatible check the other
+  // real tool calls use, so disabling the capability in Library.tsx actually
+  // turns this off. Returns undefined when there's no resolved character to
+  // search for, the capability isn't available, or nothing related turns up.
+  private async searchRelatedCodexForCharacter(
+    character: { id: string; name: string } | undefined
+  ): Promise<RetrievalResult[] | undefined> {
+    if (!character || character.name.trim().length === 0) return undefined
+    try {
+      const capabilities = await listCapabilities(this.projectRoot)
+      const capability = capabilities.find(
+        (c) => c.id === 'global.tools.codex-search' && c.lifecycleState === 'enabled' && c.compatibleAgentRoles.includes('Dialoguer')
+      )
+      if (!capability) return undefined
+
+      await ensureIndexed(this.db, this.projectRoot)
+      const results = search(this.db, character.name, { kind: 'codex-entry', limit: 4 }).filter((r) => r.id !== character.id)
+      return results.length > 0 ? results : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  // World-Builder's real tool call: reuses the same codex-contradiction-check
+  // tool Dev-Editor uses (see checkCodexContradictions above and this
+  // capability's compatibleAgentRoles in seedTools.ts, which now includes
+  // 'World-Builder'), but run against the *proposed* new entries plus the
+  // real existing Codex rather than just the existing Codex — catching a
+  // proposed fact that conflicts with something already tracked before the
+  // writer ever reviews the proposal. Proposed entries are synthesized as
+  // minimal CodexEntry-shaped objects (the tool only reads type/name/body/
+  // relationships) purely for this check; nothing is written to the Codex
+  // here. Only contradictions that actually involve one of the *proposed*
+  // entries are returned — a pre-existing contradiction between two entries
+  // already in the Codex isn't this proposal's problem to surface.
+  private async checkWorldBuilderContradictions(
+    goal: AgentGoal,
+    proposals: SuggestionRef[]
+  ): Promise<{ summary: string; contradictions: [string, string[]][] } | undefined> {
+    try {
+      const capabilities = await listCapabilities(this.projectRoot)
+      const capability = capabilities.find(
+        (c) =>
+          c.id === 'global.tools.codex-contradiction-check' &&
+          c.lifecycleState === 'enabled' &&
+          c.compatibleAgentRoles.includes(goal.agentRole)
+      )
+      if (!capability) return undefined
+
+      const tool = getSeedTool(capability.id)
+      if (!tool) return undefined
+
+      const existingEntries = await listCodexEntries(this.projectRoot)
+      const now = new Date().toISOString()
+      const proposedEntries: CodexEntry[] = proposals.map((p) => {
+        const payload = p.payload as { entryType: CodexEntryType; name: string; summary: string }
+        return {
+          schemaVersion: 1,
+          id: p.id,
+          type: payload.entryType,
+          name: payload.name,
+          status: 'tentative',
+          body: { summary: payload.summary },
+          isPrivate: false,
+          localModelOnly: false,
+          locked: false,
+          source: 'ai-proposed',
+          relationships: [],
+          manuscriptLinks: [],
+          createdAt: now,
+          updatedAt: now,
+          history: []
+        }
+      })
+
+      const { output, error } = await runSandboxed(tool, { entries: [...existingEntries, ...proposedEntries] })
+      if (error || !output) return undefined
+
+      const { contradictions } = output as { contradictions: [string, string[]][] }
+      const proposedIds = new Set(proposedEntries.map((e) => e.id))
+      const relevant = contradictions.filter(([id]) => proposedIds.has(id))
+      if (relevant.length === 0) return undefined
+
+      return {
+        summary: `${relevant.length} proposed entr${relevant.length === 1 ? 'y' : 'ies'} may conflict with existing Codex content — review before accepting.`,
+        contradictions: relevant
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  // Spec Phase 4 ("Capability recommendations based on repeated real writing
+  // workflows") — Phase 3 explicitly deferred this. Checks whether this
+  // role's own run history shows a tool called across 3+ separate completed
+  // runs (detectRepeatedToolPattern), and if so drafts a project-scoped
+  // CapabilityManifest cloned from the real installed tool's manifest,
+  // re-labeled as a per-role recommendation. Never auto-installs anything —
+  // returns a pending `capability-recommendation` suggestion the writer
+  // reviews via CapabilityRecommendationCard.tsx, same Accept/Reject/Refine
+  // contract as every other suggestion kind. Idempotent-ish: once the writer
+  // has accepted a recommendation for this exact tool+role pairing (which
+  // creates a capability at a deterministic id), this stops re-recommending
+  // it every run.
+  private async maybeRecommendCapability(goal: AgentGoal): Promise<SuggestionRef | undefined> {
+    try {
+      const match = await detectRepeatedToolPattern(this.projectRoot, this.db, goal.agentRole)
+      if (!match) return undefined
+
+      const capabilities = await listCapabilities(this.projectRoot)
+      const sourceTool = capabilities.find((c) => c.id === match.toolId)
+      if (!sourceTool) return undefined
+
+      const recommendedId = `${match.toolId}.recommended.${goal.agentRole.toLowerCase()}`
+      if (capabilities.some((c) => c.id === recommendedId)) return undefined
+
+      const now = new Date().toISOString()
+      const draftManifest: CapabilityManifest = {
+        ...sourceTool,
+        id: recommendedId,
+        name: `${sourceTool.name} (${goal.agentRole} default)`,
+        description: `${sourceTool.description} Recommended as a standard step for ${goal.agentRole} after it made this same tool call in ${match.occurrences} separate runs.`,
+        scope: 'project',
+        version: '1.0.0',
+        compatibleAgentRoles: [goal.agentRole],
+        validationStatus: 'untested',
+        lifecycleState: 'draft',
+        createdBy: 'agent-generated',
+        history: [
+          {
+            versionId: randomUUID(),
+            changedAt: now,
+            note: `Drafted from a repeated-tool-call pattern detected across ${match.occurrences} ${goal.agentRole} runs.`
+          }
+        ]
+      }
+
+      return {
+        id: randomUUID(),
+        agentRole: goal.agentRole,
+        kind: 'capability-recommendation',
+        targetSceneId: goal.scope.sceneIds?.[0],
+        payload: {
+          toolId: match.toolId,
+          occurrences: match.occurrences,
+          runIds: match.runIds,
+          rationale: `${goal.agentRole} has called "${sourceTool.name}" in ${match.occurrences} separate runs — install it as a standard, always-on capability for this role?`,
+          draftManifest
+        } satisfies CapabilityRecommendationPayload,
+        provenance: { capabilityId: match.toolId, capabilityVersion: sourceTool.version, runId: goal.runId },
+        state: 'pending'
       }
     } catch {
       return undefined
@@ -716,10 +1007,17 @@ export class AgentRunManager {
     const similarVoiceFindings = await this.checkSimilarVoices(goal)
     const allSuggestions = [...suggestions, ...similarVoiceFindings]
 
+    // The one real thing Dialogue Editor does in this build: look up real
+    // Codex entries related to the resolved character (see
+    // searchRelatedCodexForCharacter above) via retrieval/search.ts's real
+    // vector index — a genuine data point supplementing the simulated
+    // tension-tier alternatives, not a replacement for them.
+    const relatedCodexResults = await this.searchRelatedCodexForCharacter(character)
+
     const toolCall: ToolCall = {
       toolId: 'global.tools.dialogue-scan@1.0.0',
       input: toolInput,
-      output: suggestions
+      output: relatedCodexResults ? { alternatives: suggestions, relatedCodexEntries: relatedCodexResults } : suggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -743,6 +1041,10 @@ export class AgentRunManager {
       summary: `Dialogue Editor proposed ${suggestions.length} alternative reading${suggestions.length === 1 ? '' : 's'}${
         similarVoiceFindings.length > 0
           ? ` and flagged ${similarVoiceFindings.length} character${similarVoiceFindings.length === 1 ? '' : 's'} pair${similarVoiceFindings.length === 1 ? '' : 's'} with similar voices`
+          : ''
+      }${
+        relatedCodexResults
+          ? ` (found ${relatedCodexResults.length} related Codex entr${relatedCodexResults.length === 1 ? 'y' : 'ies'} for ${character?.name})`
           : ''
       }.`,
       proposedManuscriptChanges: allSuggestions
@@ -866,14 +1168,27 @@ export class AgentRunManager {
       return
     }
 
-    const suggestions = interview
+    const rawSuggestions = interview
       ? deriveWorldBuilderProposals(interview, goal.scope.sceneIds?.[0])
       : simulateCodexAdditions(selection, goal.scope.sceneIds?.[0])
+
+    // The one real thing World Builder does in this build beyond the
+    // interview/single-guess synthesis above: run the same
+    // codex-contradiction-check tool Dev-Editor uses (see
+    // checkWorldBuilderContradictions above), against these *proposed* new
+    // entries plus the real existing Codex — catching a proposed fact that
+    // conflicts with something already tracked before the writer ever
+    // reviews it. Never blocks the proposal: any hits are folded into the
+    // flagged proposal's own citations as a low-reliability warning (see
+    // applyContradictionWarnings) and into the run's overall summary/
+    // warnings — the writer still approves or rejects each proposal.
+    const contradictionNote = await this.checkWorldBuilderContradictions(goal, rawSuggestions)
+    const suggestions = contradictionNote ? applyContradictionWarnings(rawSuggestions, contradictionNote) : rawSuggestions
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.world-research@1.0.0',
       input: toolInput,
-      output: suggestions
+      output: contradictionNote ? { proposals: suggestions, codexContradictionCheck: contradictionNote } : suggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -899,9 +1214,12 @@ export class AgentRunManager {
       // store currently folds into activeSuggestions — see
       // handleAgentStep() in state/store.ts. The suggestion's own `kind`
       // ('codex-addition') is what the UI actually branches on.
-      summary: `World Builder proposed ${suggestions.length} Codex addition${suggestions.length === 1 ? '' : 's'}.`,
+      summary: `World Builder proposed ${suggestions.length} Codex addition${suggestions.length === 1 ? '' : 's'}.${
+        contradictionNote ? ` ${contradictionNote.summary}` : ''
+      }`,
       proposedManuscriptChanges: suggestions,
-      proposedCodexChanges: suggestions
+      proposedCodexChanges: suggestions,
+      warnings: contradictionNote ? [contradictionNote.summary] : undefined
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1285,6 +1603,39 @@ function simulateDialogueAlternatives(
       state: 'pending'
     }
   ]
+}
+
+// Pure helper behind runWorldBuilder's real codex-contradiction-check call
+// (checkWorldBuilderContradictions above): appends a low-reliability warning
+// citation to every proposal whose id was flagged, leaving every other
+// proposal untouched. Kept as a standalone function (rather than inline in
+// runWorldBuilder) so it's directly unit-testable, matching the house style
+// of buildTensionAlternatives/detectSimilarVoices above.
+export function applyContradictionWarnings(
+  proposals: SuggestionRef[],
+  note: { contradictions: [string, string[]][] }
+): SuggestionRef[] {
+  const reasonsById = new Map(note.contradictions)
+  return proposals.map((p) => {
+    const reasons = reasonsById.get(p.id)
+    if (!reasons || reasons.length === 0) return p
+    const payload = p.payload as {
+      entryType: string
+      name: string
+      summary: string
+      citations: { note: string; reliability: 'low' | 'medium' | 'high' | 'author-stated' }[]
+    }
+    return {
+      ...p,
+      payload: {
+        ...payload,
+        citations: [
+          ...payload.citations,
+          { note: `Possible contradiction with existing Codex content: ${reasons.join('; ')}`, reliability: 'low' as const }
+        ]
+      }
+    }
+  })
 }
 
 // Heuristic proper-noun extraction — a stand-in for real research/model
