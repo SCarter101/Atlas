@@ -64,6 +64,20 @@ imported a constant back from the other, causing "Cannot access 'X' before
 initialization" on every launch) that 97 passing unit tests never caught, because it was
 a module-evaluation-order bug, not a logic bug. Only booting the real app surfaced it.
 
+**Codex review step (added Round 5):** the Codex plugin is installed, exposing a
+`codex:codex-rescue` agent type and a `codex-companion.mjs` runtime. After a wave is
+merged and green, hand the **whole feature diff** (`git diff <base>..HEAD`) to a Codex
+subagent for an independent, correctness-only review, then **verify every finding against
+the actual code yourself before acting** — Codex can be wrong, and it's still the
+orchestrator's job to confirm and fix. Mechanics: the `codex:codex-rescue` agent only
+*launches* a background Codex job and returns a job id (`task-…`); it can't poll. Retrieve
+results directly with `node "<plugin>/plugins/codex/scripts/codex-companion.mjs" status
+<jobId> --wait --timeout-ms <ms>` then `… result <jobId>` (plugin root:
+`C:\Users\octav\.claude\plugins\marketplaces\openai-codex`). In Round 5 this caught a
+whole-feature-dead bug (capability recommendations never fired due to a tool-id mismatch)
+that 192 green tests and a clean boot both missed, because the bug was in the seam between
+a unit test's self-made fixture and the real recorded data — see the Round 5 entry.
+
 ## Fix rounds completed so far
 
 **Round 1 — "Fix before next review"**
@@ -226,17 +240,140 @@ provider integration and the API-key vault spec §13 requires; a Codex-view UI t
 "view as of scene X" using the new spoiler-filtering logic (the logic exists, the toggle
 doesn't); `SnapshotDiffView` isn't yet linked from the manuscript workspace's navigation.
 
-## Current verified state (as of Round 4 / Phase 3 completion)
+**Round 5 — Phase 4 ("Drafting and Revision Tools")**
+
+A prioritized-but-complete core of spec §15 Phase 4, built across one parallel wave of
+six agents plus one sequential follow-up agent, then subjected to an independent Codex
+review pass (see "Codex review" below). Carried-forward scope decisions (unchanged from
+Phase 3): model calls stay simulated, no new npm dependencies, honest-placeholder
+labeling for anything still simulated. A key structural win this round: **no Wave 1 item
+needed to touch `shared/ipc.ts` / `handlers.ts` / `preload/index.ts`** — everything rode
+on existing generic IPC (`scenes.write`, `codex.*`, `sessions.*`, `snapshots.*`,
+`capabilities.create`) or pure renderer/simulator state, which removed the main
+append-only-conflict source from the Phase 3 wave.
+
+*Wave 1A — Keyboard-first suggestion review & revision status:* J/K (next/prev), A/R
+(accept/reject), and per-category "Accept all" batch controls, implemented at the
+`ManuscriptWorkspace.tsx` container level (not `AgentRail.tsx` — that file is only the
+run-trigger panel; the suggestion cards actually render in `ManuscriptWorkspace`). New
+dependency-free `shared/suggestionReview.ts` holds the pure ordering/traversal helpers.
+The keydown guard `isTypingTarget()` bails on `input`/`textarea`/`select`/contenteditable
+(Tiptap's ProseMirror root) and on any modifier key, so J/K/A/R never steal keystrokes
+while drafting. Added `'fixed'` to `SuggestionRef['state']` (spec §7.2's 5th Story Editor
+issue status) with a "Mark Fixed" action on `EditorialFindingCard`.
+
+*Wave 1B — Agent-proposed metadata & craft reference layer:* the `'metadata-proposal'`
+suggestion kind is now constructed end-to-end (Dev-Editor proposes a partial `SceneMeta`
+patch via the pure `proposeSceneMetadataPatch()`), rendered by new `MetadataProposalCard`,
+and applied on accept via `scenes.write({ meta })` in `store.ts`'s `setSuggestionState`
+(the real metadata-persistence path — `SceneMetadataPanel` is read-only; there is no
+separate metadata IPC). New `renderer/src/lib/craftReference.ts` (`CRAFT_CONCEPTS`:
+hooks, scene turns, causality, stakes, setup/payoff, POV, pacing) surfaced as inline
+expandable chips on findings tagged with `craftConceptIds`.
+
+*Wave 1C — Dialogue voice profiles & side-by-side version comparison:* typed
+`CharacterVoiceProfile` (spec §7.4's 13 fields) added to `CodexEntry`, edited in
+`CodexEntryForm` for character entries, read by the Dialoguer to produce 3 tension-tier
+alternates (`buildTensionAlternatives()`) and to flag similar-sounding characters
+(`detectSimilarVoices()`, surfaced as `editorial-finding`s). Generator gained opt-in
+multi-draft mode (Advanced-Mode-gated, N `insertion`s sharing a `draftGroupId`) rendered
+in a new `DraftComparisonView`; the word-level LCS diff was extracted to
+`shared/diffText.ts`. The previously-orphaned `SnapshotDiffView` is now reachable via a
+"Revision history" toggle in the workspace toolbar.
+
+*Wave 1D — Focus themes, read-aloud, writing sprints:* completed the Typewriter theme
+(`[data-theme='typewriter']` in `tokens.css`; `theme` union was already forward-declared
+`'paper'|'night'|'typewriter'` in `schema/project.ts`); `toggleTheme` now cycles 3-way
+via `THEMES`. New `ReadAloudControl` (browser-native `speechSynthesis`, sentence-split
+utterances for sentence-level highlight — no dependency). New `SprintTimer` (15/25/45
+presets + quiet summary); it deliberately does **not** re-log words via
+`sessions.logActivity` because `handlers.ts`'s `scene:write` already logs the delta on
+every autosave — double-logging would inflate the Dashboard momentum card. Added
+word-count-on-hover to distraction-free mode (the one gap left from Round 2's focus-mode
+checklist).
+
+*Wave 1E — World Builder interview:* new `WorldBuilderInterview` wizard (6 spec topics +
+8 genre templates) whose compiled answers are smuggled through
+`AgentGoal.scope.selectionText` (marker-prefixed JSON via `shared/worldBuilderInterview.ts`)
+so no `AgentGoal`-schema/zod widening was needed. `runWorldBuilder` now returns 2–4
+proposed Codex entries via `deriveWorldBuilderProposals()`, each through the existing
+`CodexAdditionCard` approval flow; added a new `'author-stated'` citation reliability
+value (distinct from the regex-guess `'low'`) for facts synthesized from the writer's own
+answers.
+
+*Wave 1F — Visual story tools:* `Timeline.tsx` extended into a 4-tab view (Timeline /
+Plot Threads / Character Map / Conflict Curve), all manuscript-linked via the existing
+`getManuscriptReadingOrder()`. New `'plot-thread'` `CodexEntryType`; new
+`SceneCraftMeta.conflictLevel` (1–5) and Tier-1 `SceneMeta.presentCharacterIds`, both
+editable in `SceneMetadataPanel` and written via a new `updateSceneMeta` store action.
+Plot-thread→scene links are **derived** by scanning `SceneContinuityMeta.setupIds`/
+`payoffIds` rather than duplicating the relationship. Hand-rolled SVG/CSS-grid charts (no
+chart library added). New pure functions in `shared/codexLogic.ts`
+(`getPlotThreadSceneLinks`, `getConflictCurve`, `getCharacterPresenceMap`).
+**Important gotcha this wave hit:** zod's `.object()` silently strips unknown keys, so new
+`CodexEntryType`/`SceneMeta` fields **had to** be mirrored into `shared/validation.ts` or
+they'd be dropped at the IPC write boundary — the same sharp edge every schema-touching
+Phase 4 agent had to remember.
+
+*Wave 2 — Production tool use across roles + capability recommendations:* each of the 5
+roles now folds one **real** sandboxed-tool call into its result (Generator/Line-Editor →
+`word-count`; Dialoguer → real `codex-search` via `retrieval/search.ts`, called directly
+since codex-search can't run in the `vm` sandbox; World-Builder → `codex-contradiction-check`
+against *proposed* + existing Codex, warnings folded into proposals via the pure
+`applyContradictionWarnings()`). New `detectRepeatedToolPattern()` +
+`maybeRecommendCapability()`: when a role reaches for the same tool across 3+ separate
+completed runs, Dev-Editor surfaces a `'capability-recommendation'` suggestion; accepting
+it installs the draft manifest via `capabilities.create` (routed through
+`setSuggestionState` so per-card Accept **and** batch Accept-all both install — a card's
+own Accept button alone would have missed the batch path). The Wave 2 agent hit its
+session limit mid-task; the orchestrator finished the last piece (the store.ts install
+routing) by hand.
+
+*Codex review (new this round):* per the user's request, after all Phase 4 code was
+merged and green, an independent **Codex** subagent (via the `codex:codex-rescue` agent
+type / `codex-companion.mjs status|result`) reviewed the full `479e803..HEAD` diff for
+correctness only. It surfaced 3 real bugs, all confirmed against the code and fixed:
+- **HIGH — capability recommendations were dead on arrival.** `maybeRecommendCapability`
+  did `capabilities.find(c => c.id === match.toolId)`, but recorded tool-call ids are
+  versioned per-role *pseudo* ids (`global.tools.structural-analysis@1.0.0`) that match
+  **no** installed manifest, so it always bailed and no recommendation ever appeared.
+  Fixed to strip the `@version` and **synthesize** a minimal draft manifest when there's
+  no installed tool to clone (the per-role workflow tools have none). The reason this
+  slipped through: the round's own isolated unit test used a *real* manifest id
+  (`codex-search`) as its fixture, so it never exercised the versioned-pseudo-id path.
+  Added `simulator.capabilityRecommendation.test.ts` that drives a real Dev-Editor run
+  end-to-end to close that blind spot.
+- **MED — J/K review skipped two card kinds.** `KIND_ORDER` in `suggestionReview.ts` still
+  omitted `'metadata-proposal'` and `'capability-recommendation'` (a stale Wave-1A comment
+  claimed no card rendered them — true when written, false after 1B/2). Both added.
+- **LOW — grouped draft rows had no scroll/focus anchor.** `DraftComparisonView` now takes
+  `focusedSuggestionId` and renders the `suggestion-<id>` anchor + focus ring per row.
+
+  Lesson worth keeping: a fresh independent reviewer (here, a different model) caught a
+  whole-feature-dead bug that a green test suite + clean boot did not — because the bug
+  lived in the seam *between* an isolated unit under test and the real recorded data it
+  runs against. When a feature's unit test constructs its own fixture, make at least one
+  test drive the real production entry point end-to-end.
+
+**Explicitly deferred from Phase 4** (confirmed scope, not oversight): real
+OpenRouter/LM Studio provider integration + API-key vault (still simulated); the full
+production capability review/compare/rollback workflow beyond enable/disable/deprecate +
+this round's recommendation drafts; real external MCP connectivity; TTS voice selection
+and reduced-motion tuning for read-aloud; craft-reference explainers are static text (no
+deep-linking into a lesson library). Carried-over Phase 3 deferrals still stand.
+
+## Current verified state (as of Round 5 / Phase 4 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 97/97 tests passing across 16 files (was 28/5 at Round 3).
-- App launches cleanly via `npm run dev` (main + preload build, renderer connects) with
-  only expected dev-mode warnings (React DevTools suggestion, React Router v7 future
-  flags, Electron CSP insecure-policy warning) — none of these are regressions.
-- Full interactive click-through of the new UI (Codex CRUD, Library capability
-  management, Dashboard session card, an agent run hitting the new sandboxed-tool +
-  permission-enforcement path) was **not** performed this round — no headless
-  Electron/Playwright driver exists in this environment yet (see the `run` skill's
-  Electron pattern if one is needed later). Verification here relied on the automated
-  test suite plus a real `npm run dev` log/console check, which is how the circular-import
-  bug above was actually caught.
+- `npx vitest run` — 194/194 tests passing across 31 files (was 97/16 at Round 4).
+- App launches cleanly via `npm run dev` (verified twice — after the Wave 2 merge and
+  again after the Codex-review fixes) with only the expected dev-mode warnings (React
+  DevTools suggestion, React Router v7 future flags, Electron CSP insecure-policy) — no
+  regressions, no circular-import/TDZ crash.
+- Full interactive click-through of the new Phase 4 UI (keyboard J/K/A/R review, metadata
+  proposals, dialogue voice profiles, multi-draft comparison, Typewriter theme,
+  read-aloud, sprint timer, World Builder interview, the 4 visual-story tabs, a live
+  capability recommendation) was **not** performed — still no headless Electron/Playwright
+  driver in this environment. Verification relied on the automated suite (incl. new
+  end-to-end simulator tests that drive real agent runs), a real `npm run dev` boot check,
+  and an independent Codex correctness review of the whole diff.
