@@ -2,6 +2,7 @@ import type { AtlasDb } from './persistence/db'
 import { openIndexDb } from './persistence/db'
 import { AgentRunManager } from './agent/simulator'
 import { SessionApprovalStore } from './permissions/sessionApprovals'
+import { CloudConsentSessionStore } from './permissions/cloudConsent'
 import { removeProjectSessionLock } from './persistence/backupStore'
 
 // Atlas opens one project at a time in this build (matches the Phase 2
@@ -13,13 +14,15 @@ export class ProjectSession {
     readonly projectRoot: string,
     readonly db: AtlasDb,
     readonly agentRuns: AgentRunManager,
-    readonly approvals: SessionApprovalStore
+    readonly approvals: SessionApprovalStore,
+    readonly cloudConsent: CloudConsentSessionStore
   ) {}
 
   static async create(projectRoot: string): Promise<ProjectSession> {
     const db = await openIndexDb(projectRoot)
     const approvals = new SessionApprovalStore()
-    return new ProjectSession(projectRoot, db, new AgentRunManager(projectRoot, db, approvals), approvals)
+    const cloudConsent = new CloudConsentSessionStore()
+    return new ProjectSession(projectRoot, db, new AgentRunManager(projectRoot, db, approvals), approvals, cloudConsent)
   }
 
   close(): void {

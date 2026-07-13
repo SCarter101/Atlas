@@ -17,7 +17,8 @@ import type {
   PermissionDecision,
   PermissionRequest,
   SuggestionRef,
-  ToolCall
+  ToolCall,
+  TrackedChangePayload
 } from '@shared/schema/agent'
 import type { CapabilityManifest } from '@shared/schema/capability'
 import type { SceneCraftMeta, SceneMeta } from '@shared/schema/manuscript'
@@ -27,6 +28,8 @@ import type { AtlasDb } from '../persistence/db'
 import { loadAgentRun, listAgentRuns, saveAgentRun } from '../persistence/agentRunStore'
 import { listCodexEntries } from '../persistence/codexStore'
 import { readScene } from '../persistence/sceneStore'
+import { getActivePrompt } from '../persistence/promptStore'
+import { recordUsage } from '../persistence/usageStore'
 import { configuredMcpServers } from '@shared/mcp'
 import { decodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { listCapabilities } from '../capabilities/registry'
@@ -37,7 +40,7 @@ import { buildSessionApproval, SessionApprovalStore } from '../permissions/sessi
 import { LmStudioAdapter } from './providers/lmStudioAdapter'
 import { OpenRouterAdapter } from './providers/openRouterAdapter'
 import { SimulatorAdapter } from './providers/simulatorAdapter'
-import type { ProviderAdapter } from './providers/types'
+import type { ModelCallInput, ProviderAdapter } from './providers/types'
 
 // Phase 2 scope (data-contracts §6): the AgentGoal -> AgentStep[] ->
 // AgentRunRecord pipeline, and the permission/session-approval flow, are
@@ -139,6 +142,21 @@ export async function detectRepeatedToolPattern(
   return best
 }
 
+// Phase 6: thrown by runModelCallStep() when a real provider call fails and
+// no (or an unavailable) LM Studio fallback leaves nothing else to try.
+// Caught in start()'s top-level catch and translated to a distinct 'paused'
+// terminal status (recoverable — the writer can retry once the underlying
+// provider issue is fixed) rather than the generic 'error' status every
+// other unexpected exception produces.
+class ModelCallFailure extends Error {
+  constructor(
+    message: string,
+    public code: string
+  ) {
+    super(message)
+  }
+}
+
 interface PendingPermission {
   requestId: string
   resolve: (decision: PermissionDecision) => void
@@ -183,9 +201,27 @@ export class AgentRunManager {
       budget: { turnsUsed: 0, toolCallsUsed: 0, tokensUsed: 0, costUsdUsed: 0, startedAtMs: Date.now(), recentSignatures: [] }
     })
 
-    // Fire and forget — the renderer subscribes to steps via onStep().
+    // Fire and forget — the renderer subscribes to steps via onStep(). Every
+    // finish() call below is itself fire-and-forget-from-here (this whole
+    // block runs inside a .catch(), nothing left to propagate a rejection
+    // to), so each gets its own .catch() logging any disk-write failure
+    // rather than becoming an unhandled promise rejection — same
+    // never-throw-into-the-caller contract as recordModelCall's
+    // recordUsage() call below.
     void this.execute(goal).catch((err) => {
-      void this.finish(goal.runId, 'error', { code: 'simulator-error', message: String(err), recoverable: false })
+      if (err instanceof ModelCallFailure) {
+        // Phase 6: a real provider failure (with no usable fallback) is
+        // recoverable — the writer can fix the underlying issue (start LM
+        // Studio, check network, etc.) and retry — so this gets its own
+        // 'paused' status rather than the generic 'error' terminal state.
+        void this.finish(goal.runId, 'paused', { code: err.code, message: err.message, recoverable: true }).catch(
+          (finishErr) => console.error('[simulator] failed to persist paused run', finishErr)
+        )
+      } else {
+        void this.finish(goal.runId, 'error', { code: 'simulator-error', message: String(err), recoverable: false }).catch(
+          (finishErr) => console.error('[simulator] failed to persist errored run', finishErr)
+        )
+      }
     })
 
     return { runId: goal.runId }
@@ -358,12 +394,46 @@ export class AgentRunManager {
     await this.finish(goal.runId, 'cancelled')
   }
 
+  // Phase 6: the single choke point for prompt resolution, real-provider
+  // fallback, and error classification — every run<Role>() method still
+  // calls this exactly once per model-call step, same as before.
   private async runModelCallStep(goal: AgentGoal, selection: string): Promise<ModelCallSummary> {
-    return selectAdapter(goal.modelRef).runModelCall({
-      modelRef: goal.modelRef,
-      userIntent: goal.userIntent,
-      contextText: selection
-    })
+    const primary = selectAdapter(goal.modelRef)
+
+    // Best-effort: getActivePrompt() reads from the OS user-data directory
+    // via Electron's `app.getPath`, which isn't available in every context
+    // this method can run in (e.g. a unit test that doesn't mock 'electron').
+    // Same "augment, don't block" pattern as the real-tool calls below
+    // (checkWordCount, checkCodexContradictions, ...) — falling back to no
+    // system prompt is a safe degradation, never worth failing the run over.
+    let systemPrompt: string | undefined
+    try {
+      systemPrompt = (await getActivePrompt(goal.agentRole)).text
+    } catch {
+      systemPrompt = undefined
+    }
+
+    const input: ModelCallInput = { modelRef: goal.modelRef, systemPrompt, userIntent: goal.userIntent, contextText: selection }
+
+    try {
+      return await primary.runModelCall(input)
+    } catch (err) {
+      // No fallback worth attempting when the primary adapter already *is*
+      // the fallback target (lm-studio) or the simulator (which never
+      // throws in practice), or when the writer hasn't opted in.
+      if (primary.id === 'simulator' || primary.id === 'lm-studio' || !goal.lmStudioFallback) {
+        throw new ModelCallFailure(String(err instanceof Error ? err.message : err), 'model-call-failed')
+      }
+
+      const lmStudio = new LmStudioAdapter()
+      if (!(await lmStudio.isAvailable())) {
+        throw new ModelCallFailure('LM Studio fallback is unavailable.', 'fallback-unavailable')
+      }
+      return await lmStudio.runModelCall({
+        ...input,
+        modelRef: { provider: 'lm-studio', modelId: 'local-fallback', viaOpenRouter: false }
+      })
+    }
   }
 
   private recordModelCall(goal: AgentGoal, modelCall: ModelCallSummary): void {
@@ -372,6 +442,21 @@ export class AgentRunManager {
     state.budget.tokensUsed += modelCall.inputTokens + modelCall.outputTokens
     state.budget.costUsdUsed += modelCall.estimatedCostUsd
     state.budget.turnsUsed += 1
+
+    // Phase 6: fire-and-forget persistence of this call into the
+    // project-scoped usage log (main/persistence/usageStore.ts) — built by
+    // Wave 1B with no caller yet; this is that caller. Must never block or
+    // throw into the caller, same contract as every other real-tool call in
+    // this file (checkWordCount, checkCodexContradictions, ...).
+    void recordUsage(this.projectRoot, {
+      runId: goal.runId,
+      agentRole: goal.agentRole,
+      modelRef: modelCall.modelRef,
+      inputTokens: modelCall.inputTokens,
+      outputTokens: modelCall.outputTokens,
+      estimatedCostUsd: modelCall.estimatedCostUsd,
+      timestamp: new Date().toISOString()
+    }).catch((err) => console.error('[usage] failed to record', err))
   }
 
   private async execute(goal: AgentGoal): Promise<void> {
@@ -479,13 +564,41 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
+    // Phase 6: when a real adapter actually produced text, use it instead of
+    // the simulated multi-finding categorized list — a deliberate
+    // simplification for this phase (one tracked-change spanning the whole
+    // selection, category 'Model revision') rather than attempting to parse
+    // a real model's output back into the simulator's granular per-issue
+    // findings. Full structured-output extraction for multi-finding reports
+    // is deferred. Falls back to the existing simulated behavior whenever
+    // there's no real output to use (simulator adapter, or a real adapter
+    // that for some reason returned no text).
+    const isReal = selectAdapter(goal.modelRef).id !== 'simulator' && !!modelCall.outputText
+    const finalSuggestions: SuggestionRef[] = isReal
+      ? [
+          {
+            id: randomUUID(),
+            agentRole: 'Line-Editor',
+            kind: 'tracked-change',
+            targetSceneId: goal.scope.sceneIds?.[0],
+            payload: {
+              category: 'Model revision',
+              before: selection,
+              after: modelCall.outputText as string
+            } satisfies TrackedChangePayload,
+            provenance: { capabilityId: 'global.tools.line-edit-scan', capabilityVersion: '1.0.0', runId: goal.runId },
+            state: 'pending'
+          }
+        ]
+      : suggestions
+
     const wordCountNote = wordCountResult ? ` (scanned a ${wordCountResult.wordCount}-word passage)` : ''
     const result: AgentResult = {
       summary:
-        suggestions.length > 0
-          ? `Line Editor found ${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'}${wordCountNote}.`
+        finalSuggestions.length > 0
+          ? `Line Editor found ${finalSuggestions.length} suggestion${finalSuggestions.length === 1 ? '' : 's'}${wordCountNote}.`
           : `Line Editor found no issues in this selection${wordCountNote}.`,
-      proposedManuscriptChanges: suggestions
+      proposedManuscriptChanges: finalSuggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -575,12 +688,36 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
+    // Phase 6: when a real adapter produced text AND the writer didn't opt
+    // into multi-draft mode, emit exactly one insertion built from the real
+    // output instead of the simulated draft(s). Real multi-draft-against-a-
+    // real-model is explicitly out of scope this phase — it would mean N
+    // separate HTTP calls per run, which the budget-guard accounting above
+    // (a single guardModelCall check per run) isn't designed to account for.
+    // generateAlternatives therefore always keeps the simulated path, same
+    // as a real adapter that returned no text.
+    const isReal = selectAdapter(goal.modelRef).id !== 'simulator' && !!modelCall.outputText
+    const finalSuggestions: SuggestionRef[] =
+      isReal && !goal.generateAlternatives
+        ? [
+            {
+              id: randomUUID(),
+              agentRole: 'Generator',
+              kind: 'insertion',
+              targetSceneId: goal.scope.sceneIds?.[0],
+              payload: { text: modelCall.outputText as string } satisfies InsertionPayload,
+              provenance: { capabilityId: 'global.tools.prose-continuation', capabilityVersion: '1.0.0', runId: goal.runId },
+              state: 'pending'
+            }
+          ]
+        : suggestions
+
     const wordCountNote = wordCountResult
-      ? ` Generated a ${wordCountResult.wordCount}-word continuation${suggestions.length > 1 ? ' (first draft)' : ''}.`
+      ? ` Generated a ${wordCountResult.wordCount}-word continuation${finalSuggestions.length > 1 ? ' (first draft)' : ''}.`
       : ''
     const result: AgentResult = {
-      summary: `Generator drafted ${suggestions.length} continuation${suggestions.length === 1 ? '' : 's'}.${wordCountNote}`,
-      proposedManuscriptChanges: suggestions
+      summary: `Generator drafted ${finalSuggestions.length} continuation${finalSuggestions.length === 1 ? '' : 's'}.${wordCountNote}`,
+      proposedManuscriptChanges: finalSuggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,

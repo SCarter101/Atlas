@@ -278,6 +278,17 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
           )
         }
       }
+
+      // Phase 6: mirrors the localModelOnly defense-in-depth check above —
+      // the renderer already gates cloud consent in AgentRail's
+      // authorizeRun(), but the IPC boundary owns execution, so enforce it
+      // here too. See main/permissions/cloudConsent.ts.
+      if (session.cloudConsent.requireCloudAuth && !session.cloudConsent.hasConsent(validatedGoal.runId)) {
+        throw new AtlasError(
+          'This run requires cloud-model consent, which was not recorded for this session.',
+          'CLOUD_CONSENT_REQUIRED'
+        )
+      }
     }
 
     const { runId } = session.agentRuns.start(validatedGoal)
@@ -449,6 +460,26 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   })
 
   ipcMain.handle(IpcChannel.ModelsCatalog, async () => fetchOpenRouterCatalog())
+
+  // Phase 6: mirrors the writer's cloud-consent decision (made in the
+  // renderer's CloudConsentDialog, see AgentRail.tsx's authorizeRun) into
+  // the main-process CloudConsentSessionStore so AgentRunStart's guard above
+  // can enforce it even for a direct bridge call. No project-session
+  // independence concern here (unlike secrets.*) — consent is inherently
+  // tied to whichever project session is currently open.
+  ipcMain.handle(
+    IpcChannel.ConsentGrant,
+    async (_evt, decision: 'authorized-once' | 'authorized-session', runId: string) => {
+      const session = getCurrentProjectSession()
+      if (decision === 'authorized-session') session.cloudConsent.grantSession()
+      else if (decision === 'authorized-once') session.cloudConsent.grantOnce(runId)
+    }
+  )
+
+  ipcMain.handle(IpcChannel.ConsentSetRequireAuth, async (_evt, value: boolean) => {
+    const session = getCurrentProjectSession()
+    session.cloudConsent.setRequireCloudAuth(value)
+  })
 }
 
 function safeFileName(value: string): string {

@@ -37,6 +37,27 @@ export interface AgentGoal {
   // sets it without Advanced Mode still works — the gate is a UX affordance,
   // not a security boundary.
   generateAlternatives?: boolean
+  // Phase 6: when the primary adapter's real model call fails (network
+  // error, upstream error, bad response — see ModelCallFailure in
+  // main/agent/simulator.ts), fall back to a local LM Studio call instead of
+  // ending the run in error. Opt-in (unset/false = old behavior: any model
+  // call failure ends the run). Never consulted when the primary adapter is
+  // already 'simulator' or 'lm-studio' — there's nothing meaningfully
+  // different to fall back to. Mirrored into AgentGoalSchema in
+  // shared/validation.ts — zod silently strips unmirrored fields at the IPC
+  // boundary, see that file's comment.
+  lmStudioFallback?: boolean
+}
+
+// Payload shape for a `kind: 'tracked-change'` SuggestionRef (Line Editor).
+// Previously only ever inline-typed as `{category, before, after}` at each
+// call site (simulator.ts's trackedChange() helper) — pulled out here so the
+// new real-model-output path (runLineEditor's `isReal` branch, Phase 6) can
+// share the same shape instead of re-declaring it ad hoc.
+export interface TrackedChangePayload {
+  category: string
+  before: string
+  after: string
 }
 
 export interface AgentError {
