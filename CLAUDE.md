@@ -374,18 +374,100 @@ this round's recommendation drafts; real external MCP connectivity; TTS voice se
 and reduced-motion tuning for read-aloud; craft-reference explainers are static text (no
 deep-linking into a lesson library). Carried-over Phase 3 deferrals still stand.
 
-## Current verified state (as of Round 5 / Phase 4 completion)
+**Round 6 — Phase 5 ("Import, Export, and Production Hardening")**
+
+Spec §15 Phase 5, built as a sequence of items (not a parallel wave — see the build-method
+note below). Two scope decisions this round **reversed prior standing constraints, with
+explicit user sign-off**: (1) the "no new npm dependencies" rule was **lifted for Phase 5's
+real file I/O** — `docx`, `pdfkit`, `jszip`, `mammoth` (all pure-JS, main-process-only) were
+added for real export/import; (2) full-core scope, all five export formats + typeset Series
+Bible. Model calls still stay simulated (that deferral is unchanged).
+
+*Build-method note (important):* this round **tried Codex subagents as the builder**
+(`codex-companion.mjs task --write`) and **abandoned it mid-round** at the user's direction.
+Codex operates on the **shared working tree**, not isolated worktrees, so its build jobs
+can't parallelize (they collide on `shared/ipc.ts`/`handlers.ts`/`preload/index.ts`) and the
+larger ones repeatedly hit their own session limits mid-task, leaving orphaned backend for
+the orchestrator to finish by hand. Reverted to **Claude worktree agents for building**
+(Item 5 was built that way, cleanly). Codex is retained **only** for the review pass. See
+the "Codex is used ONLY for the independent review pass" note near the top.
+
+*Item 1 — Real export engine:* `main/export/` renders the manuscript to **Markdown / plain
+text / PDF (pdfkit) / DOCX (docx) / EPUB (jszip-assembled EPUB3)** and the Codex to **JSON /
+Markdown / compressed series-bible**, plus a **typeset Series Bible to PDF and EPUB**. Pure
+`render*` functions (return `Buffer`/`string`, unit-tested by magic-byte + substring) are
+split from the Electron dialog+write handler. `Export.tsx` performs real exports via new
+`export:manuscript`/`export:codex` IPC + `dialog.showSaveDialog`. Private (`isPrivate`)
+entries are excluded from shareable codex exports.
+
+*Item 2 — Manuscript import + Codex extraction:* `main/import/` parses `.md`/`.txt`/`.docx`
+(mammoth `extractRawText`) into a real `.atlas` project (books/parts/chapters/globally-unique
+scenes); heuristic `extractCodexCandidates` (repeated proper nouns, dialogue attribution,
+location prepositions) proposes character/location entries through a new `ImportReview`
+writer-approval gate before any become `ai-extracted`/`tentative` Codex entries. New
+`import:manuscript` IPC + Landing "Import Manuscript" card. Honest limits: heuristic, and
+`.docx` heading *styles* are lost by `extractRawText` (only literal "Chapter N" lines split).
+
+*Item 3 — Autosave trust signal + backup/snapshots + recovery:* save indicator shows
+"All changes saved · h:mm AM/PM" (`store.lastSavedAt`). `backupStore.ts` makes labeled
+project backups/snapshots (one jszip engine) that **skip the `backups/` dir (no nesting) and
+the rebuildable `index.sqlite`**; restore is **non-destructive** (extracts to a new
+`<name>-restored-<ts>.atlas`). Interrupted-session recovery via a `settings/session.lock`
+written on open (after checking for a stale one) and removed on clean quit; a stale lock
+raises a dismissible workspace banner. New `backup:*` + `session:recovery-status` IPC;
+Settings "Backups & snapshots" section.
+
+*Item 4 — Privacy authorization flows:* real **API-key vault** (`main/security/keyVault.ts`,
+Electron `safeStorage`/OS keychain) — refuses plaintext when encryption is unavailable,
+path-traversal-guarded names, and the IPC bridge exposes only `set/has/clear` so the **raw
+secret never reaches the renderer**. Heuristic cloud-model classifier (`shared/privacy.ts`),
+per-scene `localModelOnly` flag (+ `validation.ts` mirror + `SceneMetadataPanel` toggle),
+and a run-start gate (`AgentRail.authorizeRun`, both invoke + interview paths): a local-only
+target scene **blocks** a cloud run, else a cloud run without session auth opens
+`CloudConsentDialog`. Settings "Privacy" section. (This **delivers the API-key vault** that
+Phase 4 had listed as deferred.)
+
+*Item 5 — Error handling + storage hardening (Claude worktree agent):* React `ErrorBoundary`
+(outside the router), a global toast surface for unhandled rejections/errors, main-process
+`uncaughtException`/`unhandledRejection` log-and-continue guards, a typed `AtlasError` for
+corrupt/missing manifests, and store IPC actions that catch → toast → reset state instead of
+stranding a half-open stage. Pure `shared/errors.ts` with tests.
+
+*Also fixed a pre-existing flake:* six `AgentRunManager` tests raced the async `result` step
+with a fixed `setTimeout(0|50|60)`; replaced with a deterministic poll helper
+(`simulator.testUtils.ts:waitForResultStep`) — 8/8 consecutive full-suite runs green.
+
+*Codex adversarial-review (closing step, retained):* `codex-companion.mjs adversarial-review
+--base eb6025c` on the whole Phase 5 diff surfaced 3 findings, all confirmed against the code
+and fixed:
+- **HIGH — same-title import overwrote an existing project** (path derived from the title
+  slug alone). Now suffixes the folder (`-2`, `-3`, …) until unique, so import is additive.
+- **HIGH — the `localModelOnly` invariant was renderer-only.** Added a main-side hard-block
+  in the `AgentRunStart` handler: a cloud-classified model run against a local-only scene is
+  rejected with `AtlasError`, even via a direct bridge call.
+- **MED — a stale tracked-change accept** (original `before` text gone) skipped the write but
+  still marked the card accepted. Now surfaces a conflict toast and bails before the flip.
+
+**Explicitly deferred from Phase 5** (confirmed scope): real OpenRouter/LM Studio provider
+integration is still simulated (the *vault* now exists, but no live model calls) — and with
+it, **main-side cloud-consent *session* tracking** (the consent modal is renderer-side; the
+main-side guard enforces only the `localModelOnly` data invariant, which is enough while
+transmission is simulated); DOCX import fidelity beyond raw text (heading styles); beta-reader
+DOCX-comment import (spec's post-Phase-5 item). Carried-over Phase 3/4 deferrals still stand.
+
+## Current verified state (as of Round 6 / Phase 5 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 194/194 tests passing across 31 files (was 97/16 at Round 4).
-- App launches cleanly via `npm run dev` (verified twice — after the Wave 2 merge and
-  again after the Codex-review fixes) with only the expected dev-mode warnings (React
-  DevTools suggestion, React Router v7 future flags, Electron CSP insecure-policy) — no
-  regressions, no circular-import/TDZ crash.
-- Full interactive click-through of the new Phase 4 UI (keyboard J/K/A/R review, metadata
-  proposals, dialogue voice profiles, multi-draft comparison, Typewriter theme,
-  read-aloud, sprint timer, World Builder interview, the 4 visual-story tabs, a live
-  capability recommendation) was **not** performed — still no headless Electron/Playwright
-  driver in this environment. Verification relied on the automated suite (incl. new
-  end-to-end simulator tests that drive real agent runs), a real `npm run dev` boot check,
-  and an independent Codex correctness review of the whole diff.
+- `npx vitest run` — 224/224 tests passing across 38 files (was 194/31 at Round 5); the
+  previously-flaky simulator result-step tests are now deterministic (verified 8/8 runs).
+- App launches cleanly via `npm run dev` (verified after the Item 5 merge and again after the
+  Codex-review fixes) with only the expected dev-mode warnings (React DevTools suggestion,
+  React Router v7 future flags, Electron CSP insecure-policy) — no regressions, no
+  circular-import/TDZ crash. The Item 5 agent additionally confirmed a clean
+  `electron-vite build` (197 renderer modules, no circular imports).
+- Full interactive click-through of the new Phase 5 UI (real DOCX/PDF/EPUB export, manuscript
+  import + extraction review, backup create/restore, the privacy vault + cloud-consent modal,
+  the error-boundary/toast surfaces) was **not** performed — still no headless
+  Electron/Playwright driver in this environment. Verification relied on the automated suite
+  (incl. pure render/parse/backup tests asserting real bytes), a real `npm run dev` boot
+  check, and an independent Codex adversarial-review of the whole diff.
