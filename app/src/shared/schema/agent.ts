@@ -1,3 +1,4 @@
+import type { CapabilityManifest } from './capability'
 import type { SceneMeta } from './manuscript'
 
 export type AgentRole = 'Generator' | 'Dev-Editor' | 'Line-Editor' | 'Dialoguer' | 'World-Builder'
@@ -133,6 +134,23 @@ export interface DialogueAlternativePayload {
   alternatives: DialogueAlternativeOption[]
 }
 
+// Payload shape for a `kind: 'capability-recommendation'` SuggestionRef.
+// Spec Phase 4 ("Capability recommendations based on repeated real writing
+// workflows"): when the same tool has been invoked across `occurrences`
+// separate completed agent runs (see detectRepeatedToolPattern() in
+// main/agent/simulator.ts), the writer is offered a draft capability they
+// can approve into a real installed one via CapabilityRecommendationCard.tsx
+// — accepting calls the existing `capabilities:create` IPC directly with
+// `draftManifest`, the same contract Library.tsx's "New Capability" form
+// already uses.
+export interface CapabilityRecommendationPayload {
+  toolId: string
+  occurrences: number
+  runIds: string[]
+  rationale: string
+  draftManifest: CapabilityManifest
+}
+
 export interface SuggestionRef {
   id: string
   agentRole: AgentRole
@@ -143,6 +161,7 @@ export interface SuggestionRef {
     | 'dialogue-alternative'
     | 'metadata-proposal'
     | 'codex-addition'
+    | 'capability-recommendation'
   targetSceneId?: string
   targetCodexEntryId?: string
   payload: unknown
