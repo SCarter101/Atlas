@@ -7,6 +7,19 @@ import { emptyWorldBuilderInterviewAnswers, encodeWorldBuilderInterview } from '
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { AgentRunManager, deriveWorldBuilderProposals } from './simulator'
 
+// The simulator emits its `result` step asynchronously after a permission
+// response, so a fixed `setTimeout(0)` occasionally samples `steps` before the
+// result lands (flaky). Poll for the step instead — deterministic, with a
+// generous cap so a genuine hang still fails rather than waiting forever.
+async function waitForStep(steps: AgentStep[], kind: AgentStep['kind']): Promise<AgentStep> {
+  for (let i = 0; i < 200; i++) {
+    const found = steps.find((s) => s.kind === kind)
+    if (found) return found
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error(`Timed out waiting for a '${kind}' step`)
+}
+
 describe('deriveWorldBuilderProposals — pure interview-to-Codex-proposals derivation', () => {
   it('proposes exactly the always-on world-rule and location entries when the rest of the interview is blank', () => {
     const proposals = deriveWorldBuilderProposals(emptyWorldBuilderInterviewAnswers())
@@ -119,9 +132,8 @@ describe('AgentRunManager — World Builder interview flow', () => {
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    const resultStep = steps.find((s) => s.kind === 'result')
+    const resultStep = await waitForStep(steps, 'result')
     expect(resultStep).toBeDefined()
     const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[] }
     expect(result.proposedCodexChanges?.length).toBeGreaterThanOrEqual(2)
@@ -142,9 +154,8 @@ describe('AgentRunManager — World Builder interview flow', () => {
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    const resultStep = steps.find((s) => s.kind === 'result')
+    const resultStep = await waitForStep(steps, 'result')
     const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[] }
     expect(result.proposedCodexChanges).toHaveLength(1)
     const payload = result.proposedCodexChanges![0].payload as { citations: { reliability: string }[] }

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentGoal, AgentStep } from '@shared/schema/agent'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { AgentRunManager, detectDuplicateAction } from './simulator'
+import { waitForResultStep } from './simulator.testUtils'
 
 describe('detectDuplicateAction', () => {
   it('is false until a signature would be the threshold-th occurrence', () => {
@@ -66,7 +67,7 @@ describe('AgentRunManager — budget enforcement', () => {
     const permissionStep = steps.find((s) => s.kind === 'permission-request')
     const requestId = (permissionStep!.detail as { requestId: string }).requestId
     manager.respondToPermission(goal.runId, requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForResultStep(steps)
 
     expect(steps.some((s) => s.kind === 'tool-call')).toBe(false)
     expect(steps.some((s) => s.kind === 'model-call')).toBe(false)
@@ -91,7 +92,7 @@ describe('AgentRunManager — budget enforcement', () => {
     const permissionStep = steps.find((s) => s.kind === 'permission-request')
     const requestId = (permissionStep!.detail as { requestId: string }).requestId
     manager.respondToPermission(goal.runId, requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForResultStep(steps)
 
     expect(steps.some((s) => s.kind === 'tool-call')).toBe(true)
     expect(steps.some((s) => s.kind === 'model-call')).toBe(false)

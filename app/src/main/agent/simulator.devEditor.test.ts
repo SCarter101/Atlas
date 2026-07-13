@@ -22,6 +22,7 @@ const { installSeedCapabilities } = await import('../capabilities/seedTools')
 const { openIndexDb } = await import('../persistence/db')
 const { upsertCodexEntry } = await import('../persistence/codexStore')
 const { AgentRunManager } = await import('./simulator')
+const { waitForResultStep } = await import('./simulator.testUtils')
 
 describe('AgentRunManager — Dev-Editor real Codex contradiction check', () => {
   let userDataRoot: string
@@ -91,7 +92,7 @@ describe('AgentRunManager — Dev-Editor real Codex contradiction check', () => 
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitForResultStep(steps)
 
     const toolCallStep = steps.find((s) => s.kind === 'tool-call')
     const output = (toolCallStep!.detail as ToolCall).output as { codexContradictionCheck?: { summary: string } }
@@ -115,7 +116,7 @@ describe('AgentRunManager — Dev-Editor real Codex contradiction check', () => 
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitForResultStep(steps)
 
     const toolCallStep = steps.find((s) => s.kind === 'tool-call')
     const output = (toolCallStep!.detail as ToolCall).output

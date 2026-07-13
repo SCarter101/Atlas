@@ -21,6 +21,7 @@ const { installSeedCapabilities } = await import('../capabilities/seedTools')
 const { openIndexDb } = await import('../persistence/db')
 const { saveAgentRun } = await import('../persistence/agentRunStore')
 const { AgentRunManager } = await import('./simulator')
+const { waitForResultStep } = await import('./simulator.testUtils')
 
 // This is the end-to-end regression test for the capability-recommendation
 // bug that a Codex review caught: the recorded Dev-Editor tool-call id is the
@@ -87,7 +88,7 @@ describe('AgentRunManager — capability recommendation from repeated tool patte
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    await waitForResultStep(steps)
 
     const result = steps.find((s) => s.kind === 'result')!.detail as { proposedManuscriptChanges?: SuggestionRef[] }
     const rec = result.proposedManuscriptChanges?.find((s) => s.kind === 'capability-recommendation')
@@ -120,7 +121,7 @@ describe('AgentRunManager — capability recommendation from repeated tool patte
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    await waitForResultStep(steps)
 
     const result = steps.find((s) => s.kind === 'result')!.detail as { proposedManuscriptChanges?: SuggestionRef[] }
     expect(result.proposedManuscriptChanges?.some((s) => s.kind === 'capability-recommendation')).toBe(false)

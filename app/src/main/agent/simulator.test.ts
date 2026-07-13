@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentGoal, AgentStep, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { AgentRunManager } from './simulator'
+import { waitForResultStep } from './simulator.testUtils'
 
 describe('AgentRunManager — Line Editor simulated flow', () => {
   let projectRoot: string
@@ -58,7 +59,7 @@ describe('AgentRunManager — Line Editor simulated flow', () => {
     expect(steps.some((s) => s.kind === 'tool-call')).toBe(false)
 
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForResultStep(steps)
 
     const toolCallStep = steps.find((s) => s.kind === 'tool-call')
     expect(toolCallStep).toBeDefined()
@@ -81,7 +82,7 @@ describe('AgentRunManager — Line Editor simulated flow', () => {
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'denied')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForResultStep(steps)
 
     expect(steps.some((s) => s.kind === 'tool-call')).toBe(false)
     const resultStep = steps.find((s) => s.kind === 'result')
@@ -100,7 +101,7 @@ describe('AgentRunManager — Line Editor simulated flow', () => {
 
     expect(steps.some((s) => s.kind === 'tool-call')).toBe(false)
     manager.cancel(goal.runId)
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForResultStep(steps)
 
     expect(steps.some((s) => s.kind === 'tool-call')).toBe(false)
     const resultStep = steps.find((s) => s.kind === 'result')

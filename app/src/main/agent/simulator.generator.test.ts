@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentGoal, AgentStep, InsertionPayload, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { AgentRunManager } from './simulator'
+import { waitForResultStep } from './simulator.testUtils'
 
 function makeGoal(generateAlternatives?: boolean): AgentGoal {
   return {
@@ -31,7 +32,7 @@ async function runToCompletion(manager: AgentRunManager, goal: AgentGoal): Promi
 
   const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
   manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await waitForResultStep(steps)
   return steps
 }
 
