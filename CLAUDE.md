@@ -64,19 +64,31 @@ imported a constant back from the other, causing "Cannot access 'X' before
 initialization" on every launch) that 97 passing unit tests never caught, because it was
 a module-evaluation-order bug, not a logic bug. Only booting the real app surfaced it.
 
-**Codex review step (added Round 5):** the Codex plugin is installed, exposing a
-`codex:codex-rescue` agent type and a `codex-companion.mjs` runtime. After a wave is
-merged and green, hand the **whole feature diff** (`git diff <base>..HEAD`) to a Codex
-subagent for an independent, correctness-only review, then **verify every finding against
-the actual code yourself before acting** — Codex can be wrong, and it's still the
-orchestrator's job to confirm and fix. Mechanics: the `codex:codex-rescue` agent only
-*launches* a background Codex job and returns a job id (`task-…`); it can't poll. Retrieve
-results directly with `node "<plugin>/plugins/codex/scripts/codex-companion.mjs" status
-<jobId> --wait --timeout-ms <ms>` then `… result <jobId>` (plugin root:
-`C:\Users\octav\.claude\plugins\marketplaces\openai-codex`). In Round 5 this caught a
-whole-feature-dead bug (capability recommendations never fired due to a tool-id mismatch)
-that 192 green tests and a clean boot both missed, because the bug was in the seam between
-a unit test's self-made fixture and the real recorded data — see the Round 5 entry.
+**Codex is used ONLY for the independent review pass — never as a builder.** All
+*building* is done by Claude subagents in isolated git worktrees (the wave pattern above).
+Codex-as-builder was tried once (Round 6 / Phase 5) and abandoned: `codex-companion.mjs
+task --write` operates on the **shared working tree**, not an isolated worktree, so Codex
+build jobs can't run in parallel (they collide on shared plumbing files like
+`shared/ipc.ts`/`handlers.ts`/`preload/index.ts`) and repeatedly got cut off mid-task by
+their own session limits, leaving orphaned backend code for the orchestrator to finish by
+hand. Claude worktree agents parallelize cleanly and finish their briefs, so they remain
+the build path. Keep Codex strictly for the review step below.
+
+**Codex review step (added Round 5, retained):** the Codex plugin is installed, exposing a
+`codex:codex-rescue` agent type and a `codex-companion.mjs` runtime with `review` /
+`adversarial-review` commands. After a wave is merged and green, hand the **whole feature
+diff** (`git diff <base>..HEAD`) to Codex for an independent, correctness-only review, then
+**verify every finding against the actual code yourself before acting** — Codex can be
+wrong, and it's still the orchestrator's job to confirm and fix. Mechanics: launch a
+background job and retrieve results directly with `node
+"<plugin>/plugins/codex/scripts/codex-companion.mjs" status <jobId> --wait --timeout-ms
+<ms>` then `… result <jobId>` (plugin root:
+`C:\Users\octav\.claude\plugins\marketplaces\openai-codex`); the job id also drops out of
+the registry once consumed, so read the diff/`git status` directly if `result` 404s. In
+Round 5 this caught a whole-feature-dead bug (capability recommendations never fired due to
+a tool-id mismatch) that 192 green tests and a clean boot both missed, because the bug was
+in the seam between a unit test's self-made fixture and the real recorded data — see the
+Round 5 entry.
 
 ## Fix rounds completed so far
 
