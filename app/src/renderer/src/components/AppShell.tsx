@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import type { ManuscriptTree } from '@shared/schema/manuscript'
 import type { Theme } from '@shared/schema/project'
@@ -44,6 +44,8 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
   const setActiveScene = useAtlasStore((s) => s.setActiveScene)
   const manuscriptTree = useAtlasStore((s) => s.manuscriptTree)
   const sceneSaveState = useAtlasStore((s) => s.sceneSaveState)
+  const toasts = useAtlasStore((s) => s.toasts)
+  const dismissToast = useAtlasStore((s) => s.dismissToast)
   const location = useLocation()
 
   const [snapshotOpen, setSnapshotOpen] = useState(false)
@@ -72,8 +74,16 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [paletteOpen])
 
-  const allScenes = (manuscriptTree?.books ?? []).flatMap((b) =>
-    b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes))
+  // Performance: this nested flatMap over the whole manuscript ran on every
+  // AppShell render (including unrelated theme/palette/toast state changes);
+  // memoize on the tree so it only recomputes when the manuscript actually
+  // changes.
+  const allScenes = useMemo(
+    () =>
+      (manuscriptTree?.books ?? []).flatMap((b) =>
+        b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes))
+      ),
+    [manuscriptTree]
   )
   const activeScene = allScenes.find((s) => s.id === activeSceneId)
   const estimatedTokens = activeScene ? Math.round(activeScene.wordCount * 1.35) : 0
@@ -316,6 +326,86 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
       )}
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+    </div>
+  )
+}
+
+// Global notification surface — fixed bottom-right, newest at the bottom.
+// 'error' toasts persist until dismissed; 'info' toasts self-clear (see the
+// store's pushToast). Kept inside AppShell so it inherits the themed wrapper.
+function ToastStack({
+  toasts,
+  onDismiss
+}: {
+  toasts: { id: string; kind: 'error' | 'info'; message: string }[]
+  onDismiss: (id: string) => void
+}): JSX.Element | null {
+  if (toasts.length === 0) return null
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        right: 20,
+        bottom: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        zIndex: 200,
+        maxWidth: 380
+      }}
+    >
+      {toasts.map((toast) => {
+        const isError = toast.kind === 'error'
+        return (
+          <div
+            key={toast.id}
+            role={isError ? 'alert' : 'status'}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              padding: '12px 14px',
+              borderRadius: 10,
+              border: `1px solid ${isError ? 'var(--c-red)' : 'var(--c-border)'}`,
+              background: 'var(--c-surface-raised)',
+              boxShadow: '0 12px 28px rgba(0,0,0,0.18)'
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                marginTop: 5,
+                flexShrink: 0,
+                background: isError ? 'var(--c-red)' : 'var(--c-accent)'
+              }}
+            />
+            <span style={{ flex: 1, fontSize: 12.5, lineHeight: 1.45, color: 'var(--c-ink)', wordBreak: 'break-word' }}>
+              {toast.message}
+            </span>
+            <button
+              onClick={() => onDismiss(toast.id)}
+              title="Dismiss"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                color: 'var(--c-ink-faint)',
+                fontSize: 16,
+                lineHeight: 1,
+                padding: 0,
+                flexShrink: 0
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
 }

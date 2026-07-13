@@ -11,6 +11,18 @@ import { getCurrentProjectSession } from './projectSession'
 // packaged app — resources/ sits two levels up, as a sibling of out/.
 const iconPath = join(__dirname, '../../resources/icon.png')
 
+// Main-process last resort: log-and-continue rather than letting a stray
+// throw/rejection tear down the whole app. Same philosophy as the
+// seed-capabilities try/catch below — a single failed background operation
+// (a persistence write, an IPC handler edge case) shouldn't take the window
+// with it. We deliberately do NOT call app.quit()/process.exit() here.
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaughtException (continuing)', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandledRejection (continuing)', reason)
+})
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1440,
