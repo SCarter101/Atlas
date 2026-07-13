@@ -14,6 +14,7 @@ import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest, Theme } from '@shared/schema/project'
 import type { SessionApproval } from '@shared/schema/capability'
 import { describeProvider, type PrivacyModelRef } from '@shared/privacy'
+import { normalizeError } from '@shared/errors'
 
 // Single source of truth for both validation and the cycle order used by
 // toggleTheme below.
@@ -47,6 +48,18 @@ export interface PrivacySettings {
   warnCloudUnpublished: boolean
 }
 
+// Global renderer notification surface. 'error' toasts persist until the
+// writer dismisses them (a failed save/open is worth their attention);
+// 'info' toasts auto-dismiss after a few seconds. Rendered bottom-right in
+// AppShell.
+export interface Toast {
+  id: string
+  kind: 'error' | 'info'
+  message: string
+}
+
+const INFO_TOAST_TTL_MS = 5000
+
 // Per-agent model assignment shown in Settings and read by AgentRail — a
 // Phase 2 "mockup" per spec §15 (no real OpenRouter routing behind it yet).
 export const DEFAULT_AGENT_MODELS: Record<AgentRole, string> = {
@@ -77,6 +90,7 @@ interface AtlasState {
   privacySettings: PrivacySettings
   cloudAuthGrantedThisSession: boolean
   pendingImportCandidates: CodexCandidate[]
+  toasts: Toast[]
 
   pendingPermission: PendingPermission | null
   pendingCloudConsent: PendingCloudConsent | null
@@ -123,6 +137,8 @@ interface AtlasState {
   resolvePermission: (decision: 'approved-once' | 'approved-session' | 'denied') => void
   revokeSessionApproval: (id: string) => void
   setSuggestionState: (id: string, state: SuggestionRef['state']) => Promise<void>
+  pushToast: (kind: Toast['kind'], message: string) => void
+  dismissToast: (id: string) => void
 }
 
 export const useAtlasStore = create<AtlasState>((set, get) => ({
@@ -141,6 +157,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   privacySettings: { requireCloudAuth: true, warnCloudUnpublished: true },
   cloudAuthGrantedThisSession: false,
   pendingImportCandidates: [],
+  toasts: [],
 
   pendingPermission: null,
   pendingCloudConsent: null,
@@ -153,6 +170,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   sceneProseVersion: 0,
 
   openSampleProject: async () => {
+   try {
     const { projectRoot, manifest } = await window.atlas.project.openSample()
     // Reset suggestion state from any previously-open project before
     // reseeding — without this, reopening the sample after exiting to
@@ -247,9 +265,18 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
         ]
       }))
     }
+   } catch (err) {
+    // A failed open must not strand the writer in a half-initialized 'app'
+    // stage with a null manuscript tree — reset back to Landing and surface
+    // the reason.
+    console.error('[store] openSampleProject failed', err)
+    set({ stage: 'landing' })
+    get().pushToast('error', normalizeError(err).message)
+   }
   },
 
   openProjectAtPath: async (path) => {
+   try {
     const manifest = await window.atlas.project.open(path)
     set({
       projectRoot: path,
@@ -263,11 +290,17 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
+   } catch (err) {
+    console.error('[store] openProjectAtPath failed', err)
+    set({ stage: 'landing' })
+    get().pushToast('error', normalizeError(err).message)
+   }
   },
 
   startNewProject: () => set({ stage: 'onboarding', cloudAuthGrantedThisSession: false }),
 
   createProjectFromFoundations: async (title, genrePrimary, entries) => {
+   try {
     const { projectRoot, manifest } = await window.atlas.project.createFromFoundations(title, genrePrimary, entries)
     set({
       projectRoot,
@@ -282,6 +315,12 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       pendingImportCandidates: []
     })
     await get().refreshManuscriptTree()
+   } catch (err) {
+    // Stay on the onboarding screen (stage is only advanced to 'app' on
+    // success) so the writer's foundations input isn't lost — just report.
+    console.error('[store] createProjectFromFoundations failed', err)
+    get().pushToast('error', normalizeError(err).message)
+   }
   },
 
   exitToLanding: () => set({ stage: 'landing' }),
@@ -314,9 +353,17 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   // doesn't need its own local copy of the tree.
   updateSceneMeta: async (sceneId, metaPatch) => {
     set({ sceneSaveState: 'saving' })
-    await window.atlas.scenes.write(sceneId, { meta: metaPatch })
-    await get().refreshManuscriptTree()
-    set({ sceneSaveState: 'saved', lastSavedAt: new Date().toISOString() })
+    try {
+      await window.atlas.scenes.write(sceneId, { meta: metaPatch })
+      await get().refreshManuscriptTree()
+      set({ sceneSaveState: 'saved', lastSavedAt: new Date().toISOString() })
+    } catch (err) {
+      // Don't leave the save indicator stuck on 'saving…' forever — reset it
+      // and tell the writer the metadata write failed.
+      console.error('[store] updateSceneMeta failed', err)
+      set({ sceneSaveState: 'saved' })
+      get().pushToast('error', normalizeError(err).message)
+    }
   },
 
   toggleFocusMode: () =>
@@ -475,6 +522,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     // the scene. Other kinds (editorial findings, dialogue alternatives,
     // codex additions) are reports/options, not a single literal text to
     // apply automatically.
+    try {
     if (state === 'accepted' && suggestion?.targetSceneId) {
       if (suggestion.kind === 'tracked-change') {
         const payload = suggestion.payload as { before: string; after: string }
@@ -521,6 +569,15 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       const payload = suggestion.payload as CapabilityRecommendationPayload
       await window.atlas.capabilities.create(payload.draftManifest)
     }
+    } catch (err) {
+      // If the manuscript/capability write behind an "Accept" fails, bail
+      // BEFORE flipping the card to 'accepted' below — otherwise the UI would
+      // claim the change landed when it didn't. The card stays pending so the
+      // writer can retry.
+      console.error('[store] setSuggestionState write failed', err)
+      get().pushToast('error', normalizeError(err).message)
+      return
+    }
 
     // Drafts sharing a draftGroupId (the opt-in "Generate Alternatives" mode
     // — see AgentGoal.generateAlternatives) are mutually exclusive: only one
@@ -546,5 +603,17 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
         return sg
       })
     }))
-  }
+  },
+
+  pushToast: (kind, message) => {
+    const id = crypto.randomUUID()
+    set((s) => ({ toasts: [...s.toasts, { id, kind, message }] }))
+    // 'error' toasts persist until dismissed (a failed save is worth the
+    // writer's attention); 'info' toasts self-clear so they don't pile up.
+    if (kind === 'info') {
+      setTimeout(() => get().dismissToast(id), INFO_TOAST_TTL_MS)
+    }
+  },
+
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
 }))

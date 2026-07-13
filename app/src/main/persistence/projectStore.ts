@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProjectManifest } from '@shared/schema/project'
+import { AtlasError } from '@shared/errors'
 import { migrateRecord } from './migrations'
 import { projectPaths } from './paths'
 
@@ -14,8 +15,21 @@ export function sampleProjectRoot(): string {
 }
 
 export async function openProject(projectRoot: string): Promise<ProjectManifest> {
-  const raw = await readFile(projectPaths(projectRoot).manifest, 'utf-8')
-  return migrateRecord('ProjectManifest', JSON.parse(raw) as ProjectManifest)
+  // A missing/corrupt project.json throws a raw ENOENT or SyntaxError whose
+  // message ("Unexpected token … in JSON") means nothing to a writer. Normalize
+  // it into a tagged, explainable AtlasError. Note listProjects() below relies
+  // on this throwing so it can skip half-created folders — the behaviour is
+  // preserved, only the error shape changes.
+  try {
+    const raw = await readFile(projectPaths(projectRoot).manifest, 'utf-8')
+    return migrateRecord('ProjectManifest', JSON.parse(raw) as ProjectManifest)
+  } catch (err) {
+    console.error('[projectStore] openProject failed to read manifest', projectRoot, err)
+    throw new AtlasError(
+      "This project's manifest could not be read (it may be missing or corrupted).",
+      'MANIFEST_UNREADABLE'
+    )
+  }
 }
 
 // Lists every project folder under the "Atlas Projects" directory (each a
