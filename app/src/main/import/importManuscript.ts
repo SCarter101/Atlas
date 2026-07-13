@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CodexCandidate } from '@shared/schema/import'
 import type { ProjectManifest } from '@shared/schema/project'
@@ -16,7 +17,16 @@ export async function importManuscriptFromFile(
 ): Promise<{ projectRoot: string; manifest: ProjectManifest; codexCandidates: CodexCandidate[] }> {
   const { text, baseName } = await readSourceFile(filePath)
   const parsed = parseManuscript(text, baseName)
-  const projectRoot = join(app.getPath('documents'), 'Atlas Projects', `${slugify(parsed.title)}.atlas`)
+  const projectsDir = join(app.getPath('documents'), 'Atlas Projects')
+  const slug = slugify(parsed.title)
+  // Never overwrite an existing project on import: deriving the path from the
+  // title slug alone means importing a manuscript that shares a title with an
+  // existing project would clobber that project's manifest and scenes.
+  // Suffix until the target folder is free so import is always additive.
+  let projectRoot = join(projectsDir, `${slug}.atlas`)
+  for (let n = 2; existsSync(projectRoot); n++) {
+    projectRoot = join(projectsDir, `${slug}-${n}.atlas`)
+  }
   const session = await ProjectSession.create(projectRoot)
   setCurrentProjectSession(session)
   const manifest = await createProject(projectRoot, { title: parsed.title })

@@ -527,12 +527,19 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       if (suggestion.kind === 'tracked-change') {
         const payload = suggestion.payload as { before: string; after: string }
         const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
-        if (prose.includes(payload.before)) {
-          const nextProse = prose.replace(payload.before, payload.after)
-          await window.atlas.snapshots.create(suggestion.targetSceneId, prose, 'Before suggestion accepted')
-          await window.atlas.scenes.write(suggestion.targetSceneId, { prose: nextProse })
-          set((s) => ({ sceneProseVersion: s.sceneProseVersion + 1 }))
+        if (!prose.includes(payload.before)) {
+          // Stale suggestion: the original span is gone (the writer edited it,
+          // a concurrent save landed, or it was already accepted). Skipping
+          // the write but still flipping the card to 'accepted' would claim a
+          // change that never happened, so treat it as a conflict — surface a
+          // toast and leave the card pending instead of updating state below.
+          get().pushToast('error', 'This edit no longer matches the current text — re-run the agent to refresh the suggestion.')
+          return
         }
+        const nextProse = prose.replace(payload.before, payload.after)
+        await window.atlas.snapshots.create(suggestion.targetSceneId, prose, 'Before suggestion accepted')
+        await window.atlas.scenes.write(suggestion.targetSceneId, { prose: nextProse })
+        set((s) => ({ sceneProseVersion: s.sceneProseVersion + 1 }))
       } else if (suggestion.kind === 'insertion') {
         const payload = suggestion.payload as { text: string }
         const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)

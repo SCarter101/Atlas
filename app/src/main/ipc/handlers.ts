@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { IpcChannel, type CodexExportFormat, type FoundationsCodexDraft, type ManuscriptExportFormat } from '@shared/ipc'
+import { AtlasError } from '@shared/errors'
+import { isCloudModel } from '@shared/privacy'
 import type { AgentGoal, PermissionDecision } from '@shared/schema/agent'
 import type { CapabilityManifest, LifecycleState } from '@shared/schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
@@ -255,6 +257,26 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.AgentRunStart, async (_evt, goal: AgentGoal) => {
     const validatedGoal = AgentGoalSchema.parse(goal)
     const session = getCurrentProjectSession()
+
+    // Defense-in-depth for the writer's per-scene "local model only" marking
+    // (spec §13). The renderer already gates this in AgentRail, but the IPC
+    // boundary owns execution, so enforce the invariant here too: a
+    // cloud-classified model must never run against a scene the writer flagged
+    // local-only, even via a direct bridge call. (The consent *modal* itself
+    // stays renderer-side — see the Round 6 deferral note; model calls are
+    // simulated, so there's no real transmission to gate main-side yet.)
+    if (isCloudModel(validatedGoal.modelRef)) {
+      for (const sceneId of validatedGoal.scope.sceneIds ?? []) {
+        const scene = await readScene(session.projectRoot, session.db, sceneId).catch(() => null)
+        if (scene?.meta.localModelOnly) {
+          throw new AtlasError(
+            'This scene is marked local-model-only and cannot be sent to a cloud model.',
+            'LOCAL_MODEL_ONLY'
+          )
+        }
+      }
+    }
+
     const { runId } = session.agentRuns.start(validatedGoal)
     // Forward every step to the renderer over a fixed channel; preload
     // filters by runId when re-exposing this as a per-run subscription.
