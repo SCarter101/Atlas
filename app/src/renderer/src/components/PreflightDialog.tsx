@@ -1,5 +1,8 @@
 import { useNavigate } from 'react-router-dom'
+import type { ModelRef } from '@shared/schema/agent'
+import { describeProvider } from '@shared/privacy'
 import { estimateAgentCost } from '../lib/costEstimate'
+import { useAtlasStore } from '../state/store'
 
 // Plain-language cost pre-flight per spec §8: shown before any run starts,
 // with a real confirm/change-model/cancel choice rather than firing the
@@ -12,13 +15,18 @@ export function PreflightDialog({
   onCancel
 }: {
   agentName: string
-  model: string
+  model: ModelRef
   selectionText: string
   onConfirm: () => void
   onCancel: () => void
 }): JSX.Element {
   const navigate = useNavigate()
-  const { tokens, costUsd } = estimateAgentCost(selectionText, model)
+  // Read the catalog directly from global state rather than threading it in
+  // as a prop, since AgentRail.tsx (this component's one call site) isn't
+  // owned by this wave and shouldn't need an extra prop passed through.
+  const modelCatalog = useAtlasStore((s) => s.modelCatalog)
+  const { tokens, costUsd } = estimateAgentCost(selectionText, model, modelCatalog)
+  const modelLabel = describeProvider(model)
 
   return (
     <div
@@ -45,7 +53,7 @@ export function PreflightDialog({
           Send to {agentName}?
         </div>
         <div style={{ fontSize: 13, color: 'var(--c-ink-soft)', marginBottom: 14, lineHeight: 1.5 }}>
-          Estimated {tokens.toLocaleString()} tokens on {model}
+          Estimated {tokens.toLocaleString()} tokens on {modelLabel}
           {costUsd > 0 ? ` — about $${costUsd.toFixed(3)}.` : ' — free (local model).'}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

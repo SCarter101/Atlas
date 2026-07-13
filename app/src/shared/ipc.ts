@@ -3,11 +3,13 @@ import type { BackupMeta } from './schema/backup'
 import type { CapabilityManifest, LifecycleState, SessionApproval } from './schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { CodexCandidate } from './schema/import'
+import type { OpenRouterCatalogEntry } from './schema/models'
 import type { ProjectManifest } from './schema/project'
 import type { ManuscriptTree, SceneMeta } from './schema/manuscript'
 import type { ChapterSummary, ContextWarning, RetrievalResult, SceneSummary } from './schema/retrieval'
 import type { SessionGoal, SessionSummary } from './schema/session'
 import type { SnapshotDiffRun } from './schema/revision'
+import type { UsageSummary } from './schema/usage'
 
 // Channel names shared between preload's contextBridge exposure and main's
 // ipcMain handlers, so a typo can't silently create two different strings.
@@ -60,7 +62,12 @@ export const IpcChannel = {
   SessionRecoveryStatus: 'session:recovery-status',
   SecretsSet: 'secrets:set',
   SecretsHas: 'secrets:has',
-  SecretsClear: 'secrets:clear'
+  SecretsClear: 'secrets:clear',
+  PromptsGet: 'prompts:get',
+  PromptsSet: 'prompts:set',
+  PromptsReset: 'prompts:reset',
+  UsageSummary: 'usage:summary',
+  ModelsCatalog: 'models:catalog'
 } as const
 
 export interface SceneReadResult {
@@ -201,5 +208,16 @@ export interface AtlasBridge {
     set(name: string, value: string): Promise<{ ok: boolean; error?: string }>
     has(name: string): Promise<boolean>
     clear(name: string): Promise<void>
+  }
+  prompts: {
+    get(role: AgentRole): Promise<{ text: string; version: string }>
+    set(role: AgentRole, text: string): Promise<{ version: string }>
+    reset(role: AgentRole): Promise<{ text: string; version: string }>
+  }
+  usage: {
+    summary(): Promise<UsageSummary>
+  }
+  models: {
+    catalog(): Promise<OpenRouterCatalogEntry[]>
   }
 }

@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { AgentRole } from '@shared/schema/agent'
+import type { AgentRole, ModelRef } from '@shared/schema/agent'
 import type { BackupMeta } from '@shared/schema/backup'
+import type { OpenRouterCatalogEntry } from '@shared/schema/models'
+import type { UsageSummary } from '@shared/schema/usage'
 import { configuredMcpServers } from '@shared/mcp'
 import { useAtlasStore } from '../state/store'
-
-const MODEL_OPTIONS = ['Claude Opus 4', 'Claude Sonnet 4', 'GPT-4.1', 'Gemini 1.5 Pro', 'Local (LM Studio)']
 
 const AGENT_ORDER: { role: AgentRole; name: string }[] = [
   { role: 'Generator', name: 'Generator' },
@@ -14,30 +14,25 @@ const AGENT_ORDER: { role: AgentRole; name: string }[] = [
   { role: 'World-Builder', name: 'World Builder' }
 ]
 
-// Ported from the Phase 1 prototype's PromptEditor.dc.html — default
-// prompts and starting version numbers, kept purely as in-memory session
-// state here since there's no real prompt-driven agent behavior yet to
-// persist against (spec §14: prompts must be editable, reversible, and
-// versioned once that lands).
-const DEFAULT_PROMPTS: Record<AgentRole, string> = {
-  Generator:
-    "You are Generator, the primary drafting agent for this novelist's manuscript. Draft prose from the scene outline and metadata provided. Match the writer's established voice. Never contradict locked world rules or canon Codex facts. Ask a clarifying question if the outline is too vague to draft confidently.",
-  'Dev-Editor':
-    'You are Story Editor, an industry developmental editor. Operate at the act or full-manuscript level. Detect plot holes, pacing problems, weak stakes, and broken setups/payoffs. Return a structured report with severity scores — never rewrite prose directly.',
-  'Line-Editor':
-    'You are Line Editor, a copy editor focused on clarity and voice preservation. Propose tracked changes only — never silently edit. Flag AI-sounding prose separately from grammar and style issues.',
-  Dialoguer:
-    "You are Dialogue Editor. Use each character's Codex voice profile to evaluate whether dialogue is distinct, advances conflict, and avoids sounding interchangeable between characters.",
-  'World-Builder':
-    'You are World Builder. Use the Codex world repository as primary knowledge. Clearly separate invented facts from researched real-world facts, and cite sources for anything pulled from the web. Never add to the Codex without writer approval.'
+// Phase 6: agentModels now holds real ModelRefs (see store.ts) instead of
+// bare display strings. <select> needs string option values, so ModelRefs
+// are serialized to/from `${provider}:${modelId}` — safe because these two
+// fields together are unique across every option this screen offers.
+const SIMULATOR_REF: ModelRef = { provider: 'simulator', modelId: 'simulator', viaOpenRouter: false }
+const LM_STUDIO_REF: ModelRef = { provider: 'lm-studio', modelId: 'local-model', viaOpenRouter: false }
+
+function modelRefKey(ref: ModelRef): string {
+  return `${ref.provider}:${ref.modelId}`
 }
 
-const DEFAULT_VERSIONS: Record<AgentRole, string> = {
-  Generator: '1.2',
-  'Dev-Editor': '1.0',
-  'Line-Editor': '1.3',
-  Dialoguer: '1.0',
-  'World-Builder': '1.1'
+function modelDisplayLabel(ref: ModelRef, catalog: OpenRouterCatalogEntry[]): string {
+  if (ref.provider === 'simulator') return 'Simulated (no API calls)'
+  if (ref.provider === 'lm-studio') return 'Local (LM Studio)'
+  if (ref.provider === 'openrouter') {
+    const catalogEntry = catalog.find((entry) => entry.id === ref.modelId)
+    if (catalogEntry) return catalogEntry.name
+  }
+  return ref.modelId
 }
 
 function formatBackupSize(sizeBytes: number): string {
@@ -48,6 +43,8 @@ function formatBackupSize(sizeBytes: number): string {
 export function Settings(): JSX.Element {
   const agentModels = useAtlasStore((s) => s.agentModels)
   const setAgentModel = useAtlasStore((s) => s.setAgentModel)
+  const modelCatalog = useAtlasStore((s) => s.modelCatalog)
+  const loadModelCatalog = useAtlasStore((s) => s.loadModelCatalog)
   const lmStudioFallback = useAtlasStore((s) => s.lmStudioFallback)
   const toggleLmStudioFallback = useAtlasStore((s) => s.toggleLmStudioFallback)
   const advancedMode = useAtlasStore((s) => s.advancedMode)
@@ -126,7 +123,26 @@ export function Settings(): JSX.Element {
   useEffect(() => {
     void refreshBackups()
     void refreshOpenRouterKeyState()
+    void loadModelCatalog()
+    // loadModelCatalog is a stable store action reference (zustand), safe to
+    // omit from deps — this should only run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  function handleModelChange(role: AgentRole, key: string): void {
+    if (key === modelRefKey(SIMULATOR_REF)) {
+      setAgentModel(role, SIMULATOR_REF)
+      return
+    }
+    if (key === modelRefKey(LM_STUDIO_REF)) {
+      setAgentModel(role, LM_STUDIO_REF)
+      return
+    }
+    const catalogEntry = modelCatalog.find((entry) => modelRefKey({ provider: 'openrouter', modelId: entry.id, viaOpenRouter: true }) === key)
+    if (catalogEntry) {
+      setAgentModel(role, { provider: 'openrouter', modelId: catalogEntry.id, viaOpenRouter: true })
+    }
+  }
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '36px 40px 80px' }}>
@@ -177,8 +193,8 @@ export function Settings(): JSX.Element {
             <span style={{ fontSize: 14, fontWeight: 600 }}>{name}</span>
             {advancedMode ? (
               <select
-                value={agentModels[role]}
-                onChange={(e) => setAgentModel(role, e.target.value)}
+                value={modelRefKey(agentModels[role])}
+                onChange={(e) => handleModelChange(role, e.target.value)}
                 style={{
                   padding: '6px 10px',
                   borderRadius: 7,
@@ -188,14 +204,20 @@ export function Settings(): JSX.Element {
                   fontSize: 12.5
                 }}
               >
-                {MODEL_OPTIONS.map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
+                <option value={modelRefKey(SIMULATOR_REF)}>Simulated (no API calls)</option>
+                {modelCatalog.length > 0 && (
+                  <optgroup label="OpenRouter">
+                    {modelCatalog.map((entry) => (
+                      <option key={entry.id} value={modelRefKey({ provider: 'openrouter', modelId: entry.id, viaOpenRouter: true })}>
+                        {entry.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value={modelRefKey(LM_STUDIO_REF)}>Local (LM Studio)</option>
               </select>
             ) : (
-              <span style={{ fontSize: 13, color: 'var(--c-ink-faint)' }}>{agentModels[role]}</span>
+              <span style={{ fontSize: 13, color: 'var(--c-ink-faint)' }}>{modelDisplayLabel(agentModels[role], modelCatalog)}</span>
             )}
           </div>
         ))}
@@ -414,6 +436,13 @@ export function Settings(): JSX.Element {
             )}
           </Section>
 
+          {/* Phase 6: real per-project usage/cost tracking (main/persistence/
+              usageStore.ts). Nothing writes to the usage log yet in this
+              wave — main/agent/simulator.ts is the intended future caller
+              once real provider calls replace the simulator — so this will
+              read as empty until that lands. */}
+          <UsageSection />
+
           {/* Spec §8/§15 Phase 2: MCP-compatible adapter architecture exists
               so external tools can be discovered and invoked without the
               runtime depending on MCP directly — but production MCP
@@ -465,11 +494,103 @@ export function Settings(): JSX.Element {
   )
 }
 
+function UsageSection(): JSX.Element {
+  const [summary, setSummary] = useState<UsageSummary | null>(null)
+
+  useEffect(() => {
+    void window.atlas.usage.summary().then(setSummary)
+  }, [])
+
+  return (
+    <Section title="Usage & cost">
+      {!summary ? (
+        <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>Loading…</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 28, marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--c-ink-faint)', marginBottom: 2 }}>Total cost</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>${summary.totalCostUsd.toFixed(3)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--c-ink-faint)', marginBottom: 2 }}>Total tokens</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{summary.totalTokens.toLocaleString()}</div>
+            </div>
+          </div>
+          {AGENT_ORDER.every(({ role }) => !summary.byAgentRole[role]) ? (
+            <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>
+              No usage recorded yet — this fills in once real model calls run (still simulated in this build).
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {AGENT_ORDER.filter(({ role }) => summary.byAgentRole[role]).map(({ role, name }) => {
+                const bucket = summary.byAgentRole[role]
+                return (
+                  <div
+                    key={role}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '10px 14px',
+                      borderRadius: 9,
+                      border: '1px solid var(--c-border)',
+                      background: 'var(--c-surface-raised)',
+                      fontSize: 12.5
+                    }}
+                  >
+                    <span style={{ fontWeight: 600 }}>{name}</span>
+                    <span style={{ color: 'var(--c-ink-soft)' }}>
+                      {bucket.calls} call{bucket.calls === 1 ? '' : 's'} · {bucket.tokens.toLocaleString()} tokens · $
+                      {bucket.costUsd.toFixed(3)}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </Section>
+  )
+}
+
 function PromptEditorSection(): JSX.Element {
   const [selected, setSelected] = useState<AgentRole>('Generator')
-  const [drafts, setDrafts] = useState<Record<AgentRole, string>>({ ...DEFAULT_PROMPTS })
-  const [versions, setVersions] = useState<Record<AgentRole, string>>({ ...DEFAULT_VERSIONS })
-  const [dirty, setDirty] = useState(false)
+  const [text, setText] = useState('')
+  const [savedText, setSavedText] = useState('')
+  const [version, setVersion] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    void window.atlas.prompts.get(selected).then((result) => {
+      if (cancelled) return
+      setText(result.text)
+      setSavedText(result.text)
+      setVersion(result.version)
+      setLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [selected])
+
+  const dirty = text !== savedText
+
+  async function handleReset(): Promise<void> {
+    const result = await window.atlas.prompts.reset(selected)
+    setText(result.text)
+    setSavedText(result.text)
+    setVersion(result.version)
+  }
+
+  async function handleSaveNewVersion(): Promise<void> {
+    const result = await window.atlas.prompts.set(selected, text)
+    setSavedText(text)
+    setVersion(result.version)
+  }
 
   return (
     <Section title="System prompts">
@@ -478,10 +599,7 @@ function PromptEditorSection(): JSX.Element {
           {AGENT_ORDER.map(({ role, name }) => (
             <button
               key={role}
-              onClick={() => {
-                setSelected(role)
-                setDirty(false)
-              }}
+              onClick={() => setSelected(role)}
               style={{
                 textAlign: 'left',
                 padding: '8px 10px',
@@ -504,14 +622,12 @@ function PromptEditorSection(): JSX.Element {
             <div style={{ fontSize: 13.5, fontWeight: 600 }}>
               {AGENT_ORDER.find((a) => a.role === selected)?.name} — system prompt
             </div>
-            <span style={{ fontSize: 11, color: 'var(--c-ink-faint)' }}>Version {versions[selected]}</span>
+            <span style={{ fontSize: 11, color: 'var(--c-ink-faint)' }}>Version {version}</span>
           </div>
           <textarea
-            value={drafts[selected]}
-            onChange={(e) => {
-              setDrafts((d) => ({ ...d, [selected]: e.target.value }))
-              setDirty(true)
-            }}
+            value={text}
+            disabled={loading}
+            onChange={(e) => setText(e.target.value)}
             style={{
               width: '100%',
               minHeight: 200,
@@ -527,23 +643,19 @@ function PromptEditorSection(): JSX.Element {
             }}
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)' }}>{dirty ? 'Unsaved changes' : 'Saved'}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)' }}>{loading ? 'Loading…' : dirty ? 'Unsaved changes' : 'Saved'}</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
-                onClick={() => {
-                  setDrafts((d) => ({ ...d, [selected]: DEFAULT_PROMPTS[selected] }))
-                  setDirty(false)
-                }}
-                style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink-soft)', fontSize: 12.5, cursor: 'pointer' }}
+                onClick={() => void handleReset()}
+                disabled={loading}
+                style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink-soft)', fontSize: 12.5, cursor: loading ? 'default' : 'pointer' }}
               >
                 Reset to default
               </button>
               <button
-                onClick={() => {
-                  setVersions((v) => ({ ...v, [selected]: (parseFloat(v[selected]) + 0.1).toFixed(1) }))
-                  setDirty(false)
-                }}
-                style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: 'var(--c-accent)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => void handleSaveNewVersion()}
+                disabled={loading}
+                style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: 'var(--c-accent)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: loading ? 'default' : 'pointer' }}
               >
                 Save new version
               </button>

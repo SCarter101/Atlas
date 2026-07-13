@@ -87,6 +87,17 @@ const atlasBridge: AtlasBridge = {
     set: (name, value) => ipcRenderer.invoke(IpcChannel.SecretsSet, name, value),
     has: (name) => ipcRenderer.invoke(IpcChannel.SecretsHas, name),
     clear: (name) => ipcRenderer.invoke(IpcChannel.SecretsClear, name)
+  },
+  prompts: {
+    get: (role) => ipcRenderer.invoke(IpcChannel.PromptsGet, role),
+    set: (role, text) => ipcRenderer.invoke(IpcChannel.PromptsSet, role, text),
+    reset: (role) => ipcRenderer.invoke(IpcChannel.PromptsReset, role)
+  },
+  usage: {
+    summary: () => ipcRenderer.invoke(IpcChannel.UsageSummary)
+  },
+  models: {
+    catalog: () => ipcRenderer.invoke(IpcChannel.ModelsCatalog)
   }
 }
 
