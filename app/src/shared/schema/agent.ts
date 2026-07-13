@@ -74,6 +74,11 @@ export interface ModelCallSummary {
   inputTokens: number
   outputTokens: number
   estimatedCostUsd: number
+  // The model's actual completion text. Absent for SimulatorAdapter (there
+  // is no real text to report); present for real adapters (openRouterAdapter
+  // / lmStudioAdapter, Phase 6). No zod mirror in shared/validation.ts —
+  // ModelCallSummary is never validated at an IPC write boundary.
+  outputText?: string
 }
 
 export interface Citation {
