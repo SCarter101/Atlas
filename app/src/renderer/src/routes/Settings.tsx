@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { AgentRole } from '@shared/schema/agent'
+import type { BackupMeta } from '@shared/schema/backup'
 import { configuredMcpServers } from '@shared/mcp'
 import { useAtlasStore } from '../state/store'
 
@@ -39,6 +40,11 @@ const DEFAULT_VERSIONS: Record<AgentRole, string> = {
   'World-Builder': '1.1'
 }
 
+function formatBackupSize(sizeBytes: number): string {
+  if (sizeBytes < 1024 * 1024) return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export function Settings(): JSX.Element {
   const agentModels = useAtlasStore((s) => s.agentModels)
   const setAgentModel = useAtlasStore((s) => s.setAgentModel)
@@ -50,6 +56,43 @@ export function Settings(): JSX.Element {
   const revokeSessionApproval = useAtlasStore((s) => s.revokeSessionApproval)
 
   const [apiKey, setApiKey] = useState('')
+  const [backupLabel, setBackupLabel] = useState('')
+  const [backups, setBackups] = useState<BackupMeta[]>([])
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupMessage, setBackupMessage] = useState<string | null>(null)
+
+  async function refreshBackups(): Promise<void> {
+    setBackups(await window.atlas.backups.list())
+  }
+
+  async function handleCreateBackup(): Promise<void> {
+    setBackupBusy(true)
+    setBackupMessage(null)
+    try {
+      await window.atlas.backups.create(backupLabel.trim() || undefined)
+      setBackupLabel('')
+      await refreshBackups()
+      setBackupMessage('Backup created.')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function handleRestoreBackup(backupId: string): Promise<void> {
+    if (!window.confirm('Restore this backup to a new project folder? Your current project will not be overwritten.')) return
+    setBackupBusy(true)
+    setBackupMessage(null)
+    try {
+      const result = await window.atlas.backups.restore(backupId)
+      setBackupMessage(`Restored non-destructively to ${result.restoredProjectRoot}`)
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshBackups()
+  }, [])
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '36px 40px 80px' }}>
@@ -123,6 +166,90 @@ export function Settings(): JSX.Element {
           </div>
         ))}
       </div>
+
+      <Section title="Backups & snapshots">
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <input
+            value={backupLabel}
+            onChange={(e) => setBackupLabel(e.target.value)}
+            placeholder="Optional label"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--c-border)',
+              background: 'var(--c-surface-raised)',
+              color: 'var(--c-ink)',
+              fontSize: 13
+            }}
+          />
+          <button
+            onClick={() => void handleCreateBackup()}
+            disabled={backupBusy}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 7,
+              border: 'none',
+              background: 'var(--c-accent)',
+              color: '#fff',
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: backupBusy ? 'default' : 'pointer',
+              opacity: backupBusy ? 0.7 : 1,
+              flexShrink: 0
+            }}
+          >
+            {backupBusy ? 'Working…' : 'Create backup'}
+          </button>
+        </div>
+        {backupMessage && <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', marginBottom: 12 }}>{backupMessage}</div>}
+        {backups.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>No backups yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {backups.map((backup) => (
+              <div
+                key={backup.backupId}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  border: '1px solid var(--c-border)',
+                  background: 'var(--c-surface-raised)'
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{backup.label ?? 'Untitled'}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--c-ink-soft)' }}>
+                    {new Date(backup.createdAt).toLocaleString()} · {formatBackupSize(backup.sizeBytes)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void handleRestoreBackup(backup.backupId)}
+                  disabled={backupBusy}
+                  style={{
+                    padding: '7px 14px',
+                    borderRadius: 7,
+                    border: '1px solid var(--c-border)',
+                    background: 'transparent',
+                    color: 'var(--c-ink-soft)',
+                    fontSize: 12.5,
+                    cursor: backupBusy ? 'default' : 'pointer',
+                    flexShrink: 0,
+                    opacity: backupBusy ? 0.7 : 1
+                  }}
+                >
+                  Restore
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
 
       {advancedMode && (
         <>

@@ -76,6 +76,12 @@ const atlasBridge: AtlasBridge = {
     list: (sceneId) => ipcRenderer.invoke(IpcChannel.SnapshotsList, sceneId),
     create: (sceneId, prose, label) => ipcRenderer.invoke(IpcChannel.SnapshotsCreate, sceneId, prose, label),
     diff: (sceneId, snapshotIdA, snapshotIdB) => ipcRenderer.invoke(IpcChannel.SnapshotsDiff, sceneId, snapshotIdA, snapshotIdB)
+  },
+  backups: {
+    create: (label) => ipcRenderer.invoke(IpcChannel.BackupCreate, label),
+    list: () => ipcRenderer.invoke(IpcChannel.BackupList),
+    restore: (backupId) => ipcRenderer.invoke(IpcChannel.BackupRestore, backupId),
+    recoveryStatus: () => ipcRenderer.invoke(IpcChannel.SessionRecoveryStatus)
   }
 }
 

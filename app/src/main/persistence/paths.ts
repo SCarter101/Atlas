@@ -16,6 +16,7 @@ export function projectPaths(projectRoot: string) {
     capabilitiesDir: join(projectRoot, 'capabilities'),
     agentRunsDir: join(projectRoot, 'agent-runs'),
     exportsDir: join(projectRoot, 'exports'),
+    backupsDir: join(projectRoot, 'backups'),
     settingsDir: join(projectRoot, 'settings')
   }
 }

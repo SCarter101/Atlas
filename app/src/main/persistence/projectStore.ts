@@ -67,6 +67,7 @@ export async function createProject(
       paths.capabilitiesDir,
       paths.agentRunsDir,
       paths.exportsDir,
+      paths.backupsDir,
       paths.settingsDir
     ].map((dir) => mkdir(dir, { recursive: true }))
   )

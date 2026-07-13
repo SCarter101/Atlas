@@ -123,6 +123,7 @@ export function ManuscriptWorkspace(): JSX.Element {
   const activeSuggestions = useAtlasStore((s) => s.activeSuggestions)
   const lastAgentSummary = useAtlasStore((s) => s.lastAgentSummary)
   const sceneSaveState = useAtlasStore((s) => s.sceneSaveState)
+  const lastSavedAt = useAtlasStore((s) => s.lastSavedAt)
   const setSceneSaveState = useAtlasStore((s) => s.setSceneSaveState)
   const focusMode = useAtlasStore((s) => s.focusMode)
   const toggleFocusMode = useAtlasStore((s) => s.toggleFocusMode)
@@ -133,6 +134,7 @@ export function ManuscriptWorkspace(): JSX.Element {
   const [prose, setProse] = useState('')
   const [focusedSuggestionId, setFocusedSuggestionId] = useState<string | null>(null)
   const [showRevisionHistory, setShowRevisionHistory] = useState(false)
+  const [showRecoveryBanner, setShowRecoveryBanner] = useState(false)
   const editorRef = useRef<ManuscriptEditorHandle>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -160,11 +162,19 @@ export function ManuscriptWorkspace(): JSX.Element {
   const metadataProposals = sceneSuggestions.filter((s) => s.kind === 'metadata-proposal')
   const capabilityRecommendations = sceneSuggestions.filter((s) => s.kind === 'capability-recommendation')
   const orderedSuggestions = orderSuggestionsForReview(sceneSuggestions)
+  const savedLabel =
+    sceneSaveState === 'saved' && lastSavedAt
+      ? `All changes saved · ${new Date(lastSavedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : 'All changes saved'
 
   useEffect(() => {
     if (!activeSceneId) return
     void window.atlas.scenes.read(activeSceneId).then((result) => setProse(result.prose))
   }, [activeSceneId, sceneProseVersion])
+
+  useEffect(() => {
+    void window.atlas.backups.recoveryStatus().then((status) => setShowRecoveryBanner(status.recoveryAvailable))
+  }, [])
 
   // Clear keyboard-review focus whenever the scene changes so J/K doesn't
   // silently resume mid-list on a suggestion belonging to the old scene.
@@ -262,6 +272,34 @@ export function ManuscriptWorkspace(): JSX.Element {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+      {showRecoveryBanner && !focusMode && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            padding: '10px 24px',
+            borderBottom: '1px solid var(--c-border)',
+            background: 'var(--c-surface-raised)',
+            color: 'var(--c-ink-soft)',
+            fontSize: 12.5,
+            flexShrink: 0
+          }}
+        >
+          <span>
+            Your last session may not have closed cleanly. Your work autosaves to disk; you can also restore an earlier backup in Settings.
+          </span>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button onClick={() => navigate('/settings')} style={pillButtonStyle}>
+              Settings
+            </button>
+            <button onClick={() => setShowRecoveryBanner(false)} style={pillButtonStyle}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       {!focusMode && (
         <div
           style={{
@@ -306,7 +344,7 @@ export function ManuscriptWorkspace(): JSX.Element {
               <>
                 <SceneMetadataPanel scene={activeScene} />
                 <div style={{ fontSize: 12, color: 'var(--c-ink-faint)', marginBottom: 16 }}>
-                  {sceneSaveState === 'saved' ? 'All changes saved' : 'Saving…'}
+                  {sceneSaveState === 'saved' ? savedLabel : 'Saving…'}
                 </div>
               </>
             )}

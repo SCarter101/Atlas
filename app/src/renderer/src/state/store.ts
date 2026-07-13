@@ -54,6 +54,7 @@ interface AtlasState {
   manuscriptTree: ManuscriptTree | null
   activeSceneId: string | null
   sceneSaveState: 'saved' | 'saving'
+  lastSavedAt: string | null
   theme: Theme
   focusMode: boolean
   agentModels: Record<AgentRole, string>
@@ -110,6 +111,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   manuscriptTree: null,
   activeSceneId: null,
   sceneSaveState: 'saved',
+  lastSavedAt: null,
   theme: 'paper',
   focusMode: false,
   agentModels: { ...DEFAULT_AGENT_MODELS },
@@ -264,7 +266,8 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
 
   setActiveScene: (sceneId) => set({ activeSceneId: sceneId }),
 
-  setSceneSaveState: (state) => set({ sceneSaveState: state }),
+  setSceneSaveState: (state) =>
+    set({ sceneSaveState: state, lastSavedAt: state === 'saved' ? new Date().toISOString() : get().lastSavedAt }),
 
   setTheme: (theme) => set({ theme }),
 
@@ -286,7 +289,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     set({ sceneSaveState: 'saving' })
     await window.atlas.scenes.write(sceneId, { meta: metaPatch })
     await get().refreshManuscriptTree()
-    set({ sceneSaveState: 'saved' })
+    set({ sceneSaveState: 'saved', lastSavedAt: new Date().toISOString() })
   },
 
   toggleFocusMode: () =>

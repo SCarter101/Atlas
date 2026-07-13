@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { is } from './is'
 import { installSeedCapabilities } from './capabilities/seedTools'
 import { registerIpcHandlers } from './ipc/handlers'
+import { removeProjectSessionLock } from './persistence/backupStore'
+import { getCurrentProjectSession } from './projectSession'
 
 // Built main entry lives at out/main/index.js, so __dirname is out/main both
 // in `npm run dev` (electron-vite still builds/watches into out/) and in a
@@ -57,6 +59,14 @@ function createWindow(): BrowserWindow {
   return window
 }
 
+function removeCurrentProjectLock(): void {
+  try {
+    removeProjectSessionLock(getCurrentProjectSession().projectRoot)
+  } catch {
+    // No project open yet, or the lock is already gone.
+  }
+}
+
 void app.whenReady().then(async () => {
   // app.getName() / OS-level naming (e.g. macOS menu bar). Windows taskbar
   // grouping additionally needs an explicit AppUserModelID.
@@ -89,6 +99,13 @@ void app.whenReady().then(async () => {
   })
 })
 
+app.on('before-quit', () => {
+  removeCurrentProjectLock()
+})
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin') {
+    removeCurrentProjectLock()
+    app.quit()
+  }
 })

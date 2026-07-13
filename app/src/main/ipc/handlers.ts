@@ -35,6 +35,7 @@ import { loadCodex, loadManuscript } from '../export/loadProjectData'
 import { renderCodex } from '../export/renderCodex'
 import { renderManuscript } from '../export/renderManuscript'
 import { importManuscriptFromFile } from '../import/importManuscript'
+import { createBackup, getSessionRecoveryStatus, listBackups, markProjectSessionOpened, restoreBackup } from '../persistence/backupStore'
 import { projectPaths } from '../persistence/paths'
 
 const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ['md', 'txt', 'pdf', 'docx', 'epub']
@@ -43,6 +44,7 @@ const CODEX_EXPORT_FORMATS: CodexExportFormat[] = ['json', 'codex-md', 'series-b
 export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.ProjectOpen, async (_evt, path: string) => {
     setCurrentProjectSession(await ProjectSession.create(path))
+    await markProjectSessionOpened(path)
     return openProject(path)
   })
 
@@ -50,6 +52,7 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     const validatedSeed = ProjectManifestSeedSchema.parse(seed)
     const manifest = await createProject(path, validatedSeed)
     setCurrentProjectSession(await ProjectSession.create(path))
+    await markProjectSessionOpened(path)
     return manifest
   })
 
@@ -61,6 +64,7 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     if (!alreadySeeded) {
       await seedCottonmouthProject(projectRoot, session.db)
     }
+    await markProjectSessionOpened(projectRoot)
     const manifest = await openProject(projectRoot)
     return { projectRoot, manifest }
   })
@@ -93,6 +97,7 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
       const session = await ProjectSession.create(projectRoot)
       setCurrentProjectSession(session)
       const manifest = await createProjectFromFoundations(projectRoot, session.db, title, genrePrimary, entries)
+      await markProjectSessionOpened(projectRoot)
       return { projectRoot, manifest }
     }
   )
@@ -371,6 +376,23 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     ])
     return diffSnapshots(proseA, proseB)
   })
+
+  ipcMain.handle(IpcChannel.BackupCreate, async (_evt, label?: string) => {
+    const session = getCurrentProjectSession()
+    return createBackup(session.projectRoot, label)
+  })
+
+  ipcMain.handle(IpcChannel.BackupList, async () => {
+    const session = getCurrentProjectSession()
+    return listBackups(session.projectRoot)
+  })
+
+  ipcMain.handle(IpcChannel.BackupRestore, async (_evt, backupId: string) => {
+    const session = getCurrentProjectSession()
+    return restoreBackup(session.projectRoot, backupId)
+  })
+
+  ipcMain.handle(IpcChannel.SessionRecoveryStatus, async () => getSessionRecoveryStatus())
 }
 
 function safeFileName(value: string): string {

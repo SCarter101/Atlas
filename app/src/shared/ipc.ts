@@ -1,4 +1,5 @@
 import type { AgentGoal, AgentRole, AgentRunRecord, AgentRunStatus, AgentStep, PermissionDecision } from './schema/agent'
+import type { BackupMeta } from './schema/backup'
 import type { CapabilityManifest, LifecycleState, SessionApproval } from './schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { CodexCandidate } from './schema/import'
@@ -52,7 +53,11 @@ export const IpcChannel = {
   SessionsSetGoal: 'sessions:set-goal',
   SnapshotsList: 'snapshots:list',
   SnapshotsCreate: 'snapshots:create',
-  SnapshotsDiff: 'snapshots:diff'
+  SnapshotsDiff: 'snapshots:diff',
+  BackupCreate: 'backup:create',
+  BackupList: 'backup:list',
+  BackupRestore: 'backup:restore',
+  SessionRecoveryStatus: 'session:recovery-status'
 } as const
 
 export interface SceneReadResult {
@@ -182,5 +187,11 @@ export interface AtlasBridge {
     list(sceneId: string): Promise<{ snapshotId: string; label?: string; createdAt: string }[]>
     create(sceneId: string, prose: string, label?: string): Promise<{ snapshotId: string }>
     diff(sceneId: string, snapshotIdA: string, snapshotIdB: string): Promise<SnapshotDiffRun[]>
+  }
+  backups: {
+    create(label?: string): Promise<BackupMeta>
+    list(): Promise<BackupMeta[]>
+    restore(backupId: string): Promise<{ restoredProjectRoot: string }>
+    recoveryStatus(): Promise<{ recoveryAvailable: boolean }>
   }
 }
