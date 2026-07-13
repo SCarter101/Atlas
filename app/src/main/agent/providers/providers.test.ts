@@ -23,21 +23,19 @@ describe('SimulatorAdapter', () => {
   })
 })
 
+// runModelCall behavior (success/failure/error-mapping) for the real
+// OpenRouter/LM Studio adapters is covered in the dedicated
+// openRouterAdapter.test.ts / lmStudioAdapter.test.ts files (Phase 6) — kept
+// here to just the provider-matching contract every adapter shares.
 describe('OpenRouterAdapter / LmStudioAdapter', () => {
-  it('only support their own provider and reject with a clear, unconfigured-build error', async () => {
+  it('only support their own provider', () => {
     const openRouter = new OpenRouterAdapter()
     expect(openRouter.supports({ provider: 'openrouter', modelId: 'x', viaOpenRouter: true })).toBe(true)
     expect(openRouter.supports({ provider: 'anthropic', modelId: 'x', viaOpenRouter: false })).toBe(false)
-    await expect(
-      openRouter.runModelCall({ modelRef: { provider: 'openrouter', modelId: 'x', viaOpenRouter: true }, userIntent: '', contextText: '' })
-    ).rejects.toThrow(/not configured/i)
 
     const lmStudio = new LmStudioAdapter()
     expect(lmStudio.supports({ provider: 'lm-studio', modelId: 'x', viaOpenRouter: false })).toBe(true)
     expect(lmStudio.supports({ provider: 'anthropic', modelId: 'x', viaOpenRouter: false })).toBe(false)
-    await expect(
-      lmStudio.runModelCall({ modelRef: { provider: 'lm-studio', modelId: 'x', viaOpenRouter: false }, userIntent: '', contextText: '' })
-    ).rejects.toThrow(/not connected/i)
   })
 })
 

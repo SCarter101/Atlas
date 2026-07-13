@@ -20,4 +20,8 @@ export class SimulatorAdapter implements ProviderAdapter {
     const estimatedCostUsd = Number(((inputTokens + outputTokens) * 0.000012).toFixed(4))
     return { modelRef: input.modelRef, inputTokens, outputTokens, estimatedCostUsd }
   }
+
+  async isAvailable(): Promise<boolean> {
+    return true
+  }
 }
