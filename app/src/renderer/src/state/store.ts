@@ -6,10 +6,12 @@ import type {
   CapabilityRecommendationPayload,
   InsertionPayload,
   MetadataProposalPayload,
+  ModelRef,
   PermissionRequest,
   SuggestionRef
 } from '@shared/schema/agent'
 import type { CodexCandidate, FoundationsCodexDraft } from '@shared/ipc'
+import type { OpenRouterCatalogEntry } from '@shared/schema/models'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest, Theme } from '@shared/schema/project'
 import type { SessionApproval } from '@shared/schema/capability'
@@ -60,14 +62,17 @@ export interface Toast {
 
 const INFO_TOAST_TTL_MS = 5000
 
-// Per-agent model assignment shown in Settings and read by AgentRail — a
-// Phase 2 "mockup" per spec §15 (no real OpenRouter routing behind it yet).
-export const DEFAULT_AGENT_MODELS: Record<AgentRole, string> = {
-  Generator: 'Claude Opus 4',
-  'Dev-Editor': 'Claude Opus 4',
-  'Line-Editor': 'GPT-4.1',
-  Dialoguer: 'Claude Sonnet 4',
-  'World-Builder': 'Gemini 1.5 Pro'
+// Per-agent model assignment shown in Settings and read by AgentRail.
+// Phase 6: every role now holds a real ModelRef (provider + modelId +
+// viaOpenRouter) instead of a bare display string — defaults to the
+// simulator until the writer routes a role to a real OpenRouter/LM Studio
+// model in Settings.
+export const DEFAULT_AGENT_MODELS: Record<AgentRole, ModelRef> = {
+  Generator: { provider: 'simulator', modelId: 'simulator', viaOpenRouter: false },
+  'Dev-Editor': { provider: 'simulator', modelId: 'simulator', viaOpenRouter: false },
+  'Line-Editor': { provider: 'simulator', modelId: 'simulator', viaOpenRouter: false },
+  Dialoguer: { provider: 'simulator', modelId: 'simulator', viaOpenRouter: false },
+  'World-Builder': { provider: 'simulator', modelId: 'simulator', viaOpenRouter: false }
 }
 
 function allScenes(tree: ManuscriptTree | null): SceneMeta[] {
@@ -84,7 +89,8 @@ interface AtlasState {
   lastSavedAt: string | null
   theme: Theme
   focusMode: boolean
-  agentModels: Record<AgentRole, string>
+  agentModels: Record<AgentRole, ModelRef>
+  modelCatalog: OpenRouterCatalogEntry[]
   lmStudioFallback: boolean
   advancedMode: boolean
   privacySettings: PrivacySettings
@@ -123,7 +129,8 @@ interface AtlasState {
   updateSceneMeta: (sceneId: string, metaPatch: Partial<SceneMeta>) => Promise<void>
   toggleTheme: () => void
   toggleFocusMode: () => void
-  setAgentModel: (role: AgentRole, model: string) => void
+  setAgentModel: (role: AgentRole, model: ModelRef) => void
+  loadModelCatalog: () => Promise<void>
   toggleLmStudioFallback: () => void
   toggleAdvancedMode: () => void
   toggleRequireCloudAuth: () => void
@@ -152,6 +159,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   theme: 'paper',
   focusMode: false,
   agentModels: { ...DEFAULT_AGENT_MODELS },
+  modelCatalog: [],
   lmStudioFallback: true,
   advancedMode: false,
   privacySettings: { requireCloudAuth: true, warnCloudUnpublished: true },
@@ -385,6 +393,14 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
     }),
 
   setAgentModel: (role, model) => set((s) => ({ agentModels: { ...s.agentModels, [role]: model } })),
+
+  // Not called automatically anywhere in this store — Settings.tsx calls
+  // this in a useEffect on mount, since the catalog is only needed once the
+  // model-routing UI is actually visible.
+  loadModelCatalog: async () => {
+    const catalog = await window.atlas.models.catalog()
+    set({ modelCatalog: catalog })
+  },
 
   toggleLmStudioFallback: () => set((s) => ({ lmStudioFallback: !s.lmStudioFallback })),
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AgentGoal, AgentRole } from '@shared/schema/agent'
-import { isCloudModel } from '@shared/privacy'
+import { describeProvider, isCloudModel } from '@shared/privacy'
 import { encodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { PreflightDialog } from './PreflightDialog'
@@ -86,11 +86,10 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
     const goal: AgentGoal = {
       runId,
       agentRole: agent.role,
-      // Provider is 'anthropic' (not 'openrouter'/'lm-studio') because model
-      // calls are simulated in this build — those two providers are a real,
-      // reachable seam (see main/agent/providers/) for a future integration,
-      // not something any goal built here should route through today.
-      modelRef: { provider: 'anthropic', modelId: agentModels[agent.role], viaOpenRouter: false },
+      // Phase 6: agentModels now holds a real per-role ModelRef (see
+      // store.ts) instead of a bare display string, so it's used directly
+      // here rather than wrapped in a hand-built 'anthropic' stand-in.
+      modelRef: agentModels[agent.role],
       userIntent,
       scope: { sceneIds: [sceneId], selectionText },
       constraints: {
@@ -186,7 +185,7 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--c-ink)' }}>{agent.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--c-ink-faint)', marginTop: 1 }}>{agentModels[agent.role]}</div>
+                <div style={{ fontSize: 11, color: 'var(--c-ink-faint)', marginTop: 1 }}>{describeProvider(agentModels[agent.role])}</div>
               </div>
               <span
                 style={{

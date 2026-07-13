@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { IpcChannel, type CodexExportFormat, type FoundationsCodexDraft, type ManuscriptExportFormat } from '@shared/ipc'
 import { AtlasError } from '@shared/errors'
 import { isCloudModel } from '@shared/privacy'
-import type { AgentGoal, PermissionDecision } from '@shared/schema/agent'
+import type { AgentGoal, AgentRole, PermissionDecision } from '@shared/schema/agent'
 import type { CapabilityManifest, LifecycleState } from '@shared/schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
@@ -40,6 +40,9 @@ import { importManuscriptFromFile } from '../import/importManuscript'
 import { createBackup, getSessionRecoveryStatus, listBackups, markProjectSessionOpened, restoreBackup } from '../persistence/backupStore'
 import { projectPaths } from '../persistence/paths'
 import { clearSecret, hasSecret, setSecret } from '../security/keyVault'
+import { getActivePrompt, resetPrompt, setPrompt } from '../persistence/promptStore'
+import { getUsageSummary } from '../persistence/usageStore'
+import { fetchOpenRouterCatalog } from '../agent/providers/openRouterCatalog'
 
 const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ['md', 'txt', 'pdf', 'docx', 'epub']
 const CODEX_EXPORT_FORMATS: CodexExportFormat[] = ['json', 'codex-md', 'series-bible', 'series-bible-pdf', 'series-bible-epub']
@@ -431,6 +434,21 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.SecretsClear, async (_evt, name: string) => {
     await clearSecret(name)
   })
+
+  // Prompts are global (not project-scoped, no getCurrentProjectSession()
+  // dependency) — same simplicity as the secrets.* handlers above.
+  ipcMain.handle(IpcChannel.PromptsGet, async (_evt, role: AgentRole) => getActivePrompt(role))
+
+  ipcMain.handle(IpcChannel.PromptsSet, async (_evt, role: AgentRole, text: string) => setPrompt(role, text))
+
+  ipcMain.handle(IpcChannel.PromptsReset, async (_evt, role: AgentRole) => resetPrompt(role))
+
+  ipcMain.handle(IpcChannel.UsageSummary, async () => {
+    const session = getCurrentProjectSession()
+    return getUsageSummary(session.projectRoot)
+  })
+
+  ipcMain.handle(IpcChannel.ModelsCatalog, async () => fetchOpenRouterCatalog())
 }
 
 function safeFileName(value: string): string {
