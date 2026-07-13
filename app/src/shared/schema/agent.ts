@@ -3,7 +3,7 @@ import type { SceneMeta } from './manuscript'
 
 export type AgentRole = 'Generator' | 'Dev-Editor' | 'Line-Editor' | 'Dialoguer' | 'World-Builder'
 
-export type ModelProvider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'lm-studio'
+export type ModelProvider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'lm-studio' | 'simulator'
 
 export interface ModelRef {
   provider: ModelProvider

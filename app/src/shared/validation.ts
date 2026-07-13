@@ -200,7 +200,7 @@ void _sceneWritePatchCheck
 
 export const AgentRoleSchema = z.enum(['Generator', 'Dev-Editor', 'Line-Editor', 'Dialoguer', 'World-Builder'])
 
-export const ModelProviderSchema = z.enum(['anthropic', 'openai', 'google', 'openrouter', 'lm-studio'])
+export const ModelProviderSchema = z.enum(['anthropic', 'openai', 'google', 'openrouter', 'lm-studio', 'simulator'])
 
 export const ModelRefSchema = z.object({
   provider: ModelProviderSchema,
