@@ -27,6 +27,8 @@ export const IpcChannel = {
   CodexList: 'codex:list',
   CodexUpsert: 'codex:upsert',
   CodexDelete: 'codex:delete',
+  ExportManuscript: 'export:manuscript',
+  ExportCodex: 'export:codex',
   CapabilitiesList: 'capabilities:list',
   CapabilitiesCreate: 'capabilities:create',
   CapabilitiesUpdate: 'capabilities:update',
@@ -64,6 +66,16 @@ export interface SceneWritePatch {
 export interface CodexListFilter {
   type?: CodexEntryType
   status?: FactStatus
+}
+
+export type ManuscriptExportFormat = 'md' | 'txt' | 'pdf' | 'docx' | 'epub'
+export type CodexExportFormat = 'json' | 'codex-md' | 'series-bible' | 'series-bible-pdf' | 'series-bible-epub'
+
+export interface ExportResult {
+  ok: boolean
+  filePath?: string
+  canceled?: boolean
+  error?: string
 }
 
 // Lightweight summary for the agent-runs history list — the full
@@ -113,6 +125,10 @@ export interface AtlasBridge {
     list(filter?: CodexListFilter): Promise<CodexEntry[]>
     upsert(entry: CodexEntry): Promise<void>
     delete(entryId: string, entryType: CodexEntryType): Promise<void>
+  }
+  export: {
+    manuscript(format: ManuscriptExportFormat): Promise<ExportResult>
+    codex(format: CodexExportFormat): Promise<ExportResult>
   }
   capabilities: {
     list(): Promise<CapabilityManifest[]>

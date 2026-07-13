@@ -1,7 +1,8 @@
-import { app, ipcMain, type WebContents } from 'electron'
+import { app, dialog, ipcMain, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { IpcChannel, type FoundationsCodexDraft } from '@shared/ipc'
+import { IpcChannel, type CodexExportFormat, type FoundationsCodexDraft, type ManuscriptExportFormat } from '@shared/ipc'
 import type { AgentGoal, PermissionDecision } from '@shared/schema/agent'
 import type { CapabilityManifest, LifecycleState } from '@shared/schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
@@ -30,6 +31,13 @@ import { chapterSummaryExists, getOrGenerateChapterSummary, getOrGenerateSceneSu
 import { computeContextWarnings } from '../retrieval/contextWarnings'
 import { ensureIndexed, search } from '../retrieval/search'
 import { getCurrentProjectSession, ProjectSession, setCurrentProjectSession } from '../projectSession'
+import { loadCodex, loadManuscript } from '../export/loadProjectData'
+import { renderCodex } from '../export/renderCodex'
+import { renderManuscript } from '../export/renderManuscript'
+import { projectPaths } from '../persistence/paths'
+
+const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ['md', 'txt', 'pdf', 'docx', 'epub']
+const CODEX_EXPORT_FORMATS: CodexExportFormat[] = ['json', 'codex-md', 'series-bible', 'series-bible-pdf', 'series-bible-epub']
 
 export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.ProjectOpen, async (_evt, path: string) => {
@@ -142,6 +150,52 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.CodexDelete, async (_evt, entryId: string, entryType: CodexEntryType) => {
     const session = getCurrentProjectSession()
     await deleteCodexEntry(session.projectRoot, session.db, { id: entryId, type: entryType })
+  })
+
+  ipcMain.handle(IpcChannel.ExportManuscript, async (_evt, format: ManuscriptExportFormat) => {
+    try {
+      if (!MANUSCRIPT_EXPORT_FORMATS.includes(format)) throw new Error(`Unknown manuscript export format: ${format}`)
+
+      const session = getCurrentProjectSession()
+      const exportsDir = projectPaths(session.projectRoot).exportsDir
+      await mkdir(exportsDir, { recursive: true })
+      const manuscript = await loadManuscript(session.projectRoot, session.db)
+      const fileName = `${safeFileName(manuscript.title)}-manuscript.${extensionForManuscript(format)}`
+      const result = await dialog.showSaveDialog({
+        defaultPath: join(exportsDir, fileName),
+        filters: manuscriptFilters(format)
+      })
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+
+      const rendered = await renderManuscript(manuscript, format)
+      await writeFile(result.filePath, rendered)
+      return { ok: true, filePath: result.filePath }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle(IpcChannel.ExportCodex, async (_evt, format: CodexExportFormat) => {
+    try {
+      if (!CODEX_EXPORT_FORMATS.includes(format)) throw new Error(`Unknown codex export format: ${format}`)
+
+      const session = getCurrentProjectSession()
+      const exportsDir = projectPaths(session.projectRoot).exportsDir
+      await mkdir(exportsDir, { recursive: true })
+      const codex = await loadCodex(session.projectRoot)
+      const fileName = `${safeFileName(codex.manifest.title)}-${codexNameForFormat(format)}.${extensionForCodex(format)}`
+      const result = await dialog.showSaveDialog({
+        defaultPath: join(exportsDir, fileName),
+        filters: codexFilters(format)
+      })
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+
+      const rendered = await renderCodex(codex.entries, codex.manifest, format)
+      await writeFile(result.filePath, rendered)
+      return { ok: true, filePath: result.filePath }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
   })
 
   ipcMain.handle(IpcChannel.CapabilitiesList, async () => {
@@ -301,4 +355,56 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     ])
     return diffSnapshots(proseA, proseB)
   })
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/\s+/g, ' ').trim() || 'Atlas Export'
+}
+
+function extensionForManuscript(format: ManuscriptExportFormat): string {
+  const extensions: Record<ManuscriptExportFormat, string> = {
+    md: 'md',
+    txt: 'txt',
+    pdf: 'pdf',
+    docx: 'docx',
+    epub: 'epub'
+  }
+  return extensions[format]
+}
+
+function extensionForCodex(format: CodexExportFormat): string {
+  const extensions: Record<CodexExportFormat, string> = {
+    json: 'json',
+    'codex-md': 'md',
+    'series-bible': 'md',
+    'series-bible-pdf': 'pdf',
+    'series-bible-epub': 'epub'
+  }
+  return extensions[format]
+}
+
+function codexNameForFormat(format: CodexExportFormat): string {
+  return format === 'codex-md' ? 'codex' : format
+}
+
+function manuscriptFilters(format: ManuscriptExportFormat): Electron.FileFilter[] {
+  const filters: Record<ManuscriptExportFormat, Electron.FileFilter> = {
+    md: { name: 'Markdown', extensions: ['md'] },
+    txt: { name: 'Plain Text', extensions: ['txt'] },
+    pdf: { name: 'PDF', extensions: ['pdf'] },
+    docx: { name: 'Word Document', extensions: ['docx'] },
+    epub: { name: 'EPUB', extensions: ['epub'] }
+  }
+  return [filters[format]]
+}
+
+function codexFilters(format: CodexExportFormat): Electron.FileFilter[] {
+  const filters: Record<CodexExportFormat, Electron.FileFilter> = {
+    json: { name: 'JSON', extensions: ['json'] },
+    'codex-md': { name: 'Markdown', extensions: ['md'] },
+    'series-bible': { name: 'Markdown', extensions: ['md'] },
+    'series-bible-pdf': { name: 'PDF', extensions: ['pdf'] },
+    'series-bible-epub': { name: 'EPUB', extensions: ['epub'] }
+  }
+  return [filters[format]]
 }

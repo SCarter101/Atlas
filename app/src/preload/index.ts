@@ -25,6 +25,10 @@ const atlasBridge: AtlasBridge = {
     upsert: (entry) => ipcRenderer.invoke(IpcChannel.CodexUpsert, entry),
     delete: (entryId, entryType) => ipcRenderer.invoke(IpcChannel.CodexDelete, entryId, entryType)
   },
+  export: {
+    manuscript: (format) => ipcRenderer.invoke(IpcChannel.ExportManuscript, format),
+    codex: (format) => ipcRenderer.invoke(IpcChannel.ExportCodex, format)
+  },
   capabilities: {
     list: () => ipcRenderer.invoke(IpcChannel.CapabilitiesList),
     create: (manifest) => ipcRenderer.invoke(IpcChannel.CapabilitiesCreate, manifest),
