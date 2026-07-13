@@ -392,7 +392,11 @@ export function ManuscriptWorkspace(): JSX.Element {
                       onAcceptAll={acceptAllInSection}
                     />
                     {draftGroups.map((group) => (
-                      <DraftComparisonView key={(group[0].payload as InsertionPayload).draftGroupId} suggestions={group} />
+                      <DraftComparisonView
+                        key={(group[0].payload as InsertionPayload).draftGroupId}
+                        suggestions={group}
+                        focusedSuggestionId={focusedSuggestionId}
+                      />
                     ))}
                     {singleInsertions.map((s) => (
                       <div key={s.id} id={`suggestion-${s.id}`} style={s.id === focusedSuggestionId ? focusRingStyle : undefined}>

@@ -39,7 +39,18 @@ function diffRunStyle(type: SnapshotDiffRun['type']) {
 // rather than a second implementation — the only difference is the two
 // texts being compared come from suggestion payloads already in memory
 // instead of scene snapshots read over IPC.
-export function DraftComparisonView({ suggestions }: { suggestions: SuggestionRef[] }): JSX.Element | null {
+export function DraftComparisonView({
+  suggestions,
+  focusedSuggestionId
+}: {
+  suggestions: SuggestionRef[]
+  // The J/K keyboard-review cursor (ManuscriptWorkspace). Grouped drafts are
+  // part of the same review traversal as ungrouped cards, so each per-draft
+  // row carries the `suggestion-<id>` anchor scrollIntoView targets and shows
+  // a focus ring when it's the active row — otherwise focusing a grouped
+  // draft with J/K would be invisible.
+  focusedSuggestionId?: string | null
+}): JSX.Element | null {
   const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
 
   const drafts = suggestions.map((s, i) => {
@@ -112,9 +123,11 @@ export function DraftComparisonView({ suggestions }: { suggestions: SuggestionRe
         {drafts.map((d) => {
           const isResolved = d.suggestion.state === 'accepted' || d.suggestion.state === 'rejected'
           const badge = STATE_BADGE[d.suggestion.state]
+          const isFocused = d.suggestion.id === focusedSuggestionId
           return (
             <div
               key={d.suggestion.id}
+              id={`suggestion-${d.suggestion.id}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -123,7 +136,9 @@ export function DraftComparisonView({ suggestions }: { suggestions: SuggestionRe
                 padding: '6px 8px',
                 borderRadius: 7,
                 background: 'var(--c-surface)',
-                border: '1px solid var(--c-border)'
+                border: '1px solid var(--c-border)',
+                outline: isFocused ? '2px solid var(--c-accent)' : undefined,
+                outlineOffset: isFocused ? 2 : undefined
               }}
             >
               <span style={{ fontSize: 11.5, color: 'var(--c-ink-soft)' }}>{d.label}</span>

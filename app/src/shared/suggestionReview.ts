@@ -9,16 +9,19 @@ import type { SuggestionRef } from './schema/agent'
 // Fixed top-to-bottom order matching how ManuscriptWorkspace groups
 // suggestion cards into "Comments & Tracked Changes" sections. Used both for
 // keyboard J/K traversal order and for the batch-accept-by-category
-// control's section order. Deliberately omits 'metadata-proposal': no card
-// component renders that kind yet (grep confirms nothing in app/src
-// constructs one), so including it here would let J/K focus a suggestion
-// with no corresponding visible card.
+// control's section order. Every kind that ManuscriptWorkspace renders a card
+// for must appear here, or J/K/A/R review silently skips it — 'metadata-
+// proposal' (MetadataProposalCard) and 'capability-recommendation'
+// (CapabilityRecommendationCard) were added in later Phase 4 work and belong
+// last, matching their render order after Codex Additions.
 const KIND_ORDER: SuggestionRef['kind'][] = [
   'editorial-finding',
   'tracked-change',
   'insertion',
   'dialogue-alternative',
-  'codex-addition'
+  'codex-addition',
+  'metadata-proposal',
+  'capability-recommendation'
 ]
 
 export interface SuggestionKindGroup {

@@ -879,32 +879,75 @@ export class AgentRunManager {
       if (!match) return undefined
 
       const capabilities = await listCapabilities(this.projectRoot)
-      const sourceTool = capabilities.find((c) => c.id === match.toolId)
-      if (!sourceTool) return undefined
 
-      const recommendedId = `${match.toolId}.recommended.${goal.agentRole.toLowerCase()}`
+      // Recorded tool-call step ids carry a @version suffix (e.g.
+      // 'global.tools.structural-analysis@1.0.0'); installed capability
+      // manifest ids don't. Strip it so a real installed tool is matched when
+      // one exists. The per-role *workflow* tools that actually get recorded
+      // as tool-call steps (structural-analysis, prose-continuation,
+      // dialogue-scan, ...) have no installed manifest of their own, so
+      // sourceTool is usually undefined — and that's fine: the point is to
+      // recommend capturing a repeated workflow as a capability, not only to
+      // re-install a tool that's already installed. When there's nothing to
+      // clone, synthesize a minimal draft below rather than bailing (the old
+      // `if (!sourceTool) return` here is exactly why no recommendation ever
+      // surfaced).
+      const baseToolId = match.toolId.split('@')[0]
+      const sourceTool = capabilities.find((c) => c.id === baseToolId)
+
+      const recommendedId = `${baseToolId}.recommended.${goal.agentRole.toLowerCase()}`
       if (capabilities.some((c) => c.id === recommendedId)) return undefined
 
+      // Human-readable label from the tool id's last segment, e.g.
+      // 'global.tools.structural-analysis' -> 'Structural Analysis'.
+      const toolLabel =
+        sourceTool?.name ??
+        (baseToolId.split('.').pop() ?? baseToolId)
+          .split('-')
+          .map((w) => (w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+          .join(' ')
+
       const now = new Date().toISOString()
-      const draftManifest: CapabilityManifest = {
-        ...sourceTool,
-        id: recommendedId,
-        name: `${sourceTool.name} (${goal.agentRole} default)`,
-        description: `${sourceTool.description} Recommended as a standard step for ${goal.agentRole} after it made this same tool call in ${match.occurrences} separate runs.`,
-        scope: 'project',
-        version: '1.0.0',
-        compatibleAgentRoles: [goal.agentRole],
-        validationStatus: 'untested',
-        lifecycleState: 'draft',
-        createdBy: 'agent-generated',
-        history: [
-          {
-            versionId: randomUUID(),
-            changedAt: now,
-            note: `Drafted from a repeated-tool-call pattern detected across ${match.occurrences} ${goal.agentRole} runs.`
+      const historyNote = `Drafted from a repeated-tool-call pattern detected across ${match.occurrences} ${goal.agentRole} runs.`
+
+      const draftManifest: CapabilityManifest = sourceTool
+        ? {
+            ...sourceTool,
+            id: recommendedId,
+            name: `${sourceTool.name} (${goal.agentRole} default)`,
+            description: `${sourceTool.description} Recommended as a standard step for ${goal.agentRole} after it made this same tool call in ${match.occurrences} separate runs.`,
+            scope: 'project',
+            version: '1.0.0',
+            compatibleAgentRoles: [goal.agentRole],
+            validationStatus: 'untested',
+            lifecycleState: 'draft',
+            createdBy: 'agent-generated',
+            history: [{ versionId: randomUUID(), changedAt: now, note: historyNote }]
           }
-        ]
-      }
+        : {
+            schemaVersion: 1,
+            id: recommendedId,
+            name: `${toolLabel} (${goal.agentRole} default)`,
+            description: `Recommended as a standard step for ${goal.agentRole} after it repeated the "${toolLabel}" workflow in ${match.occurrences} separate runs.`,
+            type: 'tool',
+            scope: 'project',
+            owner: 'Atlas agent',
+            version: '1.0.0',
+            inputSchema: { type: 'object', properties: {} },
+            outputSchema: { type: 'object', properties: {} },
+            requiredContext: [],
+            dependsOn: [],
+            compatibleAgentRoles: [goal.agentRole],
+            compatibleModelCapabilities: ['tool-calling'],
+            sideEffects: 'none',
+            permissionCategory: 'none',
+            localOnly: true,
+            costCharacteristics: { estTimeMs: 50 },
+            validationStatus: 'untested',
+            lifecycleState: 'draft',
+            createdBy: 'agent-generated',
+            history: [{ versionId: randomUUID(), changedAt: now, note: historyNote }]
+          }
 
       return {
         id: randomUUID(),
@@ -915,10 +958,10 @@ export class AgentRunManager {
           toolId: match.toolId,
           occurrences: match.occurrences,
           runIds: match.runIds,
-          rationale: `${goal.agentRole} has called "${sourceTool.name}" in ${match.occurrences} separate runs — install it as a standard, always-on capability for this role?`,
+          rationale: `${goal.agentRole} has used "${toolLabel}" in ${match.occurrences} separate runs — install it as a standard, always-on capability for this role?`,
           draftManifest
         } satisfies CapabilityRecommendationPayload,
-        provenance: { capabilityId: match.toolId, capabilityVersion: sourceTool.version, runId: goal.runId },
+        provenance: { capabilityId: baseToolId, capabilityVersion: sourceTool?.version ?? '1.0.0', runId: goal.runId },
         state: 'pending'
       }
     } catch {

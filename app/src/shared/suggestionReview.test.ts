@@ -37,9 +37,17 @@ describe('groupSuggestionsByKind', () => {
     expect(groupSuggestionsByKind([])).toEqual([])
   })
 
-  it('excludes metadata-proposal suggestions (no card renders that kind yet)', () => {
-    const suggestions = [makeSuggestion({ id: 'a', kind: 'metadata-proposal' })]
-    expect(groupSuggestionsByKind(suggestions)).toEqual([])
+  it('includes metadata-proposal and capability-recommendation last, after codex-addition', () => {
+    const suggestions = [
+      makeSuggestion({ id: 'a', kind: 'capability-recommendation' }),
+      makeSuggestion({ id: 'b', kind: 'metadata-proposal' }),
+      makeSuggestion({ id: 'c', kind: 'codex-addition' })
+    ]
+    expect(groupSuggestionsByKind(suggestions).map((g) => g.kind)).toEqual([
+      'codex-addition',
+      'metadata-proposal',
+      'capability-recommendation'
+    ])
   })
 })
 
