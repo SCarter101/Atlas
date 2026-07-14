@@ -1269,7 +1269,6 @@ export class AgentRunManager {
     // editorial-finding suggestions, the same "augment, don't replace"
     // pattern Story Editor uses for its live contradiction check.
     const similarVoiceFindings = await this.checkSimilarVoices(goal)
-    const allSuggestions = [...suggestions, ...similarVoiceFindings]
 
     // The one real thing Dialogue Editor does in this build: look up real
     // Codex entries related to the resolved character (see
@@ -1292,7 +1291,25 @@ export class AgentRunManager {
     state.budget.toolCallsUsed += 1
 
     const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
-    const modelCall = await this.runModelCallStep(goal, assembledContext)
+
+    // Phase 8 §7.4 real branch: request JSON-mode output describing 3
+    // tension-tiered alternatives instead of relying purely on
+    // buildTensionAlternatives()'s string-template transform. The character's
+    // Codex voice profile isn't re-fetched here — assembleContext() has
+    // already folded it into assembledContext per Phase 7's priority order
+    // (voice profiles are one of the sections it packs) — so the instructions
+    // just point the model at whatever voice-profile context it's been given.
+    const modelCall = await this.runModelCallStep(goal, assembledContext, {
+      type: 'json',
+      instructions:
+        'Respond with strict JSON only (no prose, no markdown fences), in exactly this shape: ' +
+        '{"alternatives": [{"tier": "calm", "text": "..."}, {"tier": "guarded", "text": "..."}, {"tier": "confrontational", "text": "..."}]}. ' +
+        'Provide exactly one rewritten alternative of the original line for each of the three tension tiers, in that order — ' +
+        "no more, no fewer. Reason over the resolved character's Codex voice-profile fields already present in the context above " +
+        '(vocabulary, rhythm, formality level, speech directness, verbal tics, favorite/avoided phrases, power dynamics, etc.) so ' +
+        'each alternative actually sounds like that character; if no voice profile is present in the context, write natural ' +
+        'alternatives without inventing profile details that were not given to you.'
+    })
     if (await this.guardModelCall(goal, 'Dialogue Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1302,8 +1319,43 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
+    // Parse -> validate -> fall back to the template path on any shortfall
+    // (missing tier, empty text, malformed JSON, or a non-real adapter),
+    // matching the "augment, never break the fallback" pattern
+    // Generator/Line-Editor's real branches already established.
+    const isReal = selectAdapter(goal.modelRef).id !== 'simulator' && !!modelCall.outputText
+    const parsed = isReal
+      ? tryParseJson<{ alternatives?: { tier?: string; text?: string }[] }>(modelCall.outputText as string)
+      : undefined
+    const realAlternatives = parseRealDialogueAlternatives(parsed)
+
+    const templatePayload = suggestions[0].payload as DialogueAlternativePayload
+    const finalSuggestions: SuggestionRef[] = realAlternatives
+      ? [
+          {
+            id: randomUUID(),
+            agentRole: 'Dialoguer',
+            kind: 'dialogue-alternative',
+            targetSceneId: goal.scope.sceneIds?.[0],
+            payload: {
+              characterName: templatePayload.characterName,
+              original: templatePayload.original,
+              alternatives: realAlternatives
+            } satisfies DialogueAlternativePayload,
+            provenance: {
+              capabilityId: 'global.tools.dialogue-scan',
+              capabilityVersion: '1.0.0',
+              runId: randomUUID(),
+              refinesSuggestionId: goal.refinesSuggestionId
+            },
+            state: 'pending'
+          }
+        ]
+      : suggestions
+    const finalAllSuggestions = [...finalSuggestions, ...similarVoiceFindings]
+
     const result: AgentResult = {
-      summary: `Dialogue Editor proposed ${suggestions.length} alternative reading${suggestions.length === 1 ? '' : 's'}${
+      summary: `Dialogue Editor proposed ${finalSuggestions.length} alternative reading${finalSuggestions.length === 1 ? '' : 's'}${
         similarVoiceFindings.length > 0
           ? ` and flagged ${similarVoiceFindings.length} character${similarVoiceFindings.length === 1 ? '' : 's'} pair${similarVoiceFindings.length === 1 ? '' : 's'} with similar voices`
           : ''
@@ -1312,7 +1364,7 @@ export class AgentRunManager {
           ? ` (found ${relatedCodexResults.length} related Codex entr${relatedCodexResults.length === 1 ? 'y' : 'ies'} for ${character?.name})`
           : ''
       }.`,
-      proposedManuscriptChanges: allSuggestions
+      proposedManuscriptChanges: finalAllSuggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1446,14 +1498,19 @@ export class AgentRunManager {
     // reviews it. Never blocks the proposal: any hits are folded into the
     // flagged proposal's own citations as a low-reliability warning (see
     // applyContradictionWarnings) and into the run's overall summary/
-    // warnings — the writer still approves or rejects each proposal.
+    // warnings — the writer still approves or rejects each proposal. This
+    // check (against the template-derived proposals) also backs the tool-call
+    // step's own reported output, computed before the real-branch model call
+    // below even gets a chance to run.
     const contradictionNote = await this.checkWorldBuilderContradictions(goal, rawSuggestions)
-    const suggestions = contradictionNote ? applyContradictionWarnings(rawSuggestions, contradictionNote) : rawSuggestions
+    const templateSuggestions = contradictionNote ? applyContradictionWarnings(rawSuggestions, contradictionNote) : rawSuggestions
 
     const toolCall: ToolCall = {
       toolId: 'global.tools.world-research@1.0.0',
       input: toolInput,
-      output: contradictionNote ? { proposals: suggestions, codexContradictionCheck: contradictionNote } : suggestions
+      output: contradictionNote
+        ? { proposals: templateSuggestions, codexContradictionCheck: contradictionNote }
+        : templateSuggestions
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1475,7 +1532,26 @@ export class AgentRunManager {
           overrideLabel: 'World Builder interview answers'
         })
       : await assembleContext(this.projectRoot, this.db, goal)
-    const modelCall = await this.runModelCallStep(goal, assembledContext)
+
+    // Phase 8 §7.5 real branch: request JSON-mode output describing 1-4
+    // proposed Codex entries reasoned over the selection or the decoded
+    // interview answers, covering both entry paths with one shared request.
+    // Explicitly out of scope this round (confirmed): no real web research —
+    // there is no internet access here, so a real proposal's content
+    // generation is upgraded from template to real reasoning, but every
+    // citation still stays honestly labeled as model inference, never
+    // research (see the citation construction below).
+    const modelCall = await this.runModelCallStep(goal, assembledContext, {
+      type: 'json',
+      instructions:
+        'Respond with strict JSON only (no prose, no markdown fences), in exactly this shape: ' +
+        '{"proposals": [{"entryType": "location", "name": "...", "summary": "..."}]}, with 1 to 4 entries. ' +
+        '"entryType" must be one of: character, location, faction, object, event, world-rule, timeline-item, ' +
+        'plot-thread, relationship, theme, motif, research-note, historical-reference, scene-note, private-author-note. ' +
+        'Propose new Codex entries worth tracking, reasoned over the manuscript selection or the World Builder interview ' +
+        'answers given in the context above. You have no access to external research or the internet — every proposal must ' +
+        'be your own inference from what you were given, never presented as a researched or verified fact.'
+    })
     if (await this.guardModelCall(goal, 'World Builder', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1485,18 +1561,66 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
+    // Parse -> validate -> fall back to whichever template path is
+    // appropriate to this run's entry path on any shortfall (malformed JSON,
+    // an empty/invalid proposals array, or a non-real adapter).
+    const isReal = selectAdapter(goal.modelRef).id !== 'simulator' && !!modelCall.outputText
+    const parsed = isReal
+      ? tryParseJson<{ proposals?: { entryType?: string; name?: string; summary?: string }[] }>(
+          modelCall.outputText as string
+        )
+      : undefined
+    const realProposals = parseRealWorldBuilderProposals(parsed)
+
+    let finalSuggestions: SuggestionRef[]
+    let finalContradictionNote = contradictionNote
+    if (realProposals) {
+      const realRunId = randomUUID()
+      const rawRealSuggestions = realProposals.map((p) =>
+        worldBuilderProposal(
+          realRunId,
+          goal.scope.sceneIds?.[0],
+          p.entryType,
+          p.name,
+          p.summary,
+          interview
+            ? [worldBuilderCitation('your World Builder interview answers')]
+            : [
+                {
+                  note: 'Simulated inference from the selected passage — no external research was performed.',
+                  reliability: 'low'
+                }
+              ],
+          goal.refinesSuggestionId
+        )
+      )
+      // Re-run the same contradiction check (unchanged logic) against the
+      // real proposals actually being returned, rather than reusing the
+      // template-based check computed above for the tool-call step —
+      // "regardless of which path produced the raw proposals" applies to the
+      // proposals that actually ship in the result, not just the tool-call
+      // snapshot taken before the model call.
+      const realContradictionNote = await this.checkWorldBuilderContradictions(goal, rawRealSuggestions)
+      finalSuggestions = realContradictionNote
+        ? applyContradictionWarnings(rawRealSuggestions, realContradictionNote)
+        : rawRealSuggestions
+      finalContradictionNote = realContradictionNote
+    } else {
+      finalSuggestions = templateSuggestions
+    }
+
     const result: AgentResult = {
       // Routed through proposedManuscriptChanges (rather than
       // proposedCodexChanges) because that is the only field the renderer
       // store currently folds into activeSuggestions — see
       // handleAgentStep() in state/store.ts. The suggestion's own `kind`
       // ('codex-addition') is what the UI actually branches on.
-      summary: `World Builder proposed ${suggestions.length} Codex addition${suggestions.length === 1 ? '' : 's'}.${
-        contradictionNote ? ` ${contradictionNote.summary}` : ''
+      summary: `World Builder proposed ${finalSuggestions.length} Codex addition${finalSuggestions.length === 1 ? '' : 's'}.${
+        finalContradictionNote ? ` ${finalContradictionNote.summary}` : ''
       }`,
-      proposedManuscriptChanges: suggestions,
-      proposedCodexChanges: suggestions,
-      warnings: contradictionNote ? [contradictionNote.summary] : undefined
+      proposedManuscriptChanges: finalSuggestions,
+      proposedCodexChanges: finalSuggestions,
+      warnings: finalContradictionNote ? [finalContradictionNote.summary] : undefined
     }
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1809,6 +1933,31 @@ function lowerFirst(s: string): string {
   return s.length > 0 ? `${s.charAt(0).toLowerCase()}${s.slice(1)}` : s
 }
 
+// Phase 8: validates a real model's parsed JSON response for runDialoguer's
+// real branch. Must contain all 3 tension tiers with non-empty text — the
+// JSON can list them in any order (mapped back into this fixed order), but
+// anything less (a missing tier, empty/blank text, a malformed shape) means
+// "not usable," signaling the caller to fall back to
+// buildTensionAlternatives()'s template path rather than partially accepting
+// a result. Exported so it's directly unit-testable as a pure function,
+// matching the house style of buildTensionAlternatives/detectSimilarVoices
+// below.
+const REQUIRED_TENSION_TIERS: DialogueTensionTier[] = ['calm', 'guarded', 'confrontational']
+
+export function parseRealDialogueAlternatives(
+  parsed: { alternatives?: { tier?: string; text?: string }[] } | undefined
+): DialogueAlternativeOption[] | undefined {
+  if (!parsed || !Array.isArray(parsed.alternatives)) return undefined
+  const byTier = new Map(parsed.alternatives.map((a) => [a?.tier, a?.text]))
+  const result: DialogueAlternativeOption[] = []
+  for (const tier of REQUIRED_TENSION_TIERS) {
+    const text = byTier.get(tier)
+    if (typeof text !== 'string' || text.trim().length === 0) return undefined
+    result.push({ tier, text })
+  }
+  return result
+}
+
 // Deterministic phrasing transform — a stand-in for a real dialogue-rewrite
 // model call, same "honest placeholder" style as the rest of this file.
 // Produces one alternative per tension tier (spec §7.4: "suggest alternate
@@ -2080,7 +2229,17 @@ function worldBuilderProposal(
   entryType: CodexEntryType,
   name: string,
   summary: string,
-  citations: Array<{ note: string; reliability: 'author-stated' }>
+  // Widened to also accept the single-selection flow's 'low'-reliability
+  // regex-guess citation (Phase 8's real branch below reuses this helper for
+  // both entry paths) — deriveWorldBuilderProposals below only ever passes
+  // 'author-stated' citations, unchanged.
+  citations: Array<{ note: string; reliability: 'author-stated' | 'low' }>,
+  // Phase 8: threaded straight into provenance.refinesSuggestionId when this
+  // proposal comes from a refineSuggestion() re-run — see AgentGoal.refinesSuggestionId's
+  // own doc comment in shared/schema/agent.ts. Undefined on an ordinary run,
+  // and always undefined for deriveWorldBuilderProposals' template callers,
+  // which never pass this argument.
+  refinesSuggestionId?: string
 ): SuggestionRef {
   return {
     id: randomUUID(),
@@ -2088,9 +2247,70 @@ function worldBuilderProposal(
     kind: 'codex-addition',
     targetSceneId: sceneId,
     payload: { entryType, name, summary, citations },
-    provenance: { capabilityId: 'global.tools.world-research', capabilityVersion: '1.0.0', runId },
+    provenance: { capabilityId: 'global.tools.world-research', capabilityVersion: '1.0.0', runId, refinesSuggestionId },
     state: 'pending'
   }
+}
+
+// Mirrors shared/schema/codex.ts's CodexEntryType union as a runtime list —
+// there's no exported runtime array of that type to import (only the type
+// itself), and pulling in shared/validation.ts's zod schema just for this one
+// membership check would add a dependency this file doesn't otherwise have.
+const CODEX_ENTRY_TYPES: CodexEntryType[] = [
+  'character',
+  'location',
+  'faction',
+  'object',
+  'event',
+  'world-rule',
+  'timeline-item',
+  'plot-thread',
+  'relationship',
+  'theme',
+  'motif',
+  'research-note',
+  'historical-reference',
+  'scene-note',
+  'private-author-note'
+]
+
+export interface RealWorldBuilderProposal {
+  entryType: CodexEntryType
+  name: string
+  summary: string
+}
+
+// Phase 8: validates a real model's parsed JSON response for
+// runWorldBuilder's real branch. Requires a non-empty array (max 4 kept, per
+// spec §7.5) where every entry has a valid CodexEntryType plus non-empty
+// name/summary strings — anything less (empty array, malformed shape, an
+// entryType the model invented that isn't a real CodexEntryType) means "not
+// usable," signaling the caller to fall back to whichever template path
+// (deriveWorldBuilderProposals/simulateCodexAdditions) is appropriate to the
+// current run's entry path. Exported so it's directly unit-testable as a
+// pure function, matching parseRealDialogueAlternatives above.
+export function parseRealWorldBuilderProposals(
+  parsed: { proposals?: { entryType?: string; name?: string; summary?: string }[] } | undefined
+): RealWorldBuilderProposal[] | undefined {
+  if (!parsed || !Array.isArray(parsed.proposals) || parsed.proposals.length === 0) return undefined
+  const proposals: RealWorldBuilderProposal[] = []
+  for (const p of parsed.proposals) {
+    const entryType = p?.entryType
+    const name = p?.name
+    const summary = p?.summary
+    if (
+      typeof entryType !== 'string' ||
+      !CODEX_ENTRY_TYPES.includes(entryType as CodexEntryType) ||
+      typeof name !== 'string' ||
+      name.trim().length === 0 ||
+      typeof summary !== 'string' ||
+      summary.trim().length === 0
+    ) {
+      return undefined
+    }
+    proposals.push({ entryType: entryType as CodexEntryType, name, summary })
+  }
+  return proposals.slice(0, 4)
 }
 
 // Turns a compiled World Builder interview into 2-4 proposed Codex entries

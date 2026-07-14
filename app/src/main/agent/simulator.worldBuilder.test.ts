@@ -1,12 +1,47 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentGoal, AgentStep, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import { emptyWorldBuilderInterviewAnswers, encodeWorldBuilderInterview } from '@shared/worldBuilderInterview'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
-import { AgentRunManager, deriveWorldBuilderProposals } from './simulator'
+
+// Phase 8 §7.5: when a real provider adapter actually returns JSON-mode
+// outputText, runWorldBuilder's real branch should parse it into real Codex
+// proposals instead of the deterministic deriveWorldBuilderProposals/
+// simulateCodexAdditions templates. Fake out the whole OpenRouterAdapter
+// module rather than hitting a real network — same technique
+// simulator.realModelOutput.test.ts uses for Generator/Line-Editor.
+let fakeOutputText = ''
+vi.mock('./providers/openRouterAdapter', () => ({
+  OpenRouterAdapter: class {
+    readonly id = 'openrouter'
+    supports(modelRef: { provider: string }): boolean {
+      return modelRef.provider === 'openrouter'
+    }
+    async isAvailable(): Promise<boolean> {
+      return true
+    }
+    async runModelCall(input: { modelRef: unknown }): Promise<{
+      modelRef: unknown
+      inputTokens: number
+      outputTokens: number
+      estimatedCostUsd: number
+      outputText: string
+    }> {
+      return {
+        modelRef: input.modelRef,
+        inputTokens: 12,
+        outputTokens: 24,
+        estimatedCostUsd: 0.002,
+        outputText: fakeOutputText
+      }
+    }
+  }
+}))
+
+const { AgentRunManager, deriveWorldBuilderProposals, parseRealWorldBuilderProposals } = await import('./simulator')
 
 // The simulator emits its `result` step asynchronously after a permission
 // response, so a fixed `setTimeout(0)` occasionally samples `steps` before the
@@ -156,6 +191,163 @@ describe('AgentRunManager — World Builder interview flow', () => {
     const goal = makeGoal('The Bronco idled outside the old harbor gate.')
 
     const manager = new AgentRunManager(projectRoot, db)
+    const steps: AgentStep[] = []
+    manager.start(goal)
+    manager.onStep(goal.runId, (step) => steps.push(step))
+
+    const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
+    manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
+
+    const resultStep = await waitForStep(steps, 'result')
+    const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[] }
+    expect(result.proposedCodexChanges).toHaveLength(1)
+    const payload = result.proposedCodexChanges![0].payload as { citations: { reliability: string }[] }
+    expect(payload.citations[0].reliability).toBe('low')
+  })
+})
+
+describe('parseRealWorldBuilderProposals — pure JSON-response validator', () => {
+  it('accepts a well-formed proposals array with valid CodexEntryType values', () => {
+    const result = parseRealWorldBuilderProposals({
+      proposals: [
+        { entryType: 'location', name: 'The Sundered Vale', summary: 'A valley split by an old war.' },
+        { entryType: 'faction', name: 'The Ashguard', summary: 'Keepers of the barrier.' }
+      ]
+    })
+    expect(result).toEqual([
+      { entryType: 'location', name: 'The Sundered Vale', summary: 'A valley split by an old war.' },
+      { entryType: 'faction', name: 'The Ashguard', summary: 'Keepers of the barrier.' }
+    ])
+  })
+
+  it('caps at 4 proposals even when the model returns more', () => {
+    const result = parseRealWorldBuilderProposals({
+      proposals: Array.from({ length: 6 }, (_, i) => ({
+        entryType: 'location',
+        name: `Place ${i}`,
+        summary: `Summary ${i}`
+      }))
+    })
+    expect(result).toHaveLength(4)
+  })
+
+  it('rejects an entryType that is not a real CodexEntryType', () => {
+    const result = parseRealWorldBuilderProposals({
+      proposals: [{ entryType: 'made-up-type', name: 'Something', summary: 'A summary.' }]
+    })
+    expect(result).toBeUndefined()
+  })
+
+  it('rejects an empty proposals array and malformed shapes', () => {
+    expect(parseRealWorldBuilderProposals({ proposals: [] })).toBeUndefined()
+    expect(parseRealWorldBuilderProposals(undefined)).toBeUndefined()
+    expect(parseRealWorldBuilderProposals({})).toBeUndefined()
+    expect(
+      parseRealWorldBuilderProposals({ proposals: [{ entryType: 'location', name: '', summary: 'A summary.' }] })
+    ).toBeUndefined()
+  })
+})
+
+describe('AgentRunManager — World Builder real-model-output branch (Phase 8)', () => {
+  let projectRoot: string
+  let db: AtlasDb
+
+  beforeEach(async () => {
+    projectRoot = mkdtempSync(join(tmpdir(), 'atlas-worldbuilder-real-'))
+    db = await openIndexDb(projectRoot)
+    setPreferredEmbeddingProvider('hashing')
+  })
+
+  afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
+    fakeOutputText = ''
+    rmSync(projectRoot, { recursive: true, force: true })
+  })
+
+  function makeOpenRouterGoal(selectionText: string, refinesSuggestionId?: string): AgentGoal {
+    return {
+      runId: 'run-world-builder-real-1',
+      agentRole: 'World-Builder',
+      modelRef: { provider: 'openrouter', modelId: 'anthropic/claude-sonnet-5', viaOpenRouter: true },
+      userIntent: 'Propose new Codex entries for this passage',
+      scope: { sceneIds: ['scene-002'], selectionText },
+      constraints: {
+        maxTurns: 4,
+        maxTokens: 4000,
+        maxToolCalls: 3,
+        maxElapsedMs: 30000,
+        allowedCapabilityCategories: ['world-research']
+      },
+      refinesSuggestionId
+    }
+  }
+
+  it('parses well-formed JSON into real Codex proposals for a plain selection, keeping the honest low-reliability citation and threading refinesSuggestionId through', async () => {
+    fakeOutputText = JSON.stringify({
+      proposals: [
+        { entryType: 'location', name: 'Harborgate', summary: 'A weathered port town on the strait.' },
+        { entryType: 'faction', name: 'The Bronco Crew', summary: 'Smugglers who idle outside the gate.' }
+      ]
+    })
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeOpenRouterGoal('The Bronco idled outside the old harbor gate.', 'suggestion-original-wb')
+    const steps: AgentStep[] = []
+    manager.start(goal)
+    manager.onStep(goal.runId, (step) => steps.push(step))
+
+    const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
+    manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
+
+    const resultStep = await waitForStep(steps, 'result')
+    const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[] }
+    expect(result.proposedCodexChanges).toHaveLength(2)
+
+    const [first, second] = result.proposedCodexChanges!
+    expect((first.payload as { name: string }).name).toBe('Harborgate')
+    expect((second.payload as { name: string }).name).toBe('The Bronco Crew')
+    for (const suggestion of result.proposedCodexChanges!) {
+      const payload = suggestion.payload as { citations: { note: string; reliability: string }[] }
+      expect(payload.citations[0].reliability).toBe('low')
+      expect(payload.citations[0].note).toBe(
+        'Simulated inference from the selected passage — no external research was performed.'
+      )
+      expect(suggestion.provenance.refinesSuggestionId).toBe('suggestion-original-wb')
+    }
+  })
+
+  it('uses author-stated citations for a real interview-path response', async () => {
+    fakeOutputText = JSON.stringify({
+      proposals: [{ entryType: 'world-rule', name: 'Fantasy Kingdom — World Rules', summary: 'The barrier never fails.' }]
+    })
+
+    const answers = {
+      ...emptyWorldBuilderInterviewAnswers(),
+      genreTemplate: 'fantasy-kingdom' as const,
+      worldGrounding: 'A mountain kingdom cut off from the coast by an ancient magical barrier.',
+      consistencyFacts: 'The barrier has never once failed in a thousand years.'
+    }
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeOpenRouterGoal(encodeWorldBuilderInterview(answers))
+    const steps: AgentStep[] = []
+    manager.start(goal)
+    manager.onStep(goal.runId, (step) => steps.push(step))
+
+    const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
+    manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
+
+    const resultStep = await waitForStep(steps, 'result')
+    const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[] }
+    expect(result.proposedCodexChanges).toHaveLength(1)
+    const payload = result.proposedCodexChanges![0].payload as { citations: { reliability: string }[] }
+    expect(payload.citations[0].reliability).toBe('author-stated')
+  })
+
+  it('falls back to the single-guess template path when the real output is malformed/non-JSON', async () => {
+    fakeOutputText = 'not valid JSON at all'
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeOpenRouterGoal('The Bronco idled outside the old harbor gate.')
     const steps: AgentStep[] = []
     manager.start(goal)
     manager.onStep(goal.runId, (step) => steps.push(step))
