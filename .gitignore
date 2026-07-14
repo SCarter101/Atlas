@@ -4,3 +4,5 @@ dist/
 *.tsbuildinfo
 .thumbnail
 .claude/
+app/test-results/
+app/playwright-report/
