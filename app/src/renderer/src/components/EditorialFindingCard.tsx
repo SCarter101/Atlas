@@ -31,6 +31,21 @@ const ROLE_NAME: Record<AgentRole, string> = {
   'World-Builder': 'World Builder'
 }
 
+// Phase 8 §7.2: display label for a real Dev-Editor model call's
+// issueCategory (see EditorialFindingPayload / parseRealStructuralFindings
+// in main/agent/simulator.ts). Absent on the pre-Phase-8 template-simulated
+// finding, which never set this field — the badge below only renders when
+// it's present.
+const ISSUE_CATEGORY_LABEL: Record<string, string> = {
+  continuity: 'Continuity',
+  pacing: 'Pacing',
+  pov: 'Point of view',
+  stakes: 'Stakes',
+  hooks: 'Hooks',
+  'setup-payoff': 'Setup & payoff',
+  other: 'Other'
+}
+
 // Ported from the Phase 1 prototype's ReviewPanel.dc.html Story Editor
 // issue card. Structural findings still go through the same Universal
 // Suggestion Contract (Accept/Reject/Refine) as tracked changes — see spec
@@ -38,6 +53,7 @@ const ROLE_NAME: Record<AgentRole, string> = {
 // developmental-editing finding instead of a before/after diff.
 export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef }): JSX.Element {
   const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
+  const refineSuggestion = useAtlasStore((s) => s.refineSuggestion)
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
 
@@ -88,7 +104,39 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
         </span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--c-ink-soft)', lineHeight: 1.5, marginBottom: 10 }}>{payload.body}</div>
-      <div style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', marginBottom: 10 }}>Severity: {payload.severity}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, color: 'var(--c-ink-faint)', marginBottom: 10 }}>
+        <span>Severity: {payload.severity}</span>
+        {payload.issueCategory && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: '1px 7px',
+              borderRadius: 10,
+              background: 'var(--c-surface)',
+              border: '1px solid var(--c-border)',
+              color: 'var(--c-ink-soft)'
+            }}
+          >
+            {ISSUE_CATEGORY_LABEL[payload.issueCategory] ?? payload.issueCategory}
+          </span>
+        )}
+      </div>
+
+      {payload.revisionPlan && (
+        <div
+          style={{
+            marginBottom: 10,
+            padding: '8px 10px',
+            borderRadius: 8,
+            background: 'var(--c-surface)',
+            border: '1px solid var(--c-border)'
+          }}
+        >
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--c-ink-faint)', marginBottom: 3 }}>Revision plan</div>
+          <div style={{ fontSize: 12, color: 'var(--c-ink-soft)', lineHeight: 1.5 }}>{payload.revisionPlan}</div>
+        </div>
+      )}
 
       {craftConcepts.length > 0 && (
         <div style={{ marginBottom: 10 }}>
@@ -152,8 +200,9 @@ export function EditorialFindingCard({ suggestion }: { suggestion: SuggestionRef
           />
           <button
             onClick={() => {
-              setSuggestionState(suggestion.id, 'refining')
+              void refineSuggestion(suggestion.id, refineText)
               setRefining(false)
+              setRefineText('')
             }}
             style={{
               width: '100%',

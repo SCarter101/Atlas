@@ -44,6 +44,7 @@ const ROLE_NAME: Record<AgentRole, string> = {
 // both actually install the capability instead of only the former.
 export function CapabilityRecommendationCard({ suggestion }: { suggestion: SuggestionRef }): JSX.Element {
   const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
+  const refineSuggestion = useAtlasStore((s) => s.refineSuggestion)
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
   const [installing, setInstalling] = useState(false)
@@ -136,8 +137,9 @@ export function CapabilityRecommendationCard({ suggestion }: { suggestion: Sugge
           />
           <button
             onClick={() => {
-              setSuggestionState(suggestion.id, 'refining')
+              void refineSuggestion(suggestion.id, refineText)
               setRefining(false)
+              setRefineText('')
             }}
             style={{
               width: '100%',
