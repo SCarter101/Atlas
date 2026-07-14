@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import type { ElectronApplication, Page } from 'playwright'
-import { launchAtlas } from './support/launchApp'
+import { launchAtlas, dismissTourIfShown } from './support/launchApp'
 
 // End-to-end smoke test for Atlas's core writer loop, driven against a real
 // launched Electron instance (electron-vite's `out/` build) rather than
@@ -42,6 +42,7 @@ test.describe('Atlas golden path', () => {
     // openSampleProject() resolves (spec §2 default-view requirement) —
     // HashRouter, so the URL fragment is the reliable signal.
     await window.waitForURL(/#\/manuscript/, { timeout: 20_000 })
+    await dismissTourIfShown(window)
 
     const editor = window.locator('.manuscript-page .ProseMirror')
     await expect(editor).toBeVisible({ timeout: 20_000 })

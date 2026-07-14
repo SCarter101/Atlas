@@ -44,3 +44,21 @@ export async function launchAtlas(): Promise<AtlasApp> {
   await window.waitForLoadState('domcontentloaded')
   return { app, window }
 }
+
+// A fresh Electron profile has no localStorage, so AppShell's product tour
+// (Phase 9 Track G) auto-opens the first time AppShell mounts — i.e. once
+// navigation lands inside a project (Landing itself is outside AppShell, so
+// the tour isn't present there yet). Its full-screen overlay then intercepts
+// pointer events on everything underneath it, including the manuscript
+// editor. Call this right after the first in-app navigation completes, before
+// interacting with anything AppShell renders. "Skip" also calls the same
+// finish() as Escape (marks it seen in localStorage) — using the visible
+// button rather than a bare keypress makes the dismissal assertable and
+// fails loudly (via toBeVisible's timeout) if the tour's markup ever changes,
+// instead of silently clicking through to nothing.
+export async function dismissTourIfShown(window: Page): Promise<void> {
+  const skipButton = window.getByRole('button', { name: 'Skip' })
+  if (await skipButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await skipButton.click()
+  }
+}
