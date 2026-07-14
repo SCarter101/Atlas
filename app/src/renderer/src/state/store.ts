@@ -15,6 +15,7 @@ import type { OpenRouterCatalogEntry } from '@shared/schema/models'
 import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest, Theme } from '@shared/schema/project'
 import type { SessionApproval } from '@shared/schema/capability'
+import type { EmbeddingProvider } from '@shared/schema/embeddings'
 import { describeProvider, type PrivacyModelRef } from '@shared/privacy'
 import { normalizeError } from '@shared/errors'
 
@@ -92,6 +93,13 @@ interface AtlasState {
   agentModels: Record<AgentRole, ModelRef>
   modelCatalog: OpenRouterCatalogEntry[]
   lmStudioFallback: boolean
+  // Phase 7: which embedding provider retrieval/search should use — LM
+  // Studio (default) / OpenRouter (opt-in) / hashing-only. In-memory only,
+  // same non-persisted pattern as agentModels/lmStudioFallback above; mirrored
+  // into the main process via window.atlas.embeddings.setProvider() so
+  // background work not triggered per-call from the renderer (scene-write
+  // reindexing, the lazy ensureIndexed() pass) knows the current choice too.
+  embeddingProvider: EmbeddingProvider
   advancedMode: boolean
   privacySettings: PrivacySettings
   cloudAuthGrantedThisSession: boolean
@@ -132,6 +140,7 @@ interface AtlasState {
   setAgentModel: (role: AgentRole, model: ModelRef) => void
   loadModelCatalog: () => Promise<void>
   toggleLmStudioFallback: () => void
+  setEmbeddingProvider: (provider: EmbeddingProvider) => void
   toggleAdvancedMode: () => void
   toggleRequireCloudAuth: () => void
   toggleWarnCloudUnpublished: () => void
@@ -161,6 +170,7 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   agentModels: { ...DEFAULT_AGENT_MODELS },
   modelCatalog: [],
   lmStudioFallback: true,
+  embeddingProvider: 'lm-studio',
   advancedMode: false,
   privacySettings: { requireCloudAuth: true, warnCloudUnpublished: true },
   cloudAuthGrantedThisSession: false,
@@ -403,6 +413,11 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   },
 
   toggleLmStudioFallback: () => set((s) => ({ lmStudioFallback: !s.lmStudioFallback })),
+
+  setEmbeddingProvider: (provider) => {
+    set({ embeddingProvider: provider })
+    void window.atlas.embeddings.setProvider(provider)
+  },
 
   toggleAdvancedMode: () => set((s) => ({ advancedMode: !s.advancedMode })),
 

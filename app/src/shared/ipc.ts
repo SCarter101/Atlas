@@ -10,7 +10,7 @@ import type { ChapterSummary, ContextWarning, DerivedSummary, DerivedSummaryKind
 import type { SessionGoal, SessionSummary } from './schema/session'
 import type { SnapshotDiffRun } from './schema/revision'
 import type { UsageSummary } from './schema/usage'
-import type { EmbeddingsStatus } from './schema/embeddings'
+import type { EmbeddingProvider, EmbeddingsStatus } from './schema/embeddings'
 
 // Channel names shared between preload's contextBridge exposure and main's
 // ipcMain handlers, so a typo can't silently create two different strings.
@@ -53,6 +53,7 @@ export const IpcChannel = {
   ContextWarnings: 'context:warnings',
   SummariesGetDerived: 'summaries:get-derived',
   EmbeddingsStatus: 'embeddings:status',
+  EmbeddingsSetProvider: 'embeddings:set-provider',
   SessionsLogActivity: 'sessions:log-activity',
   SessionsSummary: 'sessions:summary',
   SessionsSetGoal: 'sessions:set-goal',
@@ -196,6 +197,14 @@ export interface AtlasBridge {
   }
   embeddings: {
     status(): Promise<EmbeddingsStatus>
+    // Mirrors the writer's Settings choice into the main process (see
+    // main/retrieval/embeddings/select.ts's setPreferredEmbeddingProvider),
+    // the same "renderer decides, main process is told" pattern
+    // consent.setRequireAuth already uses — main-process code that isn't
+    // triggered per-call from the renderer (the scene-write reindexing
+    // hook, retrieval:search's lazy indexing pass) needs to know this
+    // without an extra argument threaded through every unrelated call.
+    setProvider(provider: EmbeddingProvider): Promise<void>
   }
   sessions: {
     logActivity(wordsDelta: number): Promise<void>

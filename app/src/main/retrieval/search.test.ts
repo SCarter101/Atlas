@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openIndexDb, upsertVectorIndex, type AtlasDb } from '../persistence/db'
-import { indexText, search } from './search'
+import { writeBookMeta, writeChapterMeta, writePartMeta } from '../persistence/manuscriptStore'
+import { writeScene } from '../persistence/sceneStore'
+import { ensureIndexed, indexText, markIndexed, search } from './search'
 import { cosineSimilarity, vectorize } from './vectorize'
 
 describe('vectorize', () => {
@@ -99,5 +101,112 @@ describe('vector BLOB round trip through a real sql.js index db', () => {
     const results = search(db, 'catfish', { limit: 10 })
     const matches = results.filter((r) => r.id === 'scene-1')
     expect(matches.length).toBe(1)
+  })
+})
+
+// Phase 7: indexText/search optionally route through a real
+// main/retrieval/embeddings/ adapter instead of the bare vectorize() above,
+// tagging the vectors table row with the adapter's resolved id. These use
+// the 'hashing' adapter (a thin wrapper around vectorize() — see
+// embeddings/hashingEmbeddingAdapter.ts) so the assertions stay
+// deterministic without mocking HTTP; embeddings/*.test.ts cover the real
+// LM Studio/OpenRouter adapters' own request/response handling directly.
+describe('model-tagged retrieval (real embedding adapters, Phase 7)', () => {
+  let projectRoot: string
+  let db: AtlasDb
+
+  beforeEach(async () => {
+    projectRoot = mkdtempSync(join(tmpdir(), 'atlas-retrieval-model-test-'))
+    db = await openIndexDb(projectRoot)
+  })
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true })
+  })
+
+  it('indexText(..., model) is async and search(..., {model}) retrieves what it wrote, tagged with the adapter id', async () => {
+    await indexText(db, 'scene-1', 'scene', 'Ray walked the levee road at dawn', 'hashing')
+
+    const results = await search(db, 'Ray walked the levee road at dawn', { model: 'hashing', limit: 1 })
+    expect(results[0].id).toBe('scene-1')
+    expect(results[0].score).toBeCloseTo(1, 5)
+  })
+
+  it('does not match a vector tagged with a different embedding-space model', async () => {
+    await indexText(db, 'scene-1', 'scene', 'Ray walked the levee road at dawn', 'hashing')
+    // Simulate a vector from a different, real embedding space (e.g. LM
+    // Studio's actual model) landing in the same table under a different
+    // model tag — model-scoped search must never cosine-compare across
+    // embedding spaces (see persistence/db.ts's searchVectorIndex).
+    upsertVectorIndex(db, 'scene-2', 'scene', vectorize('Ray walked the levee road at dawn'), 'lm-studio')
+
+    const results = await search(db, 'Ray walked the levee road at dawn', { model: 'hashing', limit: 10 })
+    expect(results.some((r) => r.id === 'scene-2')).toBe(false)
+  })
+
+  it('the no-model overload stays fully synchronous (back-compat)', () => {
+    // Not awaited on purpose — this is the exact call shape every
+    // pre-Phase-7 caller (including the other describe block in this file)
+    // uses, and it must keep behaving synchronously, not return a Promise.
+    indexText(db, 'scene-3', 'scene', 'plain vectorize path, no model tag')
+    const results = search(db, 'plain vectorize path', { limit: 1 })
+    expect(results[0].id).toBe('scene-3')
+  })
+})
+
+describe('markIndexed / ensureIndexed consistency (Phase 7)', () => {
+  let projectRoot: string
+  let db: AtlasDb
+
+  beforeEach(async () => {
+    projectRoot = mkdtempSync(join(tmpdir(), 'atlas-retrieval-markindexed-test-'))
+    db = await openIndexDb(projectRoot)
+    await writeBookMeta(projectRoot, { id: 'book-01', projectId: '', title: 'Book', order: 0 })
+    await writePartMeta(projectRoot, 'book-01', { id: 'part-01', bookId: 'book-01', title: 'Part', order: 0 })
+    await writeChapterMeta(projectRoot, 'book-01', 'part-01', {
+      id: 'ch-01',
+      partId: 'part-01',
+      title: 'Chapter',
+      order: 0,
+      summary: '',
+      sceneIds: ['scene-1']
+    })
+    await writeScene(
+      projectRoot,
+      db,
+      'scene-1',
+      {
+        meta: { schemaVersion: 1, id: 'scene-1', chapterId: 'ch-01', order: 0, title: 'Scene One', status: 'drafting' },
+        prose: 'The levee held through the night.'
+      },
+      'book-01/part-01/ch-01',
+      'scene-1'
+    )
+  })
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true })
+  })
+
+  it('markIndexed() keeps ensureIndexed() from re-embedding a scene the scene-write hook already indexed', async () => {
+    // Simulate main/ipc/handlers.ts's SceneWrite hook: it already indexed
+    // scene-1 through a real embedding adapter elsewhere (not reproduced
+    // here) and just needs to record that. Deliberately NOT writing an
+    // actual vector row for scene-1 proves ensureIndexed() truly skips it
+    // — if it didn't, this test would see scene-1 show up from
+    // ensureIndexed()'s own (re-)indexing pass.
+    markIndexed(db, 'scene:scene-1')
+
+    await ensureIndexed(db, projectRoot)
+
+    const results = search(db, 'levee', { kind: 'scene', limit: 10 })
+    expect(results.some((r) => r.id === 'scene-1')).toBe(false)
+  })
+
+  it('without markIndexed(), ensureIndexed() does index the scene (sanity check for the test above)', async () => {
+    await ensureIndexed(db, projectRoot)
+
+    const results = search(db, 'levee', { kind: 'scene', limit: 10 })
+    expect(results.some((r) => r.id === 'scene-1')).toBe(true)
   })
 })
