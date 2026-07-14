@@ -6,10 +6,11 @@ import type { CodexCandidate } from './schema/import'
 import type { OpenRouterCatalogEntry } from './schema/models'
 import type { ProjectManifest } from './schema/project'
 import type { ManuscriptTree, SceneMeta } from './schema/manuscript'
-import type { ChapterSummary, ContextWarning, RetrievalResult, SceneSummary } from './schema/retrieval'
+import type { ChapterSummary, ContextWarning, DerivedSummary, DerivedSummaryKind, RetrievalResult, SceneSummary } from './schema/retrieval'
 import type { SessionGoal, SessionSummary } from './schema/session'
 import type { SnapshotDiffRun } from './schema/revision'
 import type { UsageSummary } from './schema/usage'
+import type { EmbeddingsStatus } from './schema/embeddings'
 
 // Channel names shared between preload's contextBridge exposure and main's
 // ipcMain handlers, so a typo can't silently create two different strings.
@@ -50,6 +51,8 @@ export const IpcChannel = {
   SummariesGetChapter: 'summaries:get-chapter',
   SummariesGetScene: 'summaries:get-scene',
   ContextWarnings: 'context:warnings',
+  SummariesGetDerived: 'summaries:get-derived',
+  EmbeddingsStatus: 'embeddings:status',
   SessionsLogActivity: 'sessions:log-activity',
   SessionsSummary: 'sessions:summary',
   SessionsSetGoal: 'sessions:set-goal',
@@ -186,9 +189,13 @@ export interface AtlasBridge {
   summaries: {
     getChapter(chapterId: string): Promise<ChapterSummary>
     getScene(sceneId: string): Promise<SceneSummary>
+    getDerived(kind: DerivedSummaryKind, subjectId: string): Promise<DerivedSummary>
   }
   context: {
     warnings(goal: AgentGoal): Promise<ContextWarning[]>
+  }
+  embeddings: {
+    status(): Promise<EmbeddingsStatus>
   }
   sessions: {
     logActivity(wordsDelta: number): Promise<void>

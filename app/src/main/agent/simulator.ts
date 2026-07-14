@@ -462,6 +462,7 @@ export class AgentRunManager {
     // throw into the caller, same contract as every other real-tool call in
     // this file (checkWordCount, checkCodexContradictions, ...).
     void recordUsage(this.projectRoot, {
+      callKind: 'agent-run',
       runId: goal.runId,
       agentRole: goal.agentRole,
       modelRef: modelCall.modelRef,

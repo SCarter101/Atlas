@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { AgentRole } from '@shared/schema/agent'
 import type { UsageEntry, UsageSummary } from '@shared/schema/usage'
 import { projectPaths } from './paths'
 
@@ -16,9 +15,8 @@ function modelKey(entry: UsageEntry): string {
 // Append-only usage log — one JSON object per line, mirroring the
 // house-style rolling-log approach (see sessionStore.ts's daily files) but
 // as a single project-scoped file since usage entries are per-call, not
-// per-day. Not yet called by anything in this wave — main/agent/simulator.ts
-// (owned by a later wave) is the intended caller once real provider calls
-// replace the simulator.
+// per-day. Called from main/agent/simulator.ts for agent-run calls (Phase 6)
+// and from the Phase 7 embedding/summary-generation call sites.
 export async function recordUsage(projectRoot: string, entry: UsageEntry): Promise<void> {
   const settingsDir = projectPaths(projectRoot).settingsDir
   await mkdir(settingsDir, { recursive: true })
@@ -29,7 +27,7 @@ function emptySummary(): UsageSummary {
   return {
     totalCostUsd: 0,
     totalTokens: 0,
-    byAgentRole: {} as Record<AgentRole, { costUsd: number; tokens: number; calls: number }>,
+    byAgentRole: {},
     byModel: {}
   }
 }
@@ -58,11 +56,15 @@ export async function getUsageSummary(projectRoot: string): Promise<UsageSummary
     summary.totalCostUsd += entry.estimatedCostUsd
     summary.totalTokens += tokens
 
-    const roleBucket = summary.byAgentRole[entry.agentRole] ?? { costUsd: 0, tokens: 0, calls: 0 }
-    roleBucket.costUsd += entry.estimatedCostUsd
-    roleBucket.tokens += tokens
-    roleBucket.calls += 1
-    summary.byAgentRole[entry.agentRole] = roleBucket
+    // Standalone embedding/summary-generation calls (Phase 7) have no
+    // AgentRole to bucket under — only aggregate this row when one exists.
+    if (entry.agentRole) {
+      const roleBucket = summary.byAgentRole[entry.agentRole] ?? { costUsd: 0, tokens: 0, calls: 0 }
+      roleBucket.costUsd += entry.estimatedCostUsd
+      roleBucket.tokens += tokens
+      roleBucket.calls += 1
+      summary.byAgentRole[entry.agentRole] = roleBucket
+    }
 
     const key = modelKey(entry)
     const modelBucket = summary.byModel[key] ?? { costUsd: 0, tokens: 0, calls: 0 }

@@ -108,7 +108,24 @@ describe('usageStore', () => {
     }
 
     const summary = await getUsageSummary(projectRoot)
-    expect(summary.byAgentRole.Dialoguer.calls).toBe(5)
+    expect(summary.byAgentRole.Dialoguer!.calls).toBe(5)
     expect(summary.totalTokens).toBe(100)
+  })
+
+  it('aggregates a standalone call with no runId/agentRole (Phase 7 embedding/summary calls)', async () => {
+    await recordUsage(projectRoot, {
+      callKind: 'summary-generation',
+      label: 'chapter-summary:ch-1',
+      modelRef: { provider: 'lm-studio', modelId: 'local-model', viaOpenRouter: false },
+      inputTokens: 40,
+      outputTokens: 20,
+      estimatedCostUsd: 0,
+      timestamp: '2026-01-01T00:00:00.000Z'
+    })
+
+    const summary = await getUsageSummary(projectRoot)
+    expect(summary.totalTokens).toBe(60)
+    expect(summary.byAgentRole).toEqual({})
+    expect(summary.byModel['lm-studio:local-model']).toEqual({ costUsd: 0, tokens: 60, calls: 1 })
   })
 })

@@ -62,10 +62,14 @@ const atlasBridge: AtlasBridge = {
   },
   summaries: {
     getChapter: (chapterId) => ipcRenderer.invoke(IpcChannel.SummariesGetChapter, chapterId),
-    getScene: (sceneId) => ipcRenderer.invoke(IpcChannel.SummariesGetScene, sceneId)
+    getScene: (sceneId) => ipcRenderer.invoke(IpcChannel.SummariesGetScene, sceneId),
+    getDerived: (kind, subjectId) => ipcRenderer.invoke(IpcChannel.SummariesGetDerived, kind, subjectId)
   },
   context: {
     warnings: (goal) => ipcRenderer.invoke(IpcChannel.ContextWarnings, goal)
+  },
+  embeddings: {
+    status: () => ipcRenderer.invoke(IpcChannel.EmbeddingsStatus)
   },
   sessions: {
     logActivity: (wordsDelta) => ipcRenderer.invoke(IpcChannel.SessionsLogActivity, wordsDelta),

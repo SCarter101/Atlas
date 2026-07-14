@@ -370,6 +370,16 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     })
   })
 
+  // Phase 7 Wave 0 stub — real body lands with Wave 1B's derivedSummaryStore.ts.
+  ipcMain.handle(IpcChannel.SummariesGetDerived, async (_evt, _kind: string, _subjectId: string) => {
+    throw new AtlasError('not-implemented', 'Derived summaries are not implemented yet.')
+  })
+
+  // Phase 7 Wave 0 stub — real body lands with Wave 1A's embeddings adapters.
+  ipcMain.handle(IpcChannel.EmbeddingsStatus, async () => {
+    return { activeProvider: 'hashing' as const, available: true }
+  })
+
   ipcMain.handle(IpcChannel.SessionsLogActivity, async (_evt, wordsDelta: number) => {
     const session = getCurrentProjectSession()
     await logSessionActivity(session.projectRoot, wordsDelta)

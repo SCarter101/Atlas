@@ -90,6 +90,28 @@ export interface PermissionRequest {
   decision: PermissionDecision
 }
 
+// spec §9 Context Inspection — one class of material a context-assembly pass
+// (main/agent/context/assemble.ts, Phase 7) considered including in a model
+// call's contextText. `included: false` entries are the "excluded but
+// potentially relevant items" the spec calls for, with `excludedReason`
+// explaining why (over budget, no match, spoiler-filtered, etc.).
+export type ContextSectionClass =
+  | 'chapter-summary'
+  | 'scene-outline'
+  | 'codex-entry'
+  | 'voice-profile'
+  | 'locked-world-rule'
+  | 'recent-excerpt'
+  | 'full-text'
+
+export interface ContextSection {
+  class: ContextSectionClass
+  label: string
+  included: boolean
+  tokensEstimate: number
+  excludedReason?: string
+}
+
 export interface ModelCallSummary {
   modelRef: ModelRef
   inputTokens: number
@@ -100,6 +122,15 @@ export interface ModelCallSummary {
   // / lmStudioAdapter, Phase 6). No zod mirror in shared/validation.ts —
   // ModelCallSummary is never validated at an IPC write boundary.
   outputText?: string
+  // Phase 7: what main/agent/context/assemble.ts actually packed into this
+  // call's contextText, for real Context Inspection display. Absent for
+  // pre-Phase-7 run records and for any call site not yet migrated onto
+  // assembleContext() — ContextInspectionPanel must handle its absence.
+  assembledContext?: {
+    sections: ContextSection[]
+    tokenBudget: number
+    usedTokens: number
+  }
 }
 
 export interface Citation {

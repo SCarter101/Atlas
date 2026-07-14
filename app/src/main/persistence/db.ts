@@ -71,6 +71,23 @@ export async function openIndexDb(projectRoot: string): Promise<AtlasDb> {
     );
   `)
 
+  // Phase 7: vectors gained a nullable `model` tag so real-embedding vectors
+  // (e.g. LM Studio's nomic-embed-text, dims 768) never get cosine-compared
+  // against the pre-Phase-7 hashing-trick vectors (dims 256) or against each
+  // other's different embedding spaces. A plain CREATE TABLE change doesn't
+  // reach a db file that already exists on disk (loaded via readFileSync
+  // above), so this is a one-time additive ALTER TABLE, guarded by a
+  // PRAGMA check since SQLite has no "ADD COLUMN IF NOT EXISTS". Rows
+  // written before this migration keep a NULL model (treated as the legacy
+  // hashing space by callers) rather than being dropped — this table is a
+  // derived cache per the file header, but there's no reason to force a
+  // full re-embed when a non-destructive column add works just as well.
+  const vectorsColumns = db.exec(`PRAGMA table_info(vectors)`)
+  const hasModelColumn = vectorsColumns[0]?.values.some((row) => row[1] === 'model') ?? false
+  if (!hasModelColumn) {
+    db.run(`ALTER TABLE vectors ADD COLUMN model TEXT`)
+  }
+
   const atlasDb: AtlasDb = {
     db,
     persist: () => writeFileSync(filePath, Buffer.from(db.export()))
@@ -199,15 +216,26 @@ export function listAgentRunIndex(
   }
 }
 
-// Vectors produced by main/retrieval/vectorize.ts — stored as raw Float32
+// Vectors produced by main/retrieval/vectorize.ts (or, since Phase 7, a real
+// embedding adapter — main/retrieval/embeddings/) — stored as raw Float32
 // bytes in a BLOB column. sql.js hands blob params back as Uint8Array (see
 // its ParamsObject / SqlValue types), so the round trip is
 // Float32Array -> Buffer (write) -> Uint8Array -> Float32Array (read).
-export function upsertVectorIndex(atlasDb: AtlasDb, id: string, kind: string, vector: Float32Array): void {
+//
+// `model` optionally tags which embedding space a row belongs to (e.g.
+// 'hashing-256', 'lm-studio:nomic-embed-text'). Omitted for pre-Phase-7
+// callers, in which case it's stored as NULL.
+export function upsertVectorIndex(
+  atlasDb: AtlasDb,
+  id: string,
+  kind: string,
+  vector: Float32Array,
+  model?: string
+): void {
   atlasDb.db.run(
-    `INSERT INTO vectors (id, kind, vector) VALUES (?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, vector=excluded.vector`,
-    [id, kind, Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength)]
+    `INSERT INTO vectors (id, kind, vector, model) VALUES (?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, vector=excluded.vector, model=excluded.model`,
+    [id, kind, Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength), model ?? null]
   )
   atlasDb.persist()
 }
@@ -215,14 +243,28 @@ export function upsertVectorIndex(atlasDb: AtlasDb, id: string, kind: string, ve
 export function searchVectorIndex(
   atlasDb: AtlasDb,
   queryVector: Float32Array,
-  opts?: { kind?: string; limit?: number }
+  opts?: { kind?: string; model?: string; limit?: number }
 ): { id: string; kind: string; score: number }[] {
-  const stmt = atlasDb.db.prepare(
-    opts?.kind ? `SELECT id, kind, vector FROM vectors WHERE kind = ?` : `SELECT id, kind, vector FROM vectors`
-  )
+  const conditions: string[] = []
+  const params: string[] = []
+  if (opts?.kind) {
+    conditions.push('kind = ?')
+    params.push(opts.kind)
+  }
+  // Comparing vectors across embedding spaces (different dimensionality or
+  // semantics) produces meaningless cosine scores, so a caller that knows
+  // its active embedding model should scope the search to it. Rows with no
+  // `model` tag (pre-Phase-7 hashing-trick vectors) are matched only when
+  // the caller doesn't ask for a specific model, preserving old behavior.
+  if (opts?.model) {
+    conditions.push('model = ?')
+    params.push(opts.model)
+  }
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : ''
+  const stmt = atlasDb.db.prepare(`SELECT id, kind, vector FROM vectors${where}`)
   const rows: { id: string; kind: string; score: number }[] = []
   try {
-    stmt.bind(opts?.kind ? [opts.kind] : [])
+    stmt.bind(params)
     while (stmt.step()) {
       const row = stmt.getAsObject() as unknown as { id: string; kind: string; vector: Uint8Array }
       const bytes = row.vector

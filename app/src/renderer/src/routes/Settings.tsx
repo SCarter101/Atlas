@@ -524,7 +524,7 @@ function UsageSection(): JSX.Element {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {AGENT_ORDER.filter(({ role }) => summary.byAgentRole[role]).map(({ role, name }) => {
-                const bucket = summary.byAgentRole[role]
+                const bucket = summary.byAgentRole[role]!
                 return (
                   <div
                     key={role}
