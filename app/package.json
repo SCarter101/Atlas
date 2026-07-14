@@ -11,7 +11,9 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "start": "electron-vite preview"
+    "start": "electron-vite preview",
+    "package": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder --win"
   },
   "dependencies": {
     "@tiptap/core": "^2.9.1",
@@ -46,8 +48,27 @@
   "build": {
     "productName": "Atlas",
     "appId": "com.atlas.desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
     "win": {
-      "icon": "resources/icon.png"
+      "icon": "resources/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Atlas"
     }
   }
 }
