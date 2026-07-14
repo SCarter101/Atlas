@@ -150,18 +150,28 @@ describe('AgentRunManager — real model output consumption (Phase 6)', () => {
   })
 
   describe('Line Editor', () => {
-    it('emits exactly one tracked-change built from real model output when the adapter is real', async () => {
+    // Phase 8 §7.3 + Codex adversarial-review: Line Editor's real branch now
+    // always requests JSON-mode multi-finding output (see
+    // simulator.lineEditor.test.ts for that upgrade's own coverage).
+    // FAKE_OUTPUT_TEXT here is plain prose, not JSON, so this exercises the
+    // JSON-parse-failure path — which must fall all the way through to the
+    // fully-simulated findings, NOT offer the raw model text as a
+    // whole-selection replacement (a real model's non-JSON response to a
+    // JSON-mode request is typically explanatory prose or a malformed
+    // fragment, neither of which is safe to present as literal replacement
+    // prose).
+    it('falls back to the fully-simulated findings when the real adapter does not return valid JSON', async () => {
       const manager = new AgentRunManager(projectRoot, db)
       const goal = makeGoal('Line-Editor', 'openrouter', 'run-real-line-editor')
       const steps = await runToCompletion(manager, goal)
 
       const suggestions = proposedChanges(steps)
-      expect(suggestions).toHaveLength(1)
-      expect(suggestions[0].kind).toBe('tracked-change')
-      const payload = suggestions[0].payload as TrackedChangePayload
-      expect(payload.category).toBe('Model revision')
-      expect(payload.before).toBe(goal.scope.selectionText)
-      expect(payload.after).toBe(FAKE_OUTPUT_TEXT)
+      expect(suggestions.length).toBeGreaterThan(0)
+      for (const s of suggestions) {
+        const payload = s.payload as TrackedChangePayload
+        expect(payload.category).not.toBe('Model revision')
+        expect(payload.after).not.toBe(FAKE_OUTPUT_TEXT)
+      }
     })
 
     it('still produces the old simulated multi-finding behavior unchanged via the simulator adapter', async () => {

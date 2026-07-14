@@ -83,6 +83,22 @@ function allScenes(tree: ManuscriptTree | null): SceneMeta[] {
   return (tree?.books ?? []).flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
 }
 
+// How many non-overlapping times `needle` appears in `haystack` — used by a
+// tracked-change's accept path (Codex adversarial-review, Phase 8) to detect
+// when a proposed before/after span isn't unique within the scene, since
+// String.replace(str, str) would otherwise silently rewrite whichever
+// occurrence happens to come first rather than the one the writer reviewed.
+function countOccurrences(haystack: string, needle: string): number {
+  if (needle.length === 0) return 0
+  let count = 0
+  let index = haystack.indexOf(needle)
+  while (index !== -1) {
+    count += 1
+    index = haystack.indexOf(needle, index + needle.length)
+  }
+  return count
+}
+
 // Phase 8: what a Refine re-run treats as "the prior output" for a given
 // suggestion kind — fed in as scope.selectionText so the re-invoked agent
 // role has the thing the writer is actually asking to refine, not the
@@ -691,13 +707,29 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
       if (suggestion.kind === 'tracked-change') {
         const payload = suggestion.payload as { before: string; after: string }
         const { prose } = await window.atlas.scenes.read(suggestion.targetSceneId)
-        if (!prose.includes(payload.before)) {
+        const occurrences = countOccurrences(prose, payload.before)
+        if (occurrences === 0) {
           // Stale suggestion: the original span is gone (the writer edited it,
           // a concurrent save landed, or it was already accepted). Skipping
           // the write but still flipping the card to 'accepted' would claim a
           // change that never happened, so treat it as a conflict — surface a
           // toast and leave the card pending instead of updating state below.
           get().pushToast('error', 'This edit no longer matches the current text — re-run the agent to refresh the suggestion.')
+          return
+        }
+        if (occurrences > 1) {
+          // Codex adversarial-review (Phase 8): String.replace(str, str) only
+          // ever rewrites the FIRST match in the whole scene. Phase 8's
+          // real Line-Editor path now routinely proposes short, specific
+          // spans (a few words) rather than one whole-selection block, so a
+          // span repeating elsewhere in the scene is a real, common case —
+          // accepting blind could silently edit an earlier identical phrase
+          // instead of the one the writer actually reviewed. Bail the same
+          // way a stale (zero-match) suggestion does rather than guessing.
+          get().pushToast(
+            'error',
+            'This exact text appears more than once in the scene — edit it manually rather than risk changing the wrong occurrence.'
+          )
           return
         }
         const nextProse = prose.replace(payload.before, payload.after)

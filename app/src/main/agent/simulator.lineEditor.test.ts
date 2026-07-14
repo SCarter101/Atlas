@@ -124,10 +124,14 @@ describe('AgentRunManager — Line Editor real JSON-mode multi-finding upgrade (
   })
 
   it('produces multiple tracked-change suggestions from valid JSON output, threading isAiSoundingFlag and refinesSuggestionId', async () => {
+    // Both `before` spans must actually appear verbatim in the default
+    // selection ('The door creaked open very slowly indeed.') — Codex
+    // adversarial-review's anchoring fix (Phase 8) drops any parsed finding
+    // whose span isn't a real substring of the passage the model was given.
     nextOutputText = JSON.stringify({
       findings: [
-        { category: 'Filter word', before: 'noticed that', after: 'saw', isAiSoundingFlag: false },
-        { category: 'AI-sounding phrasing', before: 'a testament to', after: 'proof of', isAiSoundingFlag: true }
+        { category: 'Filter word', before: 'creaked open', after: 'opened', isAiSoundingFlag: false },
+        { category: 'AI-sounding phrasing', before: 'very slowly', after: 'slowly', isAiSoundingFlag: true }
       ]
     })
 
@@ -149,30 +153,62 @@ describe('AgentRunManager — Line Editor real JSON-mode multi-finding upgrade (
     expect(payloads[1].isAiSoundingFlag).toBe(true)
   })
 
-  it('falls back to the single whole-selection tracked-change when the real output is not valid JSON', async () => {
+  // Codex adversarial-review (Phase 8): a JSON-mode request that fails to
+  // parse must NOT fall back to offering the raw model text as a
+  // whole-selection replacement — parse failures commonly mean explanatory
+  // prose, partial JSON, or a schema-invalid response, none of which is safe
+  // to present as literal replacement prose. It now falls all the way
+  // through to the same simulated findings used when there's no real output
+  // at all, same as the "no real output" case below.
+  it('falls back to the fully-simulated findings (not the raw model text) when the real output is not valid JSON', async () => {
     nextOutputText = 'The lantern flickered once, then steadied against the draft.'
 
     const manager = new AgentRunManager(projectRoot, db)
     const steps = await runToCompletion(manager, makeGoal({ runId: 'run-line-fallback-1' }))
 
     const suggestions = proposedChanges(steps)
-    expect(suggestions).toHaveLength(1)
-    expect(suggestions[0].kind).toBe('tracked-change')
-    const payload = suggestions[0].payload as TrackedChangePayload
-    expect(payload.category).toBe('Model revision')
-    expect(payload.after).toBe(nextOutputText)
+    expect(suggestions.length).toBeGreaterThan(0)
+    for (const s of suggestions) {
+      const payload = s.payload as TrackedChangePayload
+      expect(payload.category).not.toBe('Model revision')
+      expect(payload.after).not.toBe(nextOutputText)
+    }
   })
 
-  it('falls back to the single whole-selection tracked-change when JSON parses but findings are missing required fields', async () => {
+  it('falls back to the fully-simulated findings when JSON parses but findings are missing required fields', async () => {
     nextOutputText = JSON.stringify({ findings: [{ category: 'Incomplete', before: '', after: 'x' }] })
 
     const manager = new AgentRunManager(projectRoot, db)
     const steps = await runToCompletion(manager, makeGoal({ runId: 'run-line-invalid-findings-1' }))
 
     const suggestions = proposedChanges(steps)
+    expect(suggestions.length).toBeGreaterThan(0)
+    for (const s of suggestions) {
+      const payload = s.payload as TrackedChangePayload
+      expect(payload.category).not.toBe('Model revision')
+    }
+  })
+
+  // Codex adversarial-review (Phase 8): a real model can hallucinate a
+  // `before` span that doesn't actually appear in the passage it was given —
+  // accepting that finding as-is would let it match (and corrupt) whichever
+  // unrelated text in the scene happens to contain that substring. Findings
+  // whose `before` isn't verbatim in the selection are dropped rather than
+  // surfaced.
+  it('drops a parsed finding whose before span does not appear in the selection', async () => {
+    nextOutputText = JSON.stringify({
+      findings: [
+        { category: 'Filter word', before: 'very slowly', after: 'slowly' },
+        { category: 'Hallucinated', before: 'a phrase never in the selection', after: 'x' }
+      ]
+    })
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const steps = await runToCompletion(manager, makeGoal({ runId: 'run-line-hallucinated-span-1' }))
+
+    const suggestions = proposedChanges(steps)
     expect(suggestions).toHaveLength(1)
-    const payload = suggestions[0].payload as TrackedChangePayload
-    expect(payload.category).toBe('Model revision')
+    expect((suggestions[0].payload as TrackedChangePayload).category).toBe('Filter word')
   })
 
   it('falls back further to the fully-simulated findings when there is no real output at all', async () => {

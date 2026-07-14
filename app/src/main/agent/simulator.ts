@@ -635,48 +635,43 @@ export class AgentRunManager {
     // existing ladder, not a replacement of it.
     const isReal = selectAdapter(goal.modelRef).id !== 'simulator' && !!modelCall.outputText
     const parsedFindings = isReal ? parseLineEditFindings(modelCall.outputText as string) : undefined
+    // Codex adversarial-review (Phase 8): a JSON-mode request that fails to
+    // parse must NOT fall back to treating the raw outputText as a
+    // whole-selection replacement — a parse failure commonly means
+    // explanatory prose, partial JSON, or a schema-invalid response, none of
+    // which is safe to offer as literal replacement prose (that was only a
+    // safe fallback pre-Phase-8, when the model was asked for free-form
+    // prose directly rather than JSON). Fall through to the same simulated
+    // findings used when there's no real output at all.
+    //
+    // Each parsed finding's `before` span is also required to actually
+    // appear, verbatim, within the passage the run was scoped to — a real
+    // model can hallucinate a span that doesn't exist in the selection at
+    // all, which would otherwise silently corrupt whichever text in the
+    // scene happens to contain a substring match at accept time.
     const finalSuggestions: SuggestionRef[] = parsedFindings
-      ? parsedFindings.map((finding) => ({
-          id: randomUUID(),
-          agentRole: 'Line-Editor',
-          kind: 'tracked-change',
-          targetSceneId: goal.scope.sceneIds?.[0],
-          payload: {
-            category: finding.category,
-            before: finding.before,
-            after: finding.after,
-            ...(finding.isAiSoundingFlag ? { isAiSoundingFlag: true } : {})
-          } satisfies LineEditTrackedChangePayload,
-          provenance: {
-            capabilityId: 'global.tools.line-edit-scan',
-            capabilityVersion: '1.0.0',
-            runId: goal.runId,
-            refinesSuggestionId: goal.refinesSuggestionId
-          },
-          state: 'pending'
-        }))
-      : isReal
-        ? [
-            {
-              id: randomUUID(),
-              agentRole: 'Line-Editor',
-              kind: 'tracked-change',
-              targetSceneId: goal.scope.sceneIds?.[0],
-              payload: {
-                category: 'Model revision',
-                before: selection,
-                after: modelCall.outputText as string
-              } satisfies TrackedChangePayload,
-              provenance: {
-                capabilityId: 'global.tools.line-edit-scan',
-                capabilityVersion: '1.0.0',
-                runId: goal.runId,
-                refinesSuggestionId: goal.refinesSuggestionId
-              },
-              state: 'pending'
-            }
-          ]
-        : suggestions
+      ? parsedFindings
+          .filter((finding) => selection.includes(finding.before))
+          .map((finding) => ({
+            id: randomUUID(),
+            agentRole: 'Line-Editor',
+            kind: 'tracked-change',
+            targetSceneId: goal.scope.sceneIds?.[0],
+            payload: {
+              category: finding.category,
+              before: finding.before,
+              after: finding.after,
+              ...(finding.isAiSoundingFlag ? { isAiSoundingFlag: true } : {})
+            } satisfies LineEditTrackedChangePayload,
+            provenance: {
+              capabilityId: 'global.tools.line-edit-scan',
+              capabilityVersion: '1.0.0',
+              runId: goal.runId,
+              refinesSuggestionId: goal.refinesSuggestionId
+            },
+            state: 'pending'
+          }))
+      : suggestions
 
     const wordCountNote = wordCountResult ? ` (scanned a ${wordCountResult.wordCount}-word passage)` : ''
     const result: AgentResult = {
