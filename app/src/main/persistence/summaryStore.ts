@@ -113,14 +113,23 @@ export async function getOrGenerateChapterSummary(
   sceneSummaries: SceneSummary[]
 ): Promise<ChapterSummary> {
   const filePath = chapterSummaryPath(projectRoot, chapterId)
-  const sortedSceneSummaries = [...sceneSummaries].sort((a, b) => a.sceneId.localeCompare(b.sceneId))
-  const sourceUpdatedAt = sortedSceneSummaries.map((s) => `${s.sceneId}:${s.sourceUpdatedAt}`).join('|')
+  // Sorting is only for a deterministic fingerprint (sceneId order has
+  // nothing to do with manuscript order, e.g. UUID-style ids or scene-10
+  // sorting before scene-2) — the actual text handed to the summarizer
+  // below must stay in the caller's order (sceneSummaries as given, which
+  // callers pass in chapter.scenes / manuscript order), or a chapter whose
+  // scene ids don't happen to sort into story order gets summarized with
+  // its events out of sequence.
+  const sourceUpdatedAt = [...sceneSummaries]
+    .sort((a, b) => a.sceneId.localeCompare(b.sceneId))
+    .map((s) => `${s.sceneId}:${s.sourceUpdatedAt}`)
+    .join('|')
 
   const existingRaw = await readJsonSafe<ChapterSummary>(filePath)
   const existing = existingRaw ? normalizeChapterSummary(existingRaw) : null
   if (existing && existing.sourceUpdatedAt === sourceUpdatedAt) return existing
 
-  const combinedSceneSummaries = sortedSceneSummaries.map((s) => s.summary).join(' ')
+  const combinedSceneSummaries = sceneSummaries.map((s) => s.summary).join(' ')
   const modelResult = combinedSceneSummaries.trim()
     ? await generateSummaryViaModel(
         projectRoot,

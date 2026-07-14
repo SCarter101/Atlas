@@ -273,6 +273,62 @@ describe('assembleContext (Phase 7)', () => {
     expect(assembled.sections.some((s) => s.class === 'codex-entry')).toBe(false)
   })
 
+  it('excludes a local-model-only Codex entry from a cloud-bound run (Codex review fix)', async () => {
+    await upsertCodexEntry(
+      projectRoot,
+      db,
+      makeCodexEntry({
+        id: 'rule-secret',
+        type: 'world-rule',
+        name: 'Secret levee tunnel',
+        locked: true,
+        localModelOnly: true,
+        body: { summary: 'A tunnel under the levee only three characters know about.' }
+      })
+    )
+
+    const cloudGoal = makeGoal({
+      scope: { sceneIds: ['scene-2'], selectionText: 'Elena confronted Marcus about the letter.' },
+      modelRef: { provider: 'openrouter', modelId: 'anthropic/claude-sonnet', viaOpenRouter: true }
+    })
+    const assembledForCloud = await assembleContext(projectRoot, db, cloudGoal)
+
+    const secretSection = assembledForCloud.sections.find((s) => s.label.includes('Secret levee tunnel'))
+    expect(secretSection?.included).toBe(false)
+    expect(secretSection?.excludedReason).toBe('entry is local-model-only')
+    expect(assembledForCloud.contextText).not.toContain('Secret levee tunnel')
+
+    // The same entry is fine to include when the run targets a local model —
+    // only cloud-bound runs need to exclude it.
+    const localGoal = makeGoal({
+      scope: { sceneIds: ['scene-2'], selectionText: 'Elena confronted Marcus about the letter.' },
+      modelRef: { provider: 'lm-studio', modelId: 'local-model', viaOpenRouter: false }
+    })
+    const assembledForLocal = await assembleContext(projectRoot, db, localGoal)
+    const secretSectionLocal = assembledForLocal.sections.find((s) => s.label.includes('Secret levee tunnel'))
+    expect(secretSectionLocal?.included).toBe(true)
+  })
+
+  it('reserves headroom below maxTokens for prompt/output overhead rather than packing all the way to the configured budget (Codex review fix)', async () => {
+    const maxTokens = 1000
+    const goal = makeGoal({
+      scope: { sceneIds: ['scene-2'], selectionText: 'Elena confronted Marcus about the letter.' },
+      constraints: { maxTurns: 4, maxTokens, maxToolCalls: 3, maxElapsedMs: 30000, allowedCapabilityCategories: ['generation'] }
+    })
+    const assembled = await assembleContext(projectRoot, db, goal)
+
+    // tokenBudget still reports the writer's real configured maxTokens
+    // (what guardModelCall checks against and what Context Inspection
+    // should show as "the budget"), but the amount actually packed must
+    // leave headroom for the system prompt/userIntent/output overhead
+    // runModelCallStep() adds on top — packing all the way to maxTokens
+    // would mean the real call's total input already meets or exceeds the
+    // configured budget before output even starts.
+    expect(assembled.tokenBudget).toBe(maxTokens)
+    const usedTokens = assembled.sections.filter((s) => s.included).reduce((sum, s) => sum + s.tokensEstimate, 0)
+    expect(usedTokens).toBeLessThan(maxTokens)
+  })
+
   it('degrades gracefully with no sceneId and no Codex data: only the writer selection is included', async () => {
     const emptyProjectRoot = mkdtempSync(join(tmpdir(), 'atlas-assemble-empty-'))
     const emptyDb = await openIndexDb(emptyProjectRoot)

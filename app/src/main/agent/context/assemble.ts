@@ -3,6 +3,7 @@ import type { CodexEntry } from '@shared/schema/codex'
 import type { ManuscriptTree } from '@shared/schema/manuscript'
 import type { SceneSummary } from '@shared/schema/retrieval'
 import { filterBySpoilerReveal, getManuscriptReadingOrder } from '@shared/codexLogic'
+import { isCloudModel } from '@shared/privacy'
 import type { AtlasDb } from '../../persistence/db'
 import { listCodexEntries } from '../../persistence/codexStore'
 import { readManuscriptTree } from '../../persistence/manuscriptStore'
@@ -192,20 +193,33 @@ async function scenePresentCharacterIds(projectRoot: string, db: AtlasDb, sceneI
   }
 }
 
+// A Codex entry the writer flagged local-model-only must never reach a
+// cloud model's contextText, same invariant main/ipc/handlers.ts's
+// AgentRunStart guard already enforces for SceneMeta.localModelOnly — that
+// guard only ever checked the *scene*, not individual Codex entries pulled
+// in here via search/voice-profile/locked-world-rule, so this is the second
+// enforcement point closing that gap for cloud-bound runs. `isCloudModel`
+// is the same heuristic classifier the existing privacy gates use.
+function excludedForLocalModelOnly(entry: CodexEntry, isCloud: boolean): boolean {
+  return isCloud && entry.localModelOnly
+}
+
 // Priority 3: Codex entries relevant to this run — both explicitly-scoped
 // (goal.scope.codexEntryIds) and retrieved via a real search() call keyed on
 // the run's intent/selection, then spoiler-gated per the current scene's
 // place in reading order (Phase 7 exit criterion: a spoiler-flagged fact from
 // a later scene must never appear in an earlier scene's assembled context).
-// Entries that fail the spoiler gate are returned as pre-excluded sections —
-// never eligible for inclusion regardless of token budget.
+// Entries that fail the spoiler gate, or are local-model-only on a cloud
+// run, are returned as pre-excluded sections — never eligible for
+// inclusion regardless of token budget.
 async function relevantCodexItems(
   db: AtlasDb,
   projectRoot: string,
   goal: AgentGoal,
   allEntries: CodexEntry[],
   readingOrder: Map<string, number>,
-  sceneId: string | undefined
+  sceneId: string | undefined,
+  isCloud: boolean
 ): Promise<Item[]> {
   const byId = new Map(allEntries.map((entry) => [entry.id, entry]))
   const candidateIds = new Set<string>(goal.scope.codexEntryIds ?? [])
@@ -228,6 +242,19 @@ async function relevantCodexItems(
 
   const items: Item[] = []
   for (const entry of candidateEntries) {
+    if (excludedForLocalModelOnly(entry, isCloud)) {
+      items.push({
+        kind: 'excluded',
+        section: {
+          class: 'codex-entry',
+          label: `Codex entry — "${entry.name}"`,
+          included: false,
+          tokensEstimate: estimateTokens(codexEntryText(entry)),
+          excludedReason: 'entry is local-model-only'
+        }
+      })
+      continue
+    }
     if (!allowedIds.has(entry.id)) {
       items.push({
         kind: 'excluded',
@@ -251,12 +278,26 @@ async function relevantCodexItems(
 
 // Priority 4: voice profiles for characters actually present in this run's
 // scope (POV + presentCharacterIds) — not every character in the Codex.
-function voiceProfileItems(allEntries: CodexEntry[], presentCharacterIds: string[]): Item[] {
+function voiceProfileItems(allEntries: CodexEntry[], presentCharacterIds: string[], isCloud: boolean): Item[] {
   const items: Item[] = []
   for (const id of presentCharacterIds) {
     const entry = allEntries.find((e) => e.id === id && e.type === 'character')
     const profile = entry?.voiceProfile
     if (!entry || !profile) continue
+
+    if (excludedForLocalModelOnly(entry, isCloud)) {
+      items.push({
+        kind: 'excluded',
+        section: {
+          class: 'voice-profile',
+          label: `Voice profile — "${entry.name}"`,
+          included: false,
+          tokensEstimate: 0,
+          excludedReason: 'entry is local-model-only'
+        }
+      })
+      continue
+    }
 
     const lines: string[] = []
     if (profile.vocabulary) lines.push(`Vocabulary: ${profile.vocabulary}`)
@@ -280,14 +321,44 @@ function voiceProfileItems(allEntries: CodexEntry[], presentCharacterIds: string
 // Priority 5: every locked world-rule entry — locked is the writer's own
 // signal that a fact is settled canon an agent must never contradict, so
 // unlike Codex entries generally, these aren't scoped to a search match.
-function lockedWorldRuleItems(allEntries: CodexEntry[]): Item[] {
-  return allEntries
-    .filter((entry) => entry.type === 'world-rule' && entry.locked)
-    .map((entry) => ({
-      kind: 'candidate' as const,
-      candidate: { class: 'locked-world-rule' as const, label: `Locked world rule — "${entry.name}"`, text: codexEntryText(entry) }
-    }))
+function lockedWorldRuleItems(allEntries: CodexEntry[], isCloud: boolean): Item[] {
+  const items: Item[] = []
+  for (const entry of allEntries) {
+    if (entry.type !== 'world-rule' || !entry.locked) continue
+    if (excludedForLocalModelOnly(entry, isCloud)) {
+      items.push({
+        kind: 'excluded',
+        section: {
+          class: 'locked-world-rule',
+          label: `Locked world rule — "${entry.name}"`,
+          included: false,
+          tokensEstimate: estimateTokens(codexEntryText(entry)),
+          excludedReason: 'entry is local-model-only'
+        }
+      })
+      continue
+    }
+    items.push({
+      kind: 'candidate',
+      candidate: { class: 'locked-world-rule', label: `Locked world rule — "${entry.name}"`, text: codexEntryText(entry) }
+    })
+  }
+  return items
 }
+
+// runModelCallStep() sends contextText alongside a system prompt and the
+// writer's userIntent, and the real call still has to produce output on top
+// of that — none of which assembleContext() can see the exact size of ahead
+// of time (systemPrompt is only resolved inside runModelCallStep). Packing
+// candidates all the way up to goal.constraints.maxTokens would mean every
+// real call's actual input size systematically overshoots the budget the
+// writer configured, with guardModelCall's post-call check the only thing
+// noticing — by then the (possibly billed) call has already happened. This
+// reserves headroom for that unseen overhead; `tokenBudget` in the returned
+// AssembledContext still reports the writer's real configured maxTokens
+// (matching what guardModelCall checks against), only the greedy packing
+// loop itself uses the smaller, reserved figure.
+const CONTEXT_PACKING_FRACTION = 0.7
 
 export async function assembleContext(
   projectRoot: string,
@@ -303,16 +374,18 @@ export async function assembleContext(
   opts?: { overrideText: string; overrideLabel: string }
 ): Promise<AssembledContext> {
   const tokenBudget = goal.constraints.maxTokens
+  const packingBudget = Math.max(1, Math.floor(tokenBudget * CONTEXT_PACKING_FRACTION))
 
   if (opts) {
     const items: Item[] =
       opts.overrideText.trim().length > 0
         ? [{ kind: 'candidate', candidate: { class: 'recent-excerpt', label: opts.overrideLabel, text: opts.overrideText } }]
         : []
-    const { sections, contextText } = buildSections(items, tokenBudget)
+    const { sections, contextText } = buildSections(items, packingBudget)
     return { contextText, sections, tokenBudget }
   }
 
+  const isCloud = isCloudModel(goal.modelRef)
   const sceneId = goal.scope.sceneIds?.[0]
   const items: Item[] = []
 
@@ -349,19 +422,20 @@ export async function assembleContext(
     if (outline) items.push(outline)
   }
 
-  // 3. Relevant Codex entries (explicit + retrieved, spoiler-gated)
+  // 3. Relevant Codex entries (explicit + retrieved, spoiler-gated, and
+  // excluded outright if local-model-only and this is a cloud-bound run)
   try {
-    items.push(...(await relevantCodexItems(db, projectRoot, goal, allEntries, readingOrder, sceneId)))
+    items.push(...(await relevantCodexItems(db, projectRoot, goal, allEntries, readingOrder, sceneId, isCloud)))
   } catch {
     // Best-effort, same reasoning as above.
   }
 
   // 4. Relevant character voice profiles
   const presentCharacterIds = sceneId ? await scenePresentCharacterIds(projectRoot, db, sceneId) : []
-  items.push(...voiceProfileItems(allEntries, presentCharacterIds))
+  items.push(...voiceProfileItems(allEntries, presentCharacterIds, isCloud))
 
   // 5. Locked world rules
-  items.push(...lockedWorldRuleItems(allEntries))
+  items.push(...lockedWorldRuleItems(allEntries, isCloud))
 
   // 6. Recent manuscript excerpt — the writer's own highlighted selection
   const selectionText = goal.scope.selectionText ?? ''
@@ -386,6 +460,6 @@ export async function assembleContext(
     }
   }
 
-  const { sections, contextText } = buildSections(items, tokenBudget)
+  const { sections, contextText } = buildSections(items, packingBudget)
   return { contextText, sections, tokenBudget }
 }

@@ -13,6 +13,11 @@ import { vectorize } from './vectorize'
 // main/retrieval/embeddings/ adapter instead of the bare hashing-trick
 // vectorize() below, and tags the written/queried vector with that
 // adapter's resolved id (see persistence/db.ts's `vectors.model` column).
+// `model` is the writer's *preference*; selectEmbeddingAdapter() can still
+// resolve to a different adapter (e.g. falling back to hashing when LM
+// Studio isn't reachable), so the resolved id — returned here rather than
+// assumed to match `model` — is what callers must use for any tracking
+// keyed on "which embedding space is this vector actually in."
 //
 // These are overloaded rather than unconditionally async so every
 // pre-Phase-7 caller — this file's own ensureIndexed() fallback path below,
@@ -26,14 +31,14 @@ export function indexText(
   kind: 'codex-entry' | 'scene',
   text: string,
   model: EmbeddingProvider
-): Promise<void>
+): Promise<string>
 export function indexText(
   db: AtlasDb,
   id: string,
   kind: 'codex-entry' | 'scene',
   text: string,
   model?: EmbeddingProvider
-): void | Promise<void> {
+): void | Promise<string> {
   if (!model) {
     upsertVectorIndex(db, id, kind, vectorize(text))
     return
@@ -42,7 +47,19 @@ export function indexText(
     const adapter = await selectEmbeddingAdapter(model)
     const vector = await adapter.embed(text)
     upsertVectorIndex(db, id, kind, vector, adapter.id)
+    return adapter.id
   })()
+}
+
+// The tracking key indexedKeysByDb/ensureIndexed/markIndexed use — includes
+// the resolved embedding identity (not just kind+id) so a provider change
+// mid-session (e.g. LM Studio was down, then the writer starts its local
+// server) causes a re-embed instead of being silently skipped as
+// "already indexed" under the stale space. The plain sync/no-model path
+// (always hashing) gets its own fixed suffix, distinct from any named
+// provider, so switching *from* hashing *to* a real provider also re-embeds.
+export function indexedKey(kind: 'codex-entry' | 'scene', id: string, model: string): string {
+  return `${kind}:${id}:${model}`
 }
 
 export function search(db: AtlasDb, query: string, opts?: { kind?: string; limit?: number }): RetrievalResult[]
@@ -103,10 +120,15 @@ export function markIndexed(db: AtlasDb, key: string): void {
 
 export async function ensureIndexed(db: AtlasDb, projectRoot: string, model?: EmbeddingProvider): Promise<void> {
   const indexedKeys = keysFor(db)
+  // Resolved once per call, not per item — selectEmbeddingAdapter() can
+  // probe a real endpoint (isAvailable()), and the resolved adapter is the
+  // same for every item within a single ensureIndexed() invocation since
+  // it only depends on `model`, not on any per-item data.
+  const resolvedModelId = model ? (await selectEmbeddingAdapter(model)).id : 'sync'
 
   const codexEntries = await listCodexEntries(projectRoot)
   for (const entry of codexEntries) {
-    const key = `codex-entry:${entry.id}`
+    const key = indexedKey('codex-entry', entry.id, resolvedModelId)
     if (indexedKeys.has(key)) continue
     const text = `${entry.name}\n${JSON.stringify(entry.body)}`
     if (model) {
@@ -120,7 +142,7 @@ export async function ensureIndexed(db: AtlasDb, projectRoot: string, model?: Em
   const tree = await readManuscriptTree(projectRoot)
   const scenes = tree.books.flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
   for (const scene of scenes) {
-    const key = `scene:${scene.id}`
+    const key = indexedKey('scene', scene.id, resolvedModelId)
     if (indexedKeys.has(key)) continue
     const { prose } = await readScene(projectRoot, db, scene.id)
     const text = `${scene.title}\n${prose}`

@@ -34,7 +34,7 @@ import { getSessionSummary, logSessionActivity } from '../persistence/sessionSto
 import { getOrGenerateDerivedSummary } from '../persistence/derivedSummaryStore'
 import { chapterSummaryExists, getOrGenerateChapterSummary, getOrGenerateSceneSummary } from '../persistence/summaryStore'
 import { computeContextWarnings } from '../retrieval/contextWarnings'
-import { ensureIndexed, indexText, markIndexed, search } from '../retrieval/search'
+import { ensureIndexed, indexedKey, indexText, markIndexed, search } from '../retrieval/search'
 import {
   getEmbeddingsStatus,
   getPreferredEmbeddingProvider,
@@ -158,8 +158,8 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
         // that lazy pass doesn't waste a second, possibly-billed real
         // embedding call re-indexing the same scene.
         const embeddingProvider: EmbeddingProvider = getPreferredEmbeddingProvider() ?? 'lm-studio'
-        await indexText(session.db, sceneId, 'scene', `${after.meta.title}\n${after.prose}`, embeddingProvider)
-        markIndexed(session.db, `scene:${sceneId}`)
+        const resolvedModelId = await indexText(session.db, sceneId, 'scene', `${after.meta.title}\n${after.prose}`, embeddingProvider)
+        markIndexed(session.db, indexedKey('scene', sceneId, resolvedModelId))
       }
     }
   )

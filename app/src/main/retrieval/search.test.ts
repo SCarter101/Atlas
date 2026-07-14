@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openIndexDb, upsertVectorIndex, type AtlasDb } from '../persistence/db'
 import { writeBookMeta, writeChapterMeta, writePartMeta } from '../persistence/manuscriptStore'
 import { writeScene } from '../persistence/sceneStore'
-import { ensureIndexed, indexText, markIndexed, search } from './search'
+import { ensureIndexed, indexedKey, indexText, markIndexed, search } from './search'
 import { cosineSimilarity, vectorize } from './vectorize'
 
 describe('vectorize', () => {
@@ -195,7 +195,7 @@ describe('markIndexed / ensureIndexed consistency (Phase 7)', () => {
     // actual vector row for scene-1 proves ensureIndexed() truly skips it
     // — if it didn't, this test would see scene-1 show up from
     // ensureIndexed()'s own (re-)indexing pass.
-    markIndexed(db, 'scene:scene-1')
+    markIndexed(db, indexedKey('scene', 'scene-1', 'sync'))
 
     await ensureIndexed(db, projectRoot)
 
@@ -208,5 +208,24 @@ describe('markIndexed / ensureIndexed consistency (Phase 7)', () => {
 
     const results = search(db, 'levee', { kind: 'scene', limit: 10 })
     expect(results.some((r) => r.id === 'scene-1')).toBe(true)
+  })
+
+  it('re-embeds under the new embedding space when the active provider changes mid-session (Codex review fix)', async () => {
+    // First pass: index everything under the plain sync/hashing path (no
+    // `model` argument — the pre-Phase-7 behavior, tagged 'sync').
+    await ensureIndexed(db, projectRoot)
+    expect(search(db, 'levee', { kind: 'scene', limit: 10 }).some((r) => r.id === 'scene-1')).toBe(true)
+
+    // The writer's preferred provider is now resolvable to a NAMED
+    // provider ('hashing', chosen here for a deterministic, network-free
+    // test — any real adapter would exercise the identical code path).
+    // Before the fix, ensureIndexed() tracked only `kind:id`, so it would
+    // see scene-1 as "already indexed" and skip it — meaning a real async
+    // search scoped to `model: 'hashing'` would find nothing, since the
+    // stored row was never actually tagged with that model.
+    await ensureIndexed(db, projectRoot, 'hashing')
+
+    const scoped = await search(db, 'levee', { kind: 'scene', limit: 10, model: 'hashing' })
+    expect(scoped.some((r) => r.id === 'scene-1')).toBe(true)
   })
 })
