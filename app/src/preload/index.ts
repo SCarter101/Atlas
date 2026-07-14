@@ -69,7 +69,8 @@ const atlasBridge: AtlasBridge = {
     warnings: (goal) => ipcRenderer.invoke(IpcChannel.ContextWarnings, goal)
   },
   embeddings: {
-    status: () => ipcRenderer.invoke(IpcChannel.EmbeddingsStatus)
+    status: () => ipcRenderer.invoke(IpcChannel.EmbeddingsStatus),
+    setProvider: (provider) => ipcRenderer.invoke(IpcChannel.EmbeddingsSetProvider, provider)
   },
   sessions: {
     logActivity: (wordsDelta) => ipcRenderer.invoke(IpcChannel.SessionsLogActivity, wordsDelta),

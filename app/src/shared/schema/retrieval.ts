@@ -5,6 +5,14 @@ export interface SceneSummary {
   summary: string
   sourceUpdatedAt: string
   updatedAt: string
+  // Phase 7: generation now attempts a real model call (LM Studio, then
+  // OpenRouter) before falling back to the extractive heuristic — see
+  // main/persistence/modelSummaryFallback.ts. A summary cached before this
+  // field existed has neither on disk; readers default that case to
+  // 'heuristic' (main/persistence/summaryStore.ts's normalization helpers)
+  // since every summary generated before Phase 7 was heuristic-only.
+  generatedBy: 'model' | 'heuristic'
+  modelRef?: ModelRef
 }
 
 export interface ChapterSummary {
@@ -12,6 +20,8 @@ export interface ChapterSummary {
   summary: string
   sourceUpdatedAt: string
   updatedAt: string
+  generatedBy: 'model' | 'heuristic'
+  modelRef?: ModelRef
 }
 
 export interface ContextWarning {

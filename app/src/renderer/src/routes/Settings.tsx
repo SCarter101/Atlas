@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AgentRole, ModelRef } from '@shared/schema/agent'
 import type { BackupMeta } from '@shared/schema/backup'
+import type { EmbeddingProvider, EmbeddingsStatus } from '@shared/schema/embeddings'
 import type { OpenRouterCatalogEntry } from '@shared/schema/models'
 import type { UsageSummary } from '@shared/schema/usage'
 import { configuredMcpServers } from '@shared/mcp'
@@ -381,6 +382,11 @@ export function Settings(): JSX.Element {
             <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginTop: 6 }}>Connection status: not connected</div>
           </Section>
 
+          {/* Phase 7: main/retrieval/embeddings/ real embedding adapters
+              (LM Studio primary, OpenRouter opt-in, hashing-trick final
+              fallback — see main/retrieval/embeddings/select.ts). */}
+          <EmbeddingsSection />
+
           {/* Spec §13/§10: session-scoped capability approvals must remain
               visible and revocable for the life of the session. */}
           <Section title="Session approvals">
@@ -492,6 +498,76 @@ export function Settings(): JSX.Element {
       )}
     </div>
   )
+}
+
+const EMBEDDING_PROVIDER_OPTIONS: { value: EmbeddingProvider; label: string; hint: string }[] = [
+  { value: 'lm-studio', label: 'LM Studio (default)', hint: 'Real local embeddings — no data leaves this machine.' },
+  { value: 'openrouter', label: 'OpenRouter (opt-in)', hint: 'Real cloud embeddings — sends indexed text to OpenRouter.' },
+  { value: 'hashing', label: 'Hashing-only', hint: 'No network calls; keyword-overlap matching only, not real semantic search.' }
+]
+
+function EmbeddingsSection(): JSX.Element {
+  const embeddingProvider = useAtlasStore((s) => s.embeddingProvider)
+  const setEmbeddingProvider = useAtlasStore((s) => s.setEmbeddingProvider)
+  const [status, setStatus] = useState<EmbeddingsStatus | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.atlas.embeddings.status().then((result) => {
+      if (!cancelled) setStatus(result)
+    })
+    return () => {
+      cancelled = true
+    }
+    // Re-check status whenever the writer changes their provider choice —
+    // setEmbeddingProvider already syncs the choice to the main process, but
+    // this effect is what tells the writer whether that choice is actually
+    // reachable right now (e.g. LM Studio not running).
+  }, [embeddingProvider])
+
+  return (
+    <Section title="Embeddings provider">
+      <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', lineHeight: 1.5, marginBottom: 14 }}>
+        Retrieval (Codex and scene search used by agent context-building) can run on real semantic embeddings
+        instead of the built-in keyword-overlap fallback.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+        {EMBEDDING_PROVIDER_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            onClick={() => setEmbeddingProvider(option.value)}
+            style={{
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              padding: '10px 14px',
+              borderRadius: 9,
+              border: `1px solid ${embeddingProvider === option.value ? 'var(--c-accent)' : 'var(--c-border)'}`,
+              background: embeddingProvider === option.value ? 'var(--c-accent-soft)' : 'var(--c-surface-raised)',
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600, color: embeddingProvider === option.value ? 'var(--c-accent-text)' : 'var(--c-ink)' }}>
+              {option.label}
+            </span>
+            <span style={{ fontSize: 11.5, color: 'var(--c-ink-faint)' }}>{option.hint}</span>
+          </button>
+        ))}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--c-ink-soft)' }}>
+        {!status
+          ? 'Checking status…'
+          : status.available
+            ? `Active: ${providerLabel(status.activeProvider)} ✓`
+            : `Active: ${providerLabel(status.activeProvider)} — your selected provider isn't reachable right now, so this fell back.`}
+      </div>
+    </Section>
+  )
+}
+
+function providerLabel(provider: EmbeddingProvider): string {
+  return EMBEDDING_PROVIDER_OPTIONS.find((option) => option.value === provider)?.label ?? provider
 }
 
 function UsageSection(): JSX.Element {

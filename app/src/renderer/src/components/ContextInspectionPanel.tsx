@@ -1,8 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AgentGoal, AgentStep, PermissionRequest, ToolCall } from '@shared/schema/agent'
+import type {
+  AgentGoal,
+  AgentStep,
+  ContextSection,
+  ContextSectionClass,
+  ModelCallSummary,
+  PermissionRequest,
+  ToolCall
+} from '@shared/schema/agent'
 import type { CodexEntry } from '@shared/schema/codex'
 import type { ChapterSummary, ContextWarning } from '@shared/schema/retrieval'
+
+const SECTION_CLASS_LABEL: Record<ContextSectionClass, string> = {
+  'chapter-summary': 'Chapter summaries',
+  'scene-outline': 'Scene outlines',
+  'codex-entry': 'Codex entries',
+  'voice-profile': 'Voice profiles',
+  'locked-world-rule': 'Locked world rules',
+  'recent-excerpt': 'Recent manuscript excerpts',
+  'full-text': 'Full text'
+}
+
+function groupSectionsByClass(sections: ContextSection[]): Array<[ContextSectionClass, ContextSection[]]> {
+  const map = new Map<ContextSectionClass, ContextSection[]>()
+  for (const section of sections) {
+    const group = map.get(section.class)
+    if (group) group.push(section)
+    else map.set(section.class, [section])
+  }
+  return [...map.entries()]
+}
 
 // spec §9 Context Inspection — what was (or would be) sent to the model for
 // this run. Codex entries and chapter summaries are now retrieved for real
@@ -19,6 +47,25 @@ export function ContextInspectionPanel({ goal, steps }: { goal: AgentGoal; steps
   const toolCalls = steps.filter((s): s is AgentStep & { detail: ToolCall } => s.kind === 'tool-call')
   const permissionSteps = steps.filter((s): s is AgentStep & { detail: PermissionRequest } => s.kind === 'permission-request')
   const resultStep = steps.find((s) => s.kind === 'result')
+  const modelCallSteps = steps.filter((s): s is AgentStep & { detail: ModelCallSummary } => s.kind === 'model-call')
+
+  // Phase 7: assembleContext() (main/agent/context/assemble.ts) is the real
+  // source of truth for what was actually sent to the model, but it's only
+  // populated on model-call steps produced after that integration landed.
+  // Take the most recent step that has it — earlier runs, or runs whose
+  // model-call step predates the integration, simply won't have one, and the
+  // goal-scope-based approximation rows above keep rendering unchanged.
+  const assembledContext = [...modelCallSteps].reverse().find((s) => s.detail.assembledContext)?.detail
+    .assembledContext
+
+  const includedGroups = useMemo(
+    () => (assembledContext ? groupSectionsByClass(assembledContext.sections.filter((s) => s.included)) : []),
+    [assembledContext]
+  )
+  const excludedSections = useMemo(
+    () => (assembledContext ? assembledContext.sections.filter((s) => !s.included) : []),
+    [assembledContext]
+  )
 
   const [codexEntries, setCodexEntries] = useState<CodexEntry[]>([])
   const [chapterSummaries, setChapterSummaries] = useState<ChapterSummary[]>([])
@@ -91,6 +138,39 @@ export function ContextInspectionPanel({ goal, steps }: { goal: AgentGoal; steps
           : 'none yet'}
       </Row>
       <Row label="Structured result">{resultStep ? (resultStep.detail as { summary: string }).summary : 'not finished yet'}</Row>
+
+      {assembledContext && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginBottom: 12 }}>
+            Assembled context (actual, most recent model call)
+          </div>
+
+          {includedGroups.length > 0 ? (
+            includedGroups.map(([cls, sections]) => (
+              <Row key={cls} label={`Included ${SECTION_CLASS_LABEL[cls].toLowerCase()}`}>
+                {sections.map((s) => `${s.label} (~${s.tokensEstimate} tok)`).join(', ')}
+              </Row>
+            ))
+          ) : (
+            <Row label="Included context sections">none were included in this call</Row>
+          )}
+
+          <Row label="Excluded but potentially relevant">
+            {excludedSections.length > 0
+              ? excludedSections
+                  .map((s) => `${s.label} (${SECTION_CLASS_LABEL[s.class]}) — ${s.excludedReason ?? 'excluded'}`)
+                  .join('; ')
+              : 'none'}
+          </Row>
+
+          <Row label="Context token budget used">
+            {assembledContext.usedTokens.toLocaleString()} / {assembledContext.tokenBudget.toLocaleString()} tokens
+            {assembledContext.tokenBudget > 0
+              ? ` (${Math.round((assembledContext.usedTokens / assembledContext.tokenBudget) * 100)}%)`
+              : ''}
+          </Row>
+        </div>
+      )}
 
       {warnings.map((warning, i) => (
         <div

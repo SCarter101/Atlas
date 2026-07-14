@@ -9,7 +9,9 @@ import type { AgentGoal, AgentRole, PermissionDecision } from '@shared/schema/ag
 import type { CapabilityManifest, LifecycleState } from '@shared/schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
+import type { DerivedSummaryKind } from '@shared/schema/retrieval'
 import type { SessionGoal } from '@shared/schema/session'
+import type { EmbeddingProvider } from '@shared/schema/embeddings'
 import {
   AgentGoalSchema,
   CapabilityManifestSchema,
@@ -29,9 +31,15 @@ import { createSnapshot, diffSnapshots, getSnapshot, listSnapshots } from '../pe
 import { readScene, writeScene } from '../persistence/sceneStore'
 import { seedCottonmouthProject } from '../persistence/seedSampleProject'
 import { getSessionSummary, logSessionActivity } from '../persistence/sessionStore'
+import { getOrGenerateDerivedSummary } from '../persistence/derivedSummaryStore'
 import { chapterSummaryExists, getOrGenerateChapterSummary, getOrGenerateSceneSummary } from '../persistence/summaryStore'
 import { computeContextWarnings } from '../retrieval/contextWarnings'
-import { ensureIndexed, search } from '../retrieval/search'
+import { ensureIndexed, indexText, markIndexed, search } from '../retrieval/search'
+import {
+  getEmbeddingsStatus,
+  getPreferredEmbeddingProvider,
+  setPreferredEmbeddingProvider
+} from '../retrieval/embeddings/select'
 import { getCurrentProjectSession, ProjectSession, setCurrentProjectSession } from '../projectSession'
 import { loadCodex, loadManuscript } from '../export/loadProjectData'
 import { renderCodex } from '../export/renderCodex'
@@ -141,6 +149,17 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
         const after = await readScene(session.projectRoot, session.db, sceneId)
         const delta = after.meta.wordCount - (before?.meta.wordCount ?? 0)
         if (delta !== 0) await logSessionActivity(session.projectRoot, delta)
+
+        // Phase 7: reindex this scene's real embedding immediately on save
+        // instead of waiting for the next lazy ensureIndexed() pass (which
+        // only ever runs once per project session) — otherwise a scene
+        // edited mid-session would keep returning stale retrieval:search
+        // results until the app restarted. markIndexed() records this so
+        // that lazy pass doesn't waste a second, possibly-billed real
+        // embedding call re-indexing the same scene.
+        const embeddingProvider: EmbeddingProvider = getPreferredEmbeddingProvider() ?? 'lm-studio'
+        await indexText(session.db, sceneId, 'scene', `${after.meta.title}\n${after.prose}`, embeddingProvider)
+        markIndexed(session.db, `scene:${sceneId}`)
       }
     }
   )
@@ -325,8 +344,9 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
 
   ipcMain.handle(IpcChannel.RetrievalSearch, async (_evt, query: string, opts?: { kind?: string; limit?: number }) => {
     const session = getCurrentProjectSession()
-    await ensureIndexed(session.db, session.projectRoot)
-    return search(session.db, query, opts)
+    const embeddingProvider: EmbeddingProvider = getPreferredEmbeddingProvider() ?? 'lm-studio'
+    await ensureIndexed(session.db, session.projectRoot, embeddingProvider)
+    return search(session.db, query, { ...opts, model: embeddingProvider })
   })
 
   ipcMain.handle(IpcChannel.SummariesGetScene, async (_evt, sceneId: string) => {
@@ -370,14 +390,17 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     })
   })
 
-  // Phase 7 Wave 0 stub — real body lands with Wave 1B's derivedSummaryStore.ts.
-  ipcMain.handle(IpcChannel.SummariesGetDerived, async (_evt, _kind: string, _subjectId: string) => {
-    throw new AtlasError('not-implemented', 'Derived summaries are not implemented yet.')
+  ipcMain.handle(IpcChannel.SummariesGetDerived, async (_evt, kind: DerivedSummaryKind, subjectId: string) => {
+    const session = getCurrentProjectSession()
+    return getOrGenerateDerivedSummary(session.projectRoot, kind, subjectId)
   })
 
-  // Phase 7 Wave 0 stub — real body lands with Wave 1A's embeddings adapters.
   ipcMain.handle(IpcChannel.EmbeddingsStatus, async () => {
-    return { activeProvider: 'hashing' as const, available: true }
+    return getEmbeddingsStatus(getPreferredEmbeddingProvider())
+  })
+
+  ipcMain.handle(IpcChannel.EmbeddingsSetProvider, async (_evt, provider: EmbeddingProvider) => {
+    setPreferredEmbeddingProvider(provider)
   })
 
   ipcMain.handle(IpcChannel.SessionsLogActivity, async (_evt, wordsDelta: number) => {

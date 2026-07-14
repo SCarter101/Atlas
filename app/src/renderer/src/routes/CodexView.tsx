@@ -1,9 +1,35 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { CodexEntry, CodexEntryType } from '@shared/schema/codex'
-import { detectContradictions } from '@shared/codexLogic'
+import { detectContradictions, filterBySpoilerReveal, getManuscriptReadingOrder } from '@shared/codexLogic'
+import type { ManuscriptTree } from '@shared/schema/manuscript'
 import { CodexEntryForm } from '../components/CodexEntryForm'
 import { TYPE_LABEL } from '../lib/codexLabels'
 import { useAtlasStore } from '../state/store'
+
+interface SceneOption {
+  id: string
+  label: string
+}
+
+// Same book/part/chapter/scene flattening convention as CodexEntryForm.tsx's
+// flattenSceneOptions, but with a "Ch. N — Scene title" label (chapter
+// ordinal counted across the whole manuscript) so the "view as of" picker
+// reads like the spec's own example rather than a bare scene title.
+function flattenSceneOptionsWithChapterLabels(tree: ManuscriptTree | null): SceneOption[] {
+  const options: SceneOption[] = []
+  let chapterOrdinal = 0
+  for (const book of tree?.books ?? []) {
+    for (const part of book.parts) {
+      for (const chapter of part.chapters) {
+        chapterOrdinal += 1
+        for (const scene of chapter.scenes) {
+          options.push({ id: scene.id, label: `Ch. ${chapterOrdinal} — ${scene.title}` })
+        }
+      }
+    }
+  }
+  return options
+}
 
 const STATUS_COLOR: Record<CodexEntry['status'], string> = {
   canon: 'var(--c-green)',
@@ -29,10 +55,19 @@ function isPending(entry: CodexEntry): boolean {
 
 export function CodexView(): JSX.Element {
   const manifest = useAtlasStore((s) => s.manifest)
+  // The store already keeps a cached ManuscriptTree populated by
+  // refreshManuscriptTree() on every project open / scene write (see
+  // state/store.ts) — CodexEntryForm.tsx (rendered by this same view) reads
+  // it the same way rather than issuing its own manuscript.tree() fetch, so
+  // this reuses that convention instead of duplicating the IPC round trip.
+  const manuscriptTree = useAtlasStore((s) => s.manuscriptTree)
   const [entries, setEntries] = useState<CodexEntry[]>([])
   const [filter, setFilter] = useState<CodexEntryType | 'All'>('All')
   const [refiningId, setRefiningId] = useState<string | null>(null)
   const [formEntry, setFormEntry] = useState<CodexEntry | null | 'new'>(null)
+  // Spec §7 "view Codex as of scene X" — opt-in, defaults to no filter (show
+  // everything). undefined means "no filter" throughout.
+  const [asOfSceneId, setAsOfSceneId] = useState<string | undefined>(undefined)
 
   function refresh(): void {
     void window.atlas.codex.list().then(setEntries)
@@ -42,6 +77,20 @@ export function CodexView(): JSX.Element {
 
   const pending = entries.filter(isPending)
   const resolved = entries.filter((e) => !isPending(e) && (filter === 'All' || e.type === filter))
+
+  const sceneOptions = useMemo(() => flattenSceneOptionsWithChapterLabels(manuscriptTree), [manuscriptTree])
+  const readingOrder = useMemo(
+    () => getManuscriptReadingOrder(manuscriptTree ?? { books: [] }),
+    [manuscriptTree]
+  )
+  // filterBySpoilerReveal is a no-op (returns entries unchanged) when
+  // asOfSceneId is undefined or not found in the reading order, so this is
+  // safe to apply unconditionally rather than branching on whether a scene
+  // is selected.
+  const visibleResolved = useMemo(
+    () => filterBySpoilerReveal(resolved, asOfSceneId, readingOrder),
+    [resolved, asOfSceneId, readingOrder]
+  )
 
   const contradictions = useMemo(() => detectContradictions(entries), [entries])
 
@@ -106,6 +155,25 @@ export function CodexView(): JSX.Element {
             {f === 'All' ? 'All' : TYPE_LABEL[f]}
           </button>
         ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 24 }}>
+        <label htmlFor="codex-as-of-scene" style={{ fontSize: 11, color: 'var(--c-ink-faint)' }}>
+          View as of
+        </label>
+        <select
+          id="codex-as-of-scene"
+          value={asOfSceneId ?? ''}
+          onChange={(e) => setAsOfSceneId(e.target.value || undefined)}
+          style={asOfSelectStyle}
+        >
+          <option value="">No filter — show everything</option>
+          {sceneOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {pending.length > 0 && (
@@ -176,7 +244,7 @@ export function CodexView(): JSX.Element {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {resolved.map((entry) => (
+        {visibleResolved.map((entry) => (
           <ResolvedEntryRow
             key={entry.id}
             entry={entry}
@@ -350,6 +418,16 @@ const newEntryButtonStyle: CSSProperties = {
   fontWeight: 600,
   cursor: 'pointer',
   height: 'fit-content'
+}
+
+const asOfSelectStyle: CSSProperties = {
+  padding: '5px 10px',
+  borderRadius: 7,
+  border: '1px solid var(--c-border)',
+  background: 'var(--c-surface)',
+  color: 'var(--c-ink-soft)',
+  fontSize: 12,
+  cursor: 'pointer'
 }
 
 const rowButtonStyle: CSSProperties = {
