@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AgentGoal, AgentStep, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
+import type { AgentGoal, AgentStep, ModelCallSummary, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
+import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager } from './simulator'
 import { waitForResultStep } from './simulator.testUtils'
 
@@ -14,9 +15,15 @@ describe('AgentRunManager — Line Editor simulated flow', () => {
   beforeEach(async () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-test-'))
     db = await openIndexDb(projectRoot)
+    // Phase 7: force the network-free hashing embedding adapter so
+    // assembleContext()'s Codex-search step never depends on (or is slowed
+    // down by) a real local LM Studio instance — see simulator.budget.test.ts
+    // for the fuller rationale.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(projectRoot, { recursive: true, force: true })
   })
 
@@ -70,6 +77,20 @@ describe('AgentRunManager — Line Editor simulated flow', () => {
       .proposedManuscriptChanges
     expect(suggestions?.length).toBeGreaterThan(0)
     expect(suggestions?.[0].state).toBe('pending')
+
+    // Phase 7: the model-call step now carries what main/agent/context/
+    // assemble.ts actually packed into contextText, for real Context
+    // Inspection display — previously ModelCallSummary never had this field
+    // populated at all.
+    const modelCallStep = steps.find((s) => s.kind === 'model-call')
+    expect(modelCallStep).toBeDefined()
+    const modelCall = modelCallStep!.detail as ModelCallSummary
+    expect(modelCall.assembledContext).toBeDefined()
+    expect(modelCall.assembledContext?.tokenBudget).toBe(goal.constraints.maxTokens)
+    expect(modelCall.assembledContext?.usedTokens).toBe(modelCall.inputTokens)
+    expect(modelCall.assembledContext?.sections.length).toBeGreaterThan(0)
+    // The writer's own selection is always at least a candidate section.
+    expect(modelCall.assembledContext?.sections.some((s) => s.class === 'recent-excerpt')).toBe(true)
   })
 
   it('stops safely and proposes no changes when permission is denied', async () => {

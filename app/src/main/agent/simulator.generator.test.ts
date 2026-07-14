@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentGoal, AgentStep, InsertionPayload, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
+import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager } from './simulator'
 import { waitForResultStep } from './simulator.testUtils'
 
@@ -43,9 +44,13 @@ describe('AgentRunManager — Generator opt-in multi-draft mode', () => {
   beforeEach(async () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-generator-test-'))
     db = await openIndexDb(projectRoot)
+    // Phase 7: force the network-free hashing embedding adapter — see
+    // simulator.budget.test.ts for the fuller rationale.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(projectRoot, { recursive: true, force: true })
   })
 

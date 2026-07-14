@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentGoal, AgentStep, PermissionRequest, SuggestionRef } from '@shared/schema/agent'
 import { emptyWorldBuilderInterviewAnswers, encodeWorldBuilderInterview } from '@shared/worldBuilderInterview'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
+import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager, deriveWorldBuilderProposals } from './simulator'
 
 // The simulator emits its `result` step asynchronously after a permission
@@ -91,9 +92,16 @@ describe('AgentRunManager — World Builder interview flow', () => {
   beforeEach(async () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-worldbuilder-'))
     db = await openIndexDb(projectRoot)
+    // Phase 7: force the network-free hashing embedding adapter — see
+    // simulator.budget.test.ts for the fuller rationale. Only the
+    // non-interview (plain-selection) flow below actually reaches
+    // assembleContext()'s full retrieval path, but this is harmless either
+    // way.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(projectRoot, { recursive: true, force: true })
   })
 

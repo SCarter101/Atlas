@@ -20,6 +20,7 @@ vi.mock('electron', () => ({
 const { installSeedCapabilities } = await import('../capabilities/seedTools')
 const { openIndexDb } = await import('../persistence/db')
 const { saveAgentRun } = await import('../persistence/agentRunStore')
+const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
 const { AgentRunManager } = await import('./simulator')
 const { waitForResultStep } = await import('./simulator.testUtils')
 
@@ -40,9 +41,13 @@ describe('AgentRunManager — capability recommendation from repeated tool patte
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-caprec-'))
     db = await openIndexDb(projectRoot)
     await installSeedCapabilities()
+    // Phase 7: force the network-free hashing embedding adapter — see
+    // simulator.budget.test.ts for the fuller rationale.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(userDataRoot, { recursive: true, force: true })
     rmSync(projectRoot, { recursive: true, force: true })
   })
