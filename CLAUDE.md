@@ -455,19 +455,125 @@ main-side guard enforces only the `localModelOnly` data invariant, which is enou
 transmission is simulated); DOCX import fidelity beyond raw text (heading styles); beta-reader
 DOCX-comment import (spec's post-Phase-5 item). Carried-over Phase 3/4 deferrals still stand.
 
-## Current verified state (as of Round 6 / Phase 5 completion)
+**Round 7 — Phase 6 ("Real Model Integration")**
+
+The first post-Phase-5 beta round, scoped from `Atlas Beta Roadmap - Gap Analysis.md`'s own
+Phase 6 write-up. Confirmed scope decision with the user up front, via `AskUserQuestion`,
+before any code: **"Infrastructure-first."** Real OpenRouter + LM Studio adapters, real
+per-role prompt persistence, real usage/cost tracking, real per-agent model routing, real
+functional fallback, and real main-side cloud-consent session tracking — but only
+**Generator and Line-Editor** produce suggestion text from real completions this round. Story
+Editor/Dialogue Editor/World Builder get real adapter connectivity and real cost tracking but
+keep their template-based structured multi-finding simulation; extracting structured findings
+reliably from a real model needs JSON-mode/tool-calling design work, deliberately deferred to
+a later quality-focused phase rather than folded into this one. No token streaming this round
+either — single request/response, also deliberately deferred.
+
+*Planning note:* before dispatching any subagent, a `Plan`-agent validation pass corrected the
+initial 3-way-fully-parallel wave design. It found `main/agent/simulator.ts` and
+`AgentRail.tsx` can't safely be split across two concurrent agents (same lines, different
+rewrites) and that the consent/fallback/real-text wave structurally depends on both other
+waves' *real* merged exports (`getActivePrompt`, `recordUsage`, `ModelCallSummary.outputText`,
+`ProviderAdapter.isAvailable()`) — forking it before they merged would mean it couldn't even
+compile in its own worktree. Corrected structure: **Wave 0** (orchestrator, direct) added an
+explicit `'simulator'` `ModelProvider` value both Wave 1 agents needed present in their forks.
+**Wave 1** ran two agents truly in parallel on disjoint file ownership. **Wave 2** forked fresh
+*after* Wave 1 merged, briefed against Wave 1's actual merged code (re-verified by the
+orchestrator directly, not assumed) rather than the original plan's guesses — this caught that
+Wave 1B had already been forced to fix two lines in `AgentRail.tsx` (owned by Wave 2) just to
+keep its own build compiling after a shared type change, shrinking Wave 2's real remaining
+scope there to two small additions instead of a full rewrite.
+
+*Operational note:* both Wave 1 agents hit a transient API stream-stall failure mid-task
+(unrelated to either brief). Both had substantial uncommitted work intact in their worktrees;
+resumed via `SendMessage` with precise "continue from exactly here" instructions rather than
+restarting from scratch — full verification after resuming confirmed no work was lost or
+duplicated.
+
+*Wave 1A — Adapters & schema:* `openRouterAdapter.ts`/`lmStudioAdapter.ts` replaced their
+unconditional-throw stubs with real HTTP implementations; `ProviderAdapter` gained
+`isAvailable()`; `ModelCallSummary` gained optional `outputText`. Real deviation from the
+original design assumption, verified against live OpenRouter docs while implementing: the
+`usage: {include: true}` request flag is deprecated and has no effect — usage accounting is
+included in every response by default now.
+
+*Wave 1B — Prompts, usage, catalog, routing, Settings:* `promptStore.ts` wires up
+`PromptEditorSection` — a component that had existed since **before this round** fully built
+in the UI (role picker, version label, reset/save-new-version buttons) but held everything in
+local `useState`, discarding every edit on reload. `usageStore.ts` (append-only per-project
+JSONL) and `openRouterCatalog.ts` (live model+pricing catalog, 1h cache) back a new Settings
+"Usage & cost" section and catalog-driven model dropdowns. `agentModels` refactored
+project-wide from `Record<AgentRole, string>` (a bare display name) to
+`Record<AgentRole, ModelRef>` — the real routing type, not a mockup label.
+
+*Wave 2 — Consent, fallback, real-text loop:* `cloudConsent.ts`'s `CloudConsentSessionStore`
+closes the deferral called out at the end of Round 6 — `AgentRunStart` now enforces
+`CLOUD_CONSENT_REQUIRED` the same way it already enforced `LOCAL_MODEL_ONLY`, so a direct
+bridge call can no longer start a cloud run in a session that never showed the consent dialog.
+`simulator.ts`'s `runModelCallStep()` became the single choke point for system-prompt
+resolution, LM Studio fallback on a primary-adapter failure, and error classification — a
+failed real call with no usable fallback now ends a run in a new recoverable `'paused'` status
+(declared in the type system since Phase 2, never produced by any code path until now) instead
+of a hard `'error'`. Generator and Line-Editor now emit suggestions built from a real adapter's
+actual completion text when one is selected, instead of unconditionally using the template
+simulator.
+
+*Codex adversarial-review (closing step, retained):* the full `0b21cf7..HEAD` diff surfaced 4
+findings; 3 confirmed and fixed, 1 accepted as a documented limitation rather than a code
+change:
+- **HIGH — OpenRouter missing/malformed usage was silently recorded as $0/0 tokens.** A
+  successful response with content but no usage object (an anomaly per OpenRouter's own
+  docs, which say usage is always included) let a real paid call bypass `maxCostUsd` budget
+  checks. Now fails loudly with `OPENROUTER_BAD_RESPONSE` when token counts are missing;
+  `cost` alone is still allowed to be absent (a plausible free-model case) without treating
+  the whole response as malformed.
+- **MED — a failed LM Studio fallback call fell through to `'error'` instead of `'paused'`.**
+  `isAvailable()` passing doesn't guarantee the completion call itself then succeeds; that
+  failure wasn't re-wrapped as `ModelCallFailure`, so it skipped the intended recoverable
+  path entirely. Now wrapped and re-classified the same way the primary call already was.
+- **MED — the renderer's cloud-consent IPC sync was fire-and-forget** with no ordering
+  guarantee relative to the `agentRuns.start` call immediately after it — a narrow but real
+  race that could spuriously reject a just-approved run. Now awaited.
+- **HIGH, not fixed — a caller who deliberately invokes the consent bridge directly can
+  still grant their own run consent**, bypassing the renderer dialog on purpose. This round's
+  actual goal was closing *accidental* bypass (a future code path that starts a cloud run
+  without going through `authorizeRun()`), which the guard correctly does. A local
+  single-user desktop app has no meaningful adversarial boundary between its own renderer and
+  main process; proving a dialog was actually shown without moving the whole UI into the main
+  process isn't worth the redesign for the value it would add. Documented as an accepted
+  limitation, same treatment Round 6 gave the `warnCloudUnpublished`-not-synced-to-main
+  decision.
+
+4 new regression tests added for the 3 fixed findings (missing/malformed OpenRouter usage,
+fallback-call-itself-fails routing to `'paused'`).
+
+**Explicitly deferred from Phase 6** (confirmed scope, not oversight): token streaming (single
+request/response only); real multi-draft "Generate Alternatives" against a real model (still
+simulated even when a real adapter is selected — N real HTTP calls per run isn't designed for
+yet); structured-output extraction for Story Editor/Dialogue Editor/World Builder (still
+template-simulated, real cost tracking only); LM Studio base-URL configurability (hardcoded to
+the default local port); direct Anthropic/OpenAI/Google provider keys (spec routes remote
+calls through one OpenRouter key by design). These are the natural scope of a later
+quality-focused phase.
+
+## Current verified state (as of Round 7 / Phase 6 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 224/224 tests passing across 38 files (was 194/31 at Round 5); the
-  previously-flaky simulator result-step tests are now deterministic (verified 8/8 runs).
-- App launches cleanly via `npm run dev` (verified after the Item 5 merge and again after the
-  Codex-review fixes) with only the expected dev-mode warnings (React DevTools suggestion,
-  React Router v7 future flags, Electron CSP insecure-policy) — no regressions, no
-  circular-import/TDZ crash. The Item 5 agent additionally confirmed a clean
-  `electron-vite build` (197 renderer modules, no circular imports).
-- Full interactive click-through of the new Phase 5 UI (real DOCX/PDF/EPUB export, manuscript
-  import + extraction review, backup create/restore, the privacy vault + cloud-consent modal,
-  the error-boundary/toast surfaces) was **not** performed — still no headless
-  Electron/Playwright driver in this environment. Verification relied on the automated suite
-  (incl. pure render/parse/backup tests asserting real bytes), a real `npm run dev` boot
-  check, and an independent Codex adversarial-review of the whole diff.
+- `npx vitest run` — 267/267 tests passing across 45 files (was 224/38 at Round 6), stable
+  across multiple consecutive full-suite runs. One isolated flake was observed once in
+  `simulator.test.ts`'s `afterEach` `rmSync` cleanup (a transient Windows file-handle race
+  during test teardown, not an assertion failure) — reproduced as a clean pass in isolation
+  and in 3/3 subsequent full-suite runs; not a Phase 6 regression.
+- App launches cleanly via `npm run dev` after all three waves merged, with only the expected
+  dev-mode warnings (React DevTools suggestion, React Router v7 future flags, Electron CSP
+  insecure-policy) — no regressions, no circular-import/TDZ crash.
+- No real OpenRouter API key was available in this environment to exercise the actual
+  money-spending call path end-to-end (saving a key and running Generator/Line-Editor against
+  a real model, confirming real cost appears in Settings). That remains a manual verification
+  step for the user with their own key. Full interactive click-through of the new Phase 6 UI
+  (model routing dropdowns, prompt editor persistence across reload, the usage/cost section,
+  LM Studio fallback with a real local server) was **not** performed for the same
+  no-headless-Electron-driver reason noted in every prior round. Verification relied on the
+  automated suite (incl. mocked-`fetch` adapter tests exercising the real HTTP request/response
+  shapes), a real `npm run dev` boot check, and an independent Codex adversarial-review of the
+  whole diff.
