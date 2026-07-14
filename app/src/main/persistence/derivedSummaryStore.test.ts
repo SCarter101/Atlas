@@ -32,7 +32,7 @@ function alwaysFailFetchMock(): ReturnType<typeof vi.fn> {
 
 function makeSceneMeta(overrides: Partial<SceneMeta> & Pick<SceneMeta, 'id' | 'chapterId' | 'order' | 'title'>): SceneMeta {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     wordCount: 100,
     status: 'drafted',
     updatedAt: new Date().toISOString(),

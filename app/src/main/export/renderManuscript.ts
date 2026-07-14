@@ -23,16 +23,31 @@ export async function renderManuscript(
   }
 }
 
+// Chapters render as H2 (not H1) with the manuscript title as its own H1
+// line first — this isn't just cosmetic: main/import/parseManuscript.ts's
+// own heuristic (see its tests) expects exactly this H1-title/H2-chapter
+// convention. Rendering chapters as H1 (as an earlier version of this
+// function did, with no title line at all) meant a round-trip through
+// export -> import silently dropped the title and, worse, dropped an
+// entire chapter's worth of prose outright — parseManuscript's "is this
+// heading actually the document title?" check only inspects the *first*
+// heading-like line, so with no distinct title line every export's first
+// chapter heading was mistaken for the title and its content orphaned
+// before any chapter block was opened to hold it. Keeping this aligned
+// with parseManuscript's convention is exactly what
+// main/import/manuscriptRoundTrip.test.ts guards against regressing.
 function renderMarkdown(manuscript: LoadedManuscript): string {
-  return manuscript.chapters
+  const chapters = manuscript.chapters
     .map((chapter) => {
       const scenes = chapter.scenes
         .map((scene) => scene.markdown.trim())
         .filter(Boolean)
         .join('\n\n')
-      return [`# ${chapter.title}`, scenes].filter(Boolean).join('\n\n')
+      return [`## ${chapter.title}`, scenes].filter(Boolean).join('\n\n')
     })
     .join('\n\n---\n\n')
+
+  return [`# ${manuscript.title}`, chapters].filter(Boolean).join('\n\n')
 }
 
 async function renderDocx(manuscript: LoadedManuscript): Promise<Buffer> {

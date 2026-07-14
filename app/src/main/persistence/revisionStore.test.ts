@@ -6,7 +6,7 @@ import type { SceneMeta } from '@shared/schema/manuscript'
 import { createSnapshot, diffSnapshots, getSnapshot, listSnapshots } from './revisionStore'
 
 const SCENE_META: SceneMeta = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: 'scene-1',
   chapterId: 'chapter-1',
   order: 0,

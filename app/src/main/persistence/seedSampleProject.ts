@@ -191,7 +191,7 @@ export async function seedCottonmouthProject(projectRoot: string, db: AtlasDb): 
         globalId,
         {
           meta: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             id: globalId,
             chapterId: chapter.id,
             order: index,

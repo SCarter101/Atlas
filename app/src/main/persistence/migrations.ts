@@ -5,11 +5,13 @@
 // persisted record), the record is run through `migrateRecord` before use so
 // that a future schema bump "just works" without further plumbing changes.
 //
-// The registry is intentionally empty in real usage today — every schema in
-// `@shared/schema/*` is still at `schemaVersion: 1` and nothing has ever
-// bumped past it. Tests register fake entries under distinctive type names
-// (e.g. `__TestFixture`) to prove the mechanism without affecting any real
-// record type.
+// Round 10/Phase 9 registers the first real migration below (SceneMeta
+// v1 -> v2); every other schema in `@shared/schema/*` is still at
+// `schemaVersion: 1` with nothing registered for it. Tests additionally
+// register fake entries under distinctive type names (e.g. `__TestFixture`)
+// to exercise the generic mechanism without touching any real record type.
+
+import type { SceneMeta } from '@shared/schema/manuscript'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MigrationFn = (record: any) => any
@@ -21,8 +23,8 @@ export const migrationRegistry: MigrationRegistry = {}
 
 /**
  * Registers a migration for `typeName` from `fromVersion` to
- * `fromVersion + 1`. Exposed mainly for tests; production code should not
- * need to call this until a real v2 schema exists.
+ * `fromVersion + 1`. Called once below for the real `SceneMeta` v1->v2
+ * migration, and by tests to exercise the mechanism generically.
  */
 export function registerMigration(typeName: string, fromVersion: number, migrate: MigrationFn): void {
   const forType = (migrationRegistry[typeName] ??= {})
@@ -35,9 +37,9 @@ const MAX_MIGRATION_STEPS = 100
  * Repeatedly applies registered migrations to `record` until either no
  * migration is registered for its current `schemaVersion`, or a safety cap
  * on steps is reached (guards against a misconfigured registry looping
- * forever). Returns the record unchanged when no migration applies — the
- * common case today, since every real type is still at v1 with no
- * migrations registered.
+ * forever). Returns the record unchanged when no migration applies — still
+ * the common case for every schema other than `SceneMeta`, which is at v1
+ * with no migration registered.
  */
 export function migrateRecord<T extends { schemaVersion: number }>(typeName: string, record: T): T {
   let current: { schemaVersion: number } = record
@@ -52,3 +54,37 @@ export function migrateRecord<T extends { schemaVersion: number }>(typeName: str
 
   return current as T
 }
+
+// ---------------------------------------------------------------------------
+// Real migrations
+// ---------------------------------------------------------------------------
+
+// SceneMeta v1 -> v2 (Round 10/Phase 9): `localModelOnly` (Round 6/Phase 5's
+// privacy flag — see shared/privacy.ts, main/ipc/handlers.ts's AgentRunStart
+// cloud-consent gate) was added to SceneMeta after v1 scenes already existed
+// on disk, so a pre-existing scene's `.meta.json` simply doesn't have the
+// key at all. Every current consumer already treats that missing key
+// defensively as falsy (`if (scene?.meta.localModelOnly)`), so this isn't a
+// live crash — but the on-disk shape itself stays ambiguous between "this
+// scene was explicitly marked cloud-eligible" and "this scene predates the
+// flag entirely". This migration removes that ambiguity: any SceneMeta read
+// through migrateRecord() is guaranteed to carry an explicit boolean.
+//
+// SceneMetaV1 mirrors the real pre-v2 on-disk shape: identical to the
+// current SceneMeta type except schemaVersion is still 1 and localModelOnly
+// may be absent outright (not just `undefined`-typed — genuinely missing
+// from the parsed JSON on old files).
+type SceneMetaV1 = Omit<SceneMeta, 'schemaVersion' | 'localModelOnly'> & {
+  schemaVersion: 1
+  localModelOnly?: boolean
+}
+
+registerMigration(
+  'SceneMeta',
+  1,
+  (record: SceneMetaV1): SceneMeta => ({
+    ...record,
+    schemaVersion: 2,
+    localModelOnly: record.localModelOnly ?? false
+  })
+)

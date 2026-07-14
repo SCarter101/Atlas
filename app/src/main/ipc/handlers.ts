@@ -14,6 +14,7 @@ import type { SessionGoal } from '@shared/schema/session'
 import type { EmbeddingProvider } from '@shared/schema/embeddings'
 import {
   AgentGoalSchema,
+  BackupScheduleSchema,
   CapabilityManifestSchema,
   CodexEntrySchema,
   ProjectManifestSeedSchema,
@@ -512,6 +513,23 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.ConsentSetRequireAuth, async (_evt, value: boolean) => {
     const session = getCurrentProjectSession()
     session.cloudConsent.setRequireCloudAuth(value)
+  })
+
+  // Round 10/Phase 9: scheduled automatic backups — Settings' "Backups &
+  // snapshots" section reads/writes this via the backups.getSchedule/
+  // setSchedule bridge; main/index.ts's periodic timer independently reads
+  // the manifest itself (it isn't triggered per-IPC-call, same reasoning as
+  // embeddings.setProvider's main-process mirroring above).
+  ipcMain.handle(IpcChannel.BackupScheduleGet, async () => {
+    const session = getCurrentProjectSession()
+    const manifest = await openProject(session.projectRoot)
+    return manifest.backupSchedule ?? { enabled: false, intervalMinutes: 60 }
+  })
+
+  ipcMain.handle(IpcChannel.BackupScheduleSet, async (_evt, schedule: unknown) => {
+    const validated = BackupScheduleSchema.parse(schedule)
+    const session = getCurrentProjectSession()
+    await updateProjectManifest(session.projectRoot, { backupSchedule: validated })
   })
 }
 

@@ -62,7 +62,7 @@ export async function importManuscriptFromFile(
         globalSceneId,
         {
           meta: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             id: globalSceneId,
             chapterId,
             order: sceneIndex,

@@ -167,7 +167,7 @@ const SceneStatusSchema = z.enum(['outline', 'drafting', 'drafted', 'revised', '
 
 // All fields optional to mirror Partial<SceneMeta> in SceneWritePatch.
 const SceneMetaPatchSchema = z.object({
-  schemaVersion: z.literal(1).optional(),
+  schemaVersion: z.literal(2).optional(),
   id: z.string().optional(),
   chapterId: z.string().optional(),
   order: z.number().optional(),
@@ -370,3 +370,23 @@ type _ProjectManifestSeedCheck = z.infer<typeof ProjectManifestSeedSchema> exten
   : never
 const _projectManifestSeedCheck: _ProjectManifestSeedCheck = true
 void _projectManifestSeedCheck
+
+// ---------------------------------------------------------------------------
+// Backup schedule (Round 10/Phase 9)
+// ---------------------------------------------------------------------------
+
+// Validates the payload for the backup:schedule-set IPC handler (see
+// main/ipc/handlers.ts / shared/ipc.ts's BackupScheduleSet channel). Not
+// folded into ProjectManifestSeedSchema above since project:create's seed
+// never needs to set this at creation time — it's only ever written later
+// via the dedicated backups.setSchedule bridge call.
+export const BackupScheduleSchema = z.object({
+  enabled: z.boolean(),
+  intervalMinutes: z.number().positive()
+})
+
+type _BackupScheduleCheck = z.infer<typeof BackupScheduleSchema> extends NonNullable<ProjectManifest['backupSchedule']>
+  ? true
+  : never
+const _backupScheduleCheck: _BackupScheduleCheck = true
+void _backupScheduleCheck
