@@ -49,6 +49,26 @@ When the user asks for multiple independent fixes done in parallel via subagents
 This pattern ran across three rounds (14 total agent branches) with zero merge conflicts,
 due to the upfront file-scoping step.
 
+**Plan-agent validation before dispatch (added Round 7):** for a build large/risky enough to
+warrant `EnterPlanMode` in the first place, run a `Plan`-type subagent over the orchestrator's
+own draft wave/file-ownership design *before* forking any worktree — give it the same file
+excerpts and signatures the orchestrator already gathered (don't make it re-explore) and ask
+it specifically to pressure-test the dependency graph and file-ownership split. In Round 7
+this caught that an assumed 3-way-fully-parallel wave was actually 2-parallel-then-1-sequential
+(one wave depended on the other two's real merged exports, and would have failed to even
+compile if forked simultaneously), and that two files (`simulator.ts`, `AgentRail.tsx`) were
+about to be split across two agents that would both rewrite the same lines — a collision class
+worse than the append-only conflicts this pattern normally tolerates. Cheap insurance relative
+to the cost of an agent-hour spent building against a broken premise.
+
+**Resuming after a transient stream stall:** an agent can be cut off mid-task by an
+infrastructure-level API error (a stalled response stream) that has nothing to do with its
+brief. Check its worktree before assuming failure — substantial work is often already there,
+uncommitted. Resume it with `SendMessage` (using its `agentId`, not a fresh `Agent` call) and
+a message that names exactly what's already done and what to finish, rather than restarting
+from scratch. Verify the resumed agent's own report against the worktree's actual diff before
+committing, same as any other agent.
+
 **Wave variant (used for Phase 3, a much larger build):** when the work is too big for
 one round of fully-independent agents, split into sequential *waves*. Wave 1 = several
 agents in parallel on genuinely independent file surfaces (still expect append-only
