@@ -9,6 +9,19 @@ export interface ModelCallInput {
   systemPrompt?: string
   userIntent: string
   contextText: string
+  // Phase 8: opt-in structured-output request for roles that need a
+  // machine-parseable multi-field result (Dev-Editor findings, Dialoguer
+  // alternatives, World-Builder proposals, Line-Editor's upgraded
+  // multi-finding output) instead of one whole-selection block of prose.
+  // `instructions` is appended to the user message describing the exact
+  // JSON shape expected — deliberately redundant with the API-level
+  // `response_format` flag the real adapters also set, since some
+  // OpenRouter-routed models only honor prompt-based formatting
+  // instructions, not the API flag. Never sent to the LM Studio fallback
+  // call in runModelCallStep() (see simulator.ts) — retrying the same JSON
+  // demand on a different local model after the primary already failed for
+  // JSON-related reasons is unlikely to help.
+  responseFormat?: { type: 'json'; instructions: string }
 }
 
 export interface ProviderAdapter {

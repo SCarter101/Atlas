@@ -9,7 +9,7 @@
 // what those types already say. The `z.infer<>` checks below cross-check
 // each schema against its source-of-truth interface at compile time.
 import { z } from 'zod'
-import type { AgentGoal, ModelRef } from './schema/agent'
+import type { AgentGoal, GeneratorControls, LineEditorControls, ModelRef } from './schema/agent'
 import type { CapabilityManifest, JsonSchema } from './schema/capability'
 import type {
   CharacterVoiceProfile,
@@ -212,6 +212,35 @@ type _ModelRefCheck = z.infer<typeof ModelRefSchema> extends ModelRef ? true : n
 const _modelRefCheck: _ModelRefCheck = true
 void _modelRefCheck
 
+// Phase 8 §7.1/§7.3 per-role control sets — mirrored here since AgentGoal
+// (which embeds them) is validated at the agentRuns.start IPC boundary; see
+// GeneratorControls/LineEditorControls in schema/agent.ts for field-by-field
+// rationale.
+export const GeneratorControlsSchema = z.object({
+  tone: z.string().optional(),
+  pacing: z.enum(['slow', 'moderate', 'fast']).optional(),
+  povDepth: z.enum(['distant', 'close', 'deep']).optional(),
+  dialogueDensity: z.enum(['sparse', 'balanced', 'dialogue-heavy']).optional(),
+  exposition: z.enum(['minimal', 'moderate', 'detailed']).optional(),
+  heatLevel: z.enum(['closed-door', 'suggestive', 'explicit']).optional(),
+  literaryStyle: z.string().optional(),
+  styleSampleText: z.string().optional()
+})
+
+type _GeneratorControlsCheck = z.infer<typeof GeneratorControlsSchema> extends GeneratorControls ? true : never
+const _generatorControlsCheck: _GeneratorControlsCheck = true
+void _generatorControlsCheck
+
+export const LineEditorControlsSchema = z.object({
+  intensity: z.enum(['light', 'standard', 'heavy', 'custom']),
+  houseStyleRules: z.array(z.string()).optional(),
+  flagAiSoundingProse: z.boolean().optional()
+})
+
+type _LineEditorControlsCheck = z.infer<typeof LineEditorControlsSchema> extends LineEditorControls ? true : never
+const _lineEditorControlsCheck: _LineEditorControlsCheck = true
+void _lineEditorControlsCheck
+
 export const AgentGoalSchema = z.object({
   runId: z.string(),
   agentRole: AgentRoleSchema,
@@ -231,7 +260,10 @@ export const AgentGoalSchema = z.object({
     allowedCapabilityCategories: z.array(z.string())
   }),
   generateAlternatives: z.boolean().optional(),
-  lmStudioFallback: z.boolean().optional()
+  lmStudioFallback: z.boolean().optional(),
+  generatorControls: GeneratorControlsSchema.optional(),
+  lineEditorControls: LineEditorControlsSchema.optional(),
+  refinesSuggestionId: z.string().optional()
 })
 
 type _AgentGoalCheck = z.infer<typeof AgentGoalSchema> extends AgentGoal ? true : never

@@ -404,7 +404,11 @@ export class AgentRunManager {
   // is the adapter's own real inputTokens rather than assemble.ts's own
   // estimate, since the real count (once the call has actually completed) is
   // more honest than a pre-estimate.
-  private async runModelCallStep(goal: AgentGoal, assembled: AssembledContext): Promise<ModelCallSummary> {
+  private async runModelCallStep(
+    goal: AgentGoal,
+    assembled: AssembledContext,
+    responseFormat?: ModelCallInput['responseFormat']
+  ): Promise<ModelCallSummary> {
     const primary = selectAdapter(goal.modelRef)
 
     // Best-effort: getActivePrompt() reads from the OS user-data directory
@@ -424,7 +428,8 @@ export class AgentRunManager {
       modelRef: goal.modelRef,
       systemPrompt,
       userIntent: goal.userIntent,
-      contextText: assembled.contextText
+      contextText: assembled.contextText,
+      responseFormat
     }
 
     let summary: ModelCallSummary
@@ -443,9 +448,15 @@ export class AgentRunManager {
         throw new ModelCallFailure('LM Studio fallback is unavailable.', 'fallback-unavailable')
       }
       try {
+        // Deliberately drop responseFormat on the fallback call: a JSON-mode
+        // request that failed on the primary for JSON-related reasons is
+        // unlikely to succeed by retrying the same JSON demand on a
+        // different (local) model — let the fallback degrade to plain prose
+        // rather than compounding the failure mode.
         summary = await lmStudio.runModelCall({
           ...input,
-          modelRef: { provider: 'lm-studio', modelId: 'local-fallback', viaOpenRouter: false }
+          modelRef: { provider: 'lm-studio', modelId: 'local-fallback', viaOpenRouter: false },
+          responseFormat: undefined
         })
       } catch (fallbackErr) {
         // The fallback call itself can still fail after isAvailable() passed

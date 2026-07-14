@@ -47,6 +47,47 @@ export interface AgentGoal {
   // shared/validation.ts — zod silently strips unmirrored fields at the IPC
   // boundary, see that file's comment.
   lmStudioFallback?: boolean
+  // Phase 8 §7.1: Generator's writer-facing control set, folded into the
+  // prompt fed to a real model call (see runGenerator() in
+  // main/agent/simulator.ts) as a rendered "Style guidance" block. Every
+  // field is optional — an unset control simply isn't mentioned in the
+  // prompt, preserving today's behavior when the writer hasn't touched
+  // Advanced Mode's control-set UI (see AgentRail.tsx).
+  generatorControls?: GeneratorControls
+  // Phase 8 §7.3: Line-Editor's writer-facing control set — editing
+  // intensity, house style rules, and AI-sounding-prose flagging — folded
+  // into its real model call's prompt the same way generatorControls is.
+  lineEditorControls?: LineEditorControls
+  // Phase 8: set by refineSuggestion() (renderer/src/state/store.ts) when
+  // this goal is a scoped re-run of a prior suggestion rather than a fresh
+  // invocation. Each run<Role>() method's real-output branch threads this
+  // straight into the resulting SuggestionRef's
+  // provenance.refinesSuggestionId — the goal itself has no other use for
+  // it (userIntent already carries the refine instruction, scope.selectionText
+  // already carries the prior suggestion's own output text).
+  refinesSuggestionId?: string
+}
+
+export interface GeneratorControls {
+  tone?: string
+  pacing?: 'slow' | 'moderate' | 'fast'
+  povDepth?: 'distant' | 'close' | 'deep'
+  dialogueDensity?: 'sparse' | 'balanced' | 'dialogue-heavy'
+  exposition?: 'minimal' | 'moderate' | 'detailed'
+  heatLevel?: 'closed-door' | 'suggestive' | 'explicit'
+  literaryStyle?: string
+  // Spec §7.1 "style imitation from prose samples" — an excerpt of the
+  // writer's own prose the model should match the voice of, folded into the
+  // prompt as "Match the voice of this sample: ...". Distinct from
+  // literaryStyle (a named style, e.g. "literary," "commercial thriller"),
+  // which describes a style rather than demonstrating one.
+  styleSampleText?: string
+}
+
+export interface LineEditorControls {
+  intensity: 'light' | 'standard' | 'heavy' | 'custom'
+  houseStyleRules?: string[]
+  flagAiSoundingProse?: boolean
 }
 
 // Payload shape for a `kind: 'tracked-change'` SuggestionRef (Line Editor).
@@ -151,6 +192,15 @@ export interface EditorialFindingPayload {
   body: string
   severity: string
   craftConceptIds?: string[]
+  // Phase 8 §7.2: which detection category a real Dev-Editor model call
+  // classified this finding under (continuity/pacing/pov/stakes/hooks/
+  // setup-payoff/other) — absent for the pre-Phase-8 template-simulated
+  // finding, which never categorized itself this way.
+  issueCategory?: string
+  // Phase 8 §7.2: a concrete suggested next step for addressing the
+  // finding, distinct from `body` (which describes the issue) — only
+  // populated by a real Dev-Editor model call, not the template fallback.
+  revisionPlan?: string
 }
 
 // Payload shape for `kind: 'metadata-proposal'` suggestions. Spec Phase 4
@@ -222,7 +272,11 @@ export interface SuggestionRef {
   targetSceneId?: string
   targetCodexEntryId?: string
   payload: unknown
-  provenance: { capabilityId?: string; capabilityVersion?: string; runId: string }
+  // Phase 8: `refinesSuggestionId` links a suggestion produced by a
+  // refineSuggestion() re-run (see renderer/src/state/store.ts) back to the
+  // original suggestion it was refining, so the UI can show refinement
+  // lineage instead of an unexplained new card appearing.
+  provenance: { capabilityId?: string; capabilityVersion?: string; runId: string; refinesSuggestionId?: string }
   // 'fixed' is Story-Editor-specific (spec §7.2's 5 issue statuses: Open,
   // Accepted, Rejected, In progress, Fixed — 'refining' already covers "In
   // progress"). Only EditorialFindingCard.tsx offers a UI path to it; other

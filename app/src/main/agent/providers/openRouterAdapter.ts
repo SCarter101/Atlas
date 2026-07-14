@@ -38,7 +38,11 @@ interface OpenRouterResponseBody {
 function buildMessages(input: ModelCallInput): OpenRouterMessage[] {
   const messages: OpenRouterMessage[] = []
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
-  messages.push({ role: 'user', content: `${input.userIntent}\n\n${input.contextText}` })
+  const userContent =
+    input.responseFormat?.type === 'json'
+      ? `${input.userIntent}\n\n${input.contextText}\n\n${input.responseFormat.instructions}`
+      : `${input.userIntent}\n\n${input.contextText}`
+  messages.push({ role: 'user', content: userContent })
   return messages
 }
 
@@ -81,7 +85,8 @@ export class OpenRouterAdapter implements ProviderAdapter {
         },
         body: JSON.stringify({
           model: input.modelRef.modelId,
-          messages: buildMessages(input)
+          messages: buildMessages(input),
+          ...(input.responseFormat?.type === 'json' ? { response_format: { type: 'json_object' } } : {})
         })
       })
     } catch {

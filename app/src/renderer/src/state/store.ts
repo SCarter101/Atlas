@@ -4,11 +4,14 @@ import type {
   AgentRole,
   AgentStep,
   CapabilityRecommendationPayload,
+  DialogueAlternativePayload,
+  EditorialFindingPayload,
   InsertionPayload,
   MetadataProposalPayload,
   ModelRef,
   PermissionRequest,
-  SuggestionRef
+  SuggestionRef,
+  TrackedChangePayload
 } from '@shared/schema/agent'
 import type { CodexCandidate, FoundationsCodexDraft } from '@shared/ipc'
 import type { OpenRouterCatalogEntry } from '@shared/schema/models'
@@ -16,7 +19,7 @@ import type { ManuscriptTree, SceneMeta } from '@shared/schema/manuscript'
 import type { ProjectManifest, Theme } from '@shared/schema/project'
 import type { SessionApproval } from '@shared/schema/capability'
 import type { EmbeddingProvider } from '@shared/schema/embeddings'
-import { describeProvider, type PrivacyModelRef } from '@shared/privacy'
+import { describeProvider, isCloudModel, type PrivacyModelRef } from '@shared/privacy'
 import { normalizeError } from '@shared/errors'
 
 // Single source of truth for both validation and the cycle order used by
@@ -78,6 +81,37 @@ export const DEFAULT_AGENT_MODELS: Record<AgentRole, ModelRef> = {
 
 function allScenes(tree: ManuscriptTree | null): SceneMeta[] {
   return (tree?.books ?? []).flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
+}
+
+// Phase 8: what a Refine re-run treats as "the prior output" for a given
+// suggestion kind — fed in as scope.selectionText so the re-invoked agent
+// role has the thing the writer is actually asking to refine, not the
+// original manuscript selection the first run started from. One switch
+// arm per SuggestionRef.kind so a new kind can't silently fall through to
+// an unhelpful default without a compiler nudge (the `never` arm below).
+function extractSuggestionText(suggestion: SuggestionRef): string {
+  switch (suggestion.kind) {
+    case 'tracked-change':
+      return (suggestion.payload as TrackedChangePayload).after
+    case 'insertion':
+      return (suggestion.payload as InsertionPayload).text
+    case 'editorial-finding': {
+      const payload = suggestion.payload as EditorialFindingPayload
+      return payload.revisionPlan ? `${payload.body}\n\n${payload.revisionPlan}` : payload.body
+    }
+    case 'dialogue-alternative':
+      return (suggestion.payload as DialogueAlternativePayload).original
+    case 'metadata-proposal':
+      return (suggestion.payload as MetadataProposalPayload).rationale
+    case 'codex-addition':
+      return (suggestion.payload as { summary: string }).summary
+    case 'capability-recommendation':
+      return (suggestion.payload as CapabilityRecommendationPayload).rationale
+    default: {
+      const _exhaustive: never = suggestion.kind
+      return String(_exhaustive)
+    }
+  }
 }
 
 interface AtlasState {
@@ -153,6 +187,22 @@ interface AtlasState {
   resolvePermission: (decision: 'approved-once' | 'approved-session' | 'denied') => void
   revokeSessionApproval: (id: string) => void
   setSuggestionState: (id: string, state: SuggestionRef['state']) => Promise<void>
+  // Phase 8: the privacy/cloud-consent gating a run must pass before it's
+  // dispatched — lifted out of AgentRail.tsx (which used to own this as a
+  // local function backed by a local setPrivacyMessage banner) so the
+  // Refine loop (refineSuggestion below) can reuse the exact same gating
+  // instead of duplicating it. Returns a result rather than touching UI
+  // state directly, since callers surface it differently (AgentRail shows
+  // an inline banner; refineSuggestion pushes a toast).
+  authorizeAgentRun: (goal: AgentGoal) => Promise<{ ok: boolean; message?: string }>
+  // Phase 8: closes the "Refine" loop — every suggestion card's follow-up-
+  // instruction textarea previously discarded its typed text and just
+  // flipped the card to 'refining'. This actually records the instruction,
+  // authorizes and dispatches a scoped re-run of the same agent role
+  // (userIntent = instruction, selectionText = the original suggestion's own
+  // prior output), through the same agentRuns.start/onStep plumbing
+  // AgentRail uses for a fresh invocation.
+  refineSuggestion: (id: string, instruction: string) => Promise<void>
   pushToast: (kind: Toast['kind'], message: string) => void
   dismissToast: (id: string) => void
 }
@@ -460,6 +510,80 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   setPendingImportCandidates: (candidates) => set({ pendingImportCandidates: candidates }),
 
   clearPendingImportCandidates: () => set({ pendingImportCandidates: [] }),
+
+  // Phase 8: lifted from AgentRail.tsx's local authorizeRun() so the Refine
+  // loop (refineSuggestion below) can reuse the identical privacy/cloud-
+  // consent gating instead of duplicating it — same localModelOnly check and
+  // same requestCloudConsent + consent.grant() sync AgentRail's "Invoke on
+  // scene" flow already relied on, just returning a result instead of
+  // writing to a component-local banner state.
+  authorizeAgentRun: async (goal) => {
+    const targetSceneIds = goal.scope.sceneIds ?? []
+    const targetScenes = allScenes(get().manuscriptTree).filter((scene) => targetSceneIds.includes(scene.id))
+    const cloudModel = isCloudModel(goal.modelRef)
+
+    if (cloudModel && targetScenes.some((scene) => scene.localModelOnly)) {
+      return { ok: false, message: 'This scene is marked local-model-only; switch that agent to a local model or clear the flag.' }
+    }
+
+    if (cloudModel && get().privacySettings.requireCloudAuth && !get().cloudAuthGrantedThisSession) {
+      const decision = await get().requestCloudConsent(goal.modelRef)
+      if (decision === 'cancelled') {
+        return { ok: false, message: 'Cloud model run cancelled.' }
+      }
+      try {
+        await window.atlas.consent.grant(decision, goal.runId)
+      } catch {
+        // Best-effort sync — if it fails, AgentRunStart's own main-side
+        // guard is still the accurate source of truth and will reject the
+        // run with a clear error rather than silently proceeding.
+      }
+    }
+
+    return { ok: true }
+  },
+
+  refineSuggestion: async (id, instruction) => {
+    const suggestion = get().activeSuggestions.find((sg) => sg.id === id)
+    if (!suggestion) return
+
+    const runId = crypto.randomUUID()
+    const goal: AgentGoal = {
+      runId,
+      agentRole: suggestion.agentRole,
+      modelRef: get().agentModels[suggestion.agentRole],
+      userIntent: instruction,
+      scope: {
+        sceneIds: suggestion.targetSceneId ? [suggestion.targetSceneId] : undefined,
+        selectionText: extractSuggestionText(suggestion)
+      },
+      constraints: {
+        maxTurns: 4,
+        maxTokens: 6000,
+        maxToolCalls: 3,
+        maxElapsedMs: 30000,
+        allowedCapabilityCategories: ['line-editing']
+      },
+      lmStudioFallback: get().lmStudioFallback,
+      refinesSuggestionId: suggestion.id
+    }
+
+    const { ok, message } = await get().authorizeAgentRun(goal)
+    if (!ok) {
+      get().pushToast('error', message ?? 'Refinement run was not authorized.')
+      return
+    }
+
+    set((s) => ({
+      activeSuggestions: s.activeSuggestions.map((sg) =>
+        sg.id === id ? { ...sg, refineInstruction: instruction, state: 'refining' } : sg
+      )
+    }))
+
+    get().startAgentRun(goal)
+    void window.atlas.agentRuns.start(goal)
+    window.atlas.agentRuns.onStep(runId, (step) => get().handleAgentStep(runId, step))
+  },
 
   startAgentRun: (goal) => set({ currentRunGoal: goal, currentRunSteps: [] }),
 

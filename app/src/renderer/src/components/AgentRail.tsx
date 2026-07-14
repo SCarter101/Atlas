@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AgentGoal, AgentRole } from '@shared/schema/agent'
-import { describeProvider, isCloudModel } from '@shared/privacy'
+import { describeProvider } from '@shared/privacy'
 import { encodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { PreflightDialog } from './PreflightDialog'
@@ -28,10 +28,7 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   const startAgentRun = useAtlasStore((s) => s.startAgentRun)
   const activeSuggestions = useAtlasStore((s) => s.activeSuggestions)
   const agentModels = useAtlasStore((s) => s.agentModels)
-  const manuscriptTree = useAtlasStore((s) => s.manuscriptTree)
-  const privacySettings = useAtlasStore((s) => s.privacySettings)
-  const cloudAuthGrantedThisSession = useAtlasStore((s) => s.cloudAuthGrantedThisSession)
-  const requestCloudConsent = useAtlasStore((s) => s.requestCloudConsent)
+  const authorizeAgentRun = useAtlasStore((s) => s.authorizeAgentRun)
   const currentRunGoal = useAtlasStore((s) => s.currentRunGoal)
   const currentRunSteps = useAtlasStore((s) => s.currentRunSteps)
   const advancedMode = useAtlasStore((s) => s.advancedMode)
@@ -57,45 +54,14 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   // Shared by both the "Invoke on scene" flow (a raw manuscript selection)
   // and the World Builder interview flow (a marker-encoded interview
   // payload, see startInterviewRun below) — both just need an AgentGoal
-  // built and dispatched the same way.
+  // built and dispatched the same way. The actual privacy/cloud-consent
+  // gating now lives in the store's authorizeAgentRun (Phase 8), shared
+  // with the Refine loop — this just surfaces its result as this
+  // component's local banner.
   async function authorizeRun(goal: AgentGoal): Promise<boolean> {
-    const targetSceneIds = goal.scope.sceneIds ?? []
-    const targetScenes = (manuscriptTree?.books ?? [])
-      .flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
-      .filter((scene) => targetSceneIds.includes(scene.id))
-    const cloudModel = isCloudModel(goal.modelRef)
-
-    if (cloudModel && targetScenes.some((scene) => scene.localModelOnly)) {
-      setPrivacyMessage('This scene is marked local-model-only; switch that agent to a local model or clear the flag.')
-      return false
-    }
-
-    if (cloudModel && privacySettings.requireCloudAuth && !cloudAuthGrantedThisSession) {
-      const decision = await requestCloudConsent(goal.modelRef)
-      if (decision === 'cancelled') {
-        setPrivacyMessage('Cloud model run cancelled.')
-        return false
-      }
-      // Phase 6: mirror the decision main-side so AgentRunStart's IPC-level
-      // consent guard (see main/permissions/cloudConsent.ts) doesn't reject
-      // the run we're about to start. This must be awaited, not
-      // fire-and-forget: authorizeRun()'s caller starts the run immediately
-      // after this returns, and without awaiting, the agentRuns.start IPC
-      // call had no ordering guarantee relative to this one completing on
-      // the main side — a real (if narrow) race that could spuriously
-      // reject a just-approved run. `decision` is already narrowed to
-      // exclude 'cancelled' here by the early return above.
-      try {
-        await window.atlas.consent.grant(decision, goal.runId)
-      } catch {
-        // Best-effort sync — if it fails, AgentRunStart's own main-side
-        // guard is still the accurate source of truth and will reject the
-        // run with a clear error rather than silently proceeding.
-      }
-    }
-
-    setPrivacyMessage(null)
-    return true
+    const { ok, message } = await authorizeAgentRun(goal)
+    setPrivacyMessage(message ?? null)
+    return ok
   }
 
   async function runAgent(agent: AgentDef, selectionText: string, userIntent: string): Promise<void> {
@@ -111,7 +77,13 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
       scope: { sceneIds: [sceneId], selectionText },
       constraints: {
         maxTurns: 4,
-        maxTokens: 4000,
+        // Phase 8: bumped from 4000 — real structured (JSON-mode) output
+        // for the now-real Dev-Editor/Dialoguer/World-Builder/Line-Editor
+        // paths runs more output-token-hungry than equivalent free-form
+        // prose for the same content, and guardModelCall's budget check
+        // only runs after the (already-billed) call completes, so a too-tight
+        // budget mostly just discards a real result rather than saving cost.
+        maxTokens: 6000,
         maxToolCalls: 3,
         maxElapsedMs: 30000,
         allowedCapabilityCategories: ['line-editing']

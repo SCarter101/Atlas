@@ -24,7 +24,11 @@ interface LmStudioResponseBody {
 function buildMessages(input: ModelCallInput): LmStudioMessage[] {
   const messages: LmStudioMessage[] = []
   if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
-  messages.push({ role: 'user', content: `${input.userIntent}\n\n${input.contextText}` })
+  const userContent =
+    input.responseFormat?.type === 'json'
+      ? `${input.userIntent}\n\n${input.contextText}\n\n${input.responseFormat.instructions}`
+      : `${input.userIntent}\n\n${input.contextText}`
+  messages.push({ role: 'user', content: userContent })
   return messages
 }
 
@@ -50,7 +54,8 @@ export class LmStudioAdapter implements ProviderAdapter {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: input.modelRef.modelId,
-          messages: buildMessages(input)
+          messages: buildMessages(input),
+          ...(input.responseFormat?.type === 'json' ? { response_format: { type: 'json_object' } } : {})
         })
       })
     } catch {
