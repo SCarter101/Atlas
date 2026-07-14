@@ -10,7 +10,9 @@ import type {
   DialogueAlternativePayload,
   DialogueTensionTier,
   EditorialFindingPayload,
+  GeneratorControls,
   InsertionPayload,
+  LineEditorControls,
   MetadataProposalPayload,
   ModelCallSummary,
   ModelRef,
@@ -581,7 +583,7 @@ export class AgentRunManager {
       return
     }
 
-    const suggestions = simulateLineEditFindings(selection, goal.scope.sceneIds?.[0])
+    const suggestions = simulateLineEditFindings(selection, goal.scope.sceneIds?.[0], goal.refinesSuggestionId)
 
     // The one real thing Line Editor does in this build: run the real
     // word-count tool on the passage being edited (see checkWordCount above)
@@ -603,7 +605,15 @@ export class AgentRunManager {
     state.budget.toolCallsUsed += 1
 
     const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
-    const modelCall = await this.runModelCallStep(goal, assembledContext)
+    // Phase 8 §7.3: request real JSON-mode output describing multiple
+    // specific-span findings instead of the old one-whole-selection
+    // rewrite — see renderLineEditorInstructions() for how
+    // goal.lineEditorControls (intensity/house-style rules/AI-sounding-prose
+    // flagging) shapes what's asked for.
+    const modelCall = await this.runModelCallStep(goal, assembledContext, {
+      type: 'json',
+      instructions: renderLineEditorInstructions(goal.lineEditorControls)
+    })
     if (await this.guardModelCall(goal, 'Line Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -613,33 +623,60 @@ export class AgentRunManager {
     })
     this.recordModelCall(goal, modelCall)
 
-    // Phase 6: when a real adapter actually produced text, use it instead of
-    // the simulated multi-finding categorized list — a deliberate
-    // simplification for this phase (one tracked-change spanning the whole
-    // selection, category 'Model revision') rather than attempting to parse
-    // a real model's output back into the simulator's granular per-issue
-    // findings. Full structured-output extraction for multi-finding reports
-    // is deferred. Falls back to the existing simulated behavior whenever
-    // there's no real output to use (simulator adapter, or a real adapter
-    // that for some reason returned no text).
+    // Phase 6/8: when a real adapter actually produced text, prefer its
+    // structured JSON findings (multiple specific before/after spans the
+    // writer can accept individually) over the simulated multi-finding
+    // categorized list. Falls back to the old single whole-selection
+    // tracked-change (Phase 6's "deliberate simplification") when the real
+    // output isn't valid JSON in the expected shape, and further falls back
+    // to the fully-simulated findings whenever there's no real output to use
+    // at all (simulator adapter, or a real adapter that for some reason
+    // returned no text) — this is a new best case inserted ahead of the
+    // existing ladder, not a replacement of it.
     const isReal = selectAdapter(goal.modelRef).id !== 'simulator' && !!modelCall.outputText
-    const finalSuggestions: SuggestionRef[] = isReal
-      ? [
-          {
-            id: randomUUID(),
-            agentRole: 'Line-Editor',
-            kind: 'tracked-change',
-            targetSceneId: goal.scope.sceneIds?.[0],
-            payload: {
-              category: 'Model revision',
-              before: selection,
-              after: modelCall.outputText as string
-            } satisfies TrackedChangePayload,
-            provenance: { capabilityId: 'global.tools.line-edit-scan', capabilityVersion: '1.0.0', runId: goal.runId },
-            state: 'pending'
-          }
-        ]
-      : suggestions
+    const parsedFindings = isReal ? parseLineEditFindings(modelCall.outputText as string) : undefined
+    const finalSuggestions: SuggestionRef[] = parsedFindings
+      ? parsedFindings.map((finding) => ({
+          id: randomUUID(),
+          agentRole: 'Line-Editor',
+          kind: 'tracked-change',
+          targetSceneId: goal.scope.sceneIds?.[0],
+          payload: {
+            category: finding.category,
+            before: finding.before,
+            after: finding.after,
+            ...(finding.isAiSoundingFlag ? { isAiSoundingFlag: true } : {})
+          } satisfies LineEditTrackedChangePayload,
+          provenance: {
+            capabilityId: 'global.tools.line-edit-scan',
+            capabilityVersion: '1.0.0',
+            runId: goal.runId,
+            refinesSuggestionId: goal.refinesSuggestionId
+          },
+          state: 'pending'
+        }))
+      : isReal
+        ? [
+            {
+              id: randomUUID(),
+              agentRole: 'Line-Editor',
+              kind: 'tracked-change',
+              targetSceneId: goal.scope.sceneIds?.[0],
+              payload: {
+                category: 'Model revision',
+                before: selection,
+                after: modelCall.outputText as string
+              } satisfies TrackedChangePayload,
+              provenance: {
+                capabilityId: 'global.tools.line-edit-scan',
+                capabilityVersion: '1.0.0',
+                runId: goal.runId,
+                refinesSuggestionId: goal.refinesSuggestionId
+              },
+              state: 'pending'
+            }
+          ]
+        : suggestions
 
     const wordCountNote = wordCountResult ? ` (scanned a ${wordCountResult.wordCount}-word passage)` : ''
     const result: AgentResult = {
@@ -689,6 +726,35 @@ export class AgentRunManager {
     if (await this.guardToolCall(goal, 'Generator')) return
 
     const selection = goal.scope.selectionText ?? ''
+
+    // Phase 8 §7.1 ("ask a clarifying question if the outline is too vague to
+    // draft confidently" — already promised by this role's own system prompt,
+    // see promptStore.ts's Generator entry): when there's genuinely nothing
+    // to anchor a draft on — a tiny/empty selection AND no SceneMeta.purpose
+    // set for the target scene — skip the whole draft pipeline (tool call +
+    // model call) and surface a clarifying question instead, shaped as an
+    // editorial-finding so it renders through EditorialFindingCard (keyed by
+    // suggestion.kind, not agentRole — see ManuscriptWorkspace.tsx) rather
+    // than an empty or nonsensical insertion. Deliberately narrow: a short
+    // selection anchored by a scene that already has its purpose filled in
+    // still has enough to draft against, so this only fires when both
+    // signals are absent.
+    const clarifyingQuestion = await this.maybeAskGeneratorClarifyingQuestion(goal, selection)
+    if (clarifyingQuestion) {
+      const result: AgentResult = {
+        summary: 'Generator needs more direction before drafting — asked a clarifying question instead of guessing.',
+        proposedManuscriptChanges: [clarifyingQuestion]
+      }
+      this.emit(goal.runId, {
+        stepIndex: state.record.steps.length,
+        kind: 'result',
+        timestamp: new Date().toISOString(),
+        detail: result
+      })
+      await this.finish(goal.runId, 'completed')
+      return
+    }
+
     const toolInput = { selection }
     if (
       await this.guardDuplicateAction(goal, 'Generator', toolSignature('global.tools.prose-continuation@1.0.0', toolInput))
@@ -703,7 +769,8 @@ export class AgentRunManager {
     const suggestions = simulateGeneratorContinuation(
       selection,
       goal.scope.sceneIds?.[0],
-      goal.generateAlternatives ? 3 : 1
+      goal.generateAlternatives ? 3 : 1,
+      goal.refinesSuggestionId
     )
 
     // The one real thing Generator does in this build: run the real
@@ -727,8 +794,21 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
+    // Phase 8 §7.1: fold the writer's control set (tone/pacing/POV depth/
+    // dialogue density/exposition/heat level/literary style) and any
+    // style-imitation sample into what the real model call actually
+    // receives — rendered into a "Style guidance" block appended to
+    // userIntent (see renderGeneratorStyleGuidance()). Built as a modified
+    // *copy* of goal passed only to runModelCallStep: assembleContext() below
+    // still runs against the original goal, since retrieval relevance is
+    // about the raw selection/intent, not this rendered guidance block. No
+    // responseFormat here — Generator's real output stays free-form prose,
+    // unlike Line Editor's JSON-mode upgrade above.
+    const styleGuidance = goal.generatorControls ? renderGeneratorStyleGuidance(goal.generatorControls) : undefined
+    const modelCallGoal = styleGuidance ? { ...goal, userIntent: `${goal.userIntent}\n\n${styleGuidance}` } : goal
+
     const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
-    const modelCall = await this.runModelCallStep(goal, assembledContext)
+    const modelCall = await this.runModelCallStep(modelCallGoal, assembledContext)
     if (await this.guardModelCall(goal, 'Generator', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -756,7 +836,12 @@ export class AgentRunManager {
               kind: 'insertion',
               targetSceneId: goal.scope.sceneIds?.[0],
               payload: { text: modelCall.outputText as string } satisfies InsertionPayload,
-              provenance: { capabilityId: 'global.tools.prose-continuation', capabilityVersion: '1.0.0', runId: goal.runId },
+              provenance: {
+                capabilityId: 'global.tools.prose-continuation',
+                capabilityVersion: '1.0.0',
+                runId: goal.runId,
+                refinesSuggestionId: goal.refinesSuggestionId
+              },
               state: 'pending'
             }
           ]
@@ -777,6 +862,55 @@ export class AgentRunManager {
     })
 
     await this.finish(goal.runId, 'completed')
+  }
+
+  // Phase 8 §7.1: "ask a clarifying question if the outline is too vague to
+  // draft confidently" — a real check, not just a stated intent in the
+  // prompt. Fires only when there's genuinely nothing to work with: a
+  // selection under GENERATOR_CLARIFY_MIN_LENGTH characters (including
+  // empty) AND no SceneMeta.purpose set for the target scene. A
+  // short-but-anchored selection (a scene that already has its purpose
+  // filled in) still has enough context to draft against, so this stays
+  // narrow on purpose rather than firing on every short selection. Same
+  // best-effort readScene()-with-try/catch pattern as
+  // proposeMetadataSuggestion above: a scene that isn't indexed/readable
+  // (e.g. a detached run in a test) is treated as "no outline available."
+  private async maybeAskGeneratorClarifyingQuestion(
+    goal: AgentGoal,
+    selection: string
+  ): Promise<SuggestionRef | undefined> {
+    if (selection.trim().length >= GENERATOR_CLARIFY_MIN_LENGTH) return undefined
+
+    const sceneId = goal.scope.sceneIds?.[0]
+    let hasOutline = false
+    if (sceneId) {
+      try {
+        const { meta } = await readScene(this.projectRoot, this.db, sceneId)
+        hasOutline = !!meta.purpose && meta.purpose.trim().length > 0
+      } catch {
+        hasOutline = false
+      }
+    }
+    if (hasOutline) return undefined
+
+    return {
+      id: randomUUID(),
+      agentRole: 'Generator',
+      kind: 'editorial-finding',
+      targetSceneId: sceneId,
+      payload: {
+        title: 'What should happen next in this scene?',
+        body: "There isn't enough here to draft confidently — no meaningful selection to continue from, and this scene has no stated purpose to anchor on. Add a sentence or two about what should happen next, or fill in the scene's purpose in Scene Metadata, then run Generator again.",
+        severity: 'low'
+      } satisfies EditorialFindingPayload,
+      provenance: {
+        capabilityId: 'global.tools.prose-continuation',
+        capabilityVersion: '1.0.0',
+        runId: goal.runId,
+        refinesSuggestionId: goal.refinesSuggestionId
+      },
+      state: 'pending'
+    }
   }
 
   private async runDevEditor(goal: AgentGoal): Promise<void> {
@@ -1660,18 +1794,32 @@ function planSummaryFor(goal: AgentGoal): string {
 // Canned findings styled on the Phase 1 prototype's sample Line Editor
 // suggestions (filter words, adverb overuse, repeated sentence structure) —
 // deterministic pattern checks, not a real model call.
-function simulateLineEditFindings(selection: string, sceneId?: string): SuggestionRef[] {
+function simulateLineEditFindings(selection: string, sceneId?: string, refinesSuggestionId?: string): SuggestionRef[] {
   const findings: SuggestionRef[] = []
   const runId = randomUUID()
 
   if (/\bnoticed that\b/i.test(selection)) {
     findings.push(
-      trackedChange(runId, sceneId, 'Filter word', selection, selection.replace(/\bnoticed that\b/i, '').trim())
+      trackedChange(
+        runId,
+        sceneId,
+        'Filter word',
+        selection,
+        selection.replace(/\bnoticed that\b/i, '').trim(),
+        refinesSuggestionId
+      )
     )
   }
   if (/\bvery\b/i.test(selection)) {
     findings.push(
-      trackedChange(runId, sceneId, 'Adverb overuse', selection, selection.replace(/\bvery\s+/gi, '').trim())
+      trackedChange(
+        runId,
+        sceneId,
+        'Adverb overuse',
+        selection,
+        selection.replace(/\bvery\s+/gi, '').trim(),
+        refinesSuggestionId
+      )
     )
   }
   if (findings.length === 0 && selection.trim().length > 0) {
@@ -1681,7 +1829,8 @@ function simulateLineEditFindings(selection: string, sceneId?: string): Suggesti
         sceneId,
         'Standard copyedit',
         selection,
-        selection // no confident rewrite — placeholder pass-through
+        selection, // no confident rewrite — placeholder pass-through
+        refinesSuggestionId
       )
     )
   }
@@ -1693,7 +1842,8 @@ function trackedChange(
   sceneId: string | undefined,
   category: string,
   before: string,
-  after: string
+  after: string,
+  refinesSuggestionId?: string
 ): SuggestionRef {
   return {
     id: randomUUID(),
@@ -1701,9 +1851,91 @@ function trackedChange(
     kind: 'tracked-change',
     targetSceneId: sceneId,
     payload: { category, before, after },
-    provenance: { capabilityId: 'global.tools.line-edit-scan', capabilityVersion: '1.0.0', runId },
+    provenance: { capabilityId: 'global.tools.line-edit-scan', capabilityVersion: '1.0.0', runId, refinesSuggestionId },
     state: 'pending'
   }
+}
+
+// Phase 8 §7.3: local widening of TrackedChangePayload (shared/schema/
+// agent.ts is Wave-0-frozen for this round — see this file's ownership
+// notes) to carry the new optional AI-sounding-prose flag a real JSON-mode
+// Line Editor call can now report per finding. SuggestionRef.payload is
+// `unknown`, so this is purely a local type-safety aid for the `satisfies`
+// check in runLineEditor() — it doesn't change what's actually stored or
+// read elsewhere. SuggestionCard.tsx mirrors this same shape locally to
+// display the flag.
+interface LineEditTrackedChangePayload extends TrackedChangePayload {
+  isAiSoundingFlag?: boolean
+}
+
+// Phase 8 §7.3: the JSON shape requested from a real Line Editor model call
+// (see runLineEditor()'s responseFormat) — one entry per specific
+// before/after span within the selection, rather than one whole-selection
+// rewrite, so the writer can accept/reject each edit individually.
+interface LineEditFindingJson {
+  category: string
+  before: string
+  after: string
+  isAiSoundingFlag?: boolean
+}
+
+interface LineEditJsonResponse {
+  findings: LineEditFindingJson[]
+}
+
+// Never throws (tryParseJson's own contract) and returns undefined on any
+// shape mismatch — every finding must have non-empty category/before/after
+// strings, and there must be at least one. A parse or validation failure
+// here is the signal for runLineEditor() to fall back to the existing
+// single-tracked-change-from-outputText behavior, not a hard error.
+function parseLineEditFindings(text: string): LineEditFindingJson[] | undefined {
+  const parsed = tryParseJson<LineEditJsonResponse>(text)
+  if (!parsed || !Array.isArray(parsed.findings) || parsed.findings.length === 0) return undefined
+
+  const valid = parsed.findings.every(
+    (f) =>
+      !!f &&
+      typeof f.category === 'string' &&
+      f.category.trim().length > 0 &&
+      typeof f.before === 'string' &&
+      f.before.trim().length > 0 &&
+      typeof f.after === 'string' &&
+      f.after.trim().length > 0
+  )
+  return valid ? parsed.findings : undefined
+}
+
+// Phase 8 §7.3: renders goal.lineEditorControls into the `instructions` half
+// of runLineEditor()'s JSON-mode responseFormat — always called (even when
+// lineEditorControls is unset, in which case it just describes the default
+// "standard" intensity and the required JSON shape) since the JSON-mode
+// upgrade itself is not opt-in, only the control set layered on top of it is.
+function renderLineEditorInstructions(controls?: LineEditorControls): string {
+  const intensity = controls?.intensity ?? 'standard'
+  const intensityNote =
+    intensity === 'light'
+      ? 'Editing intensity: light — flag only clear errors (grammar, typos, factual/continuity slips in the prose itself); leave stylistic choices alone.'
+      : intensity === 'heavy'
+        ? 'Editing intensity: heavy — apply aggressive line-level tightening: cut redundancy, sharpen weak verbs and adjectives, trim filler.'
+        : intensity === 'custom'
+          ? "Editing intensity: custom — follow the writer's house style rules below verbatim rather than a generic editing pass."
+          : 'Editing intensity: standard — typical line-edit thoroughness (clarity, voice preservation, filter words, overused modifiers).'
+
+  const houseStyleNote =
+    controls?.houseStyleRules && controls.houseStyleRules.length > 0
+      ? ` House style rules to enforce: ${controls.houseStyleRules.join('; ')}.`
+      : ''
+
+  const aiSoundingNote = controls?.flagAiSoundingProse
+    ? ' Additionally, flag any phrasing that reads as AI-generated or generically templated by setting "isAiSoundingFlag": true on that finding.'
+    : ''
+
+  return (
+    'Return ONLY JSON matching this exact shape: ' +
+    '{"findings": [{"category": string, "before": string, "after": string, "isAiSoundingFlag": boolean (optional)}]}. ' +
+    'Each "before" must be a specific, short span copied verbatim from within the selection (never the whole passage) and "after" its proposed replacement, so the writer can accept or reject each edit individually. ' +
+    `Return at least one finding. ${intensityNote}${houseStyleNote}${aiSoundingNote}`
+  )
 }
 
 // Deterministic, template-based continuations — not a real model call.
@@ -1729,7 +1961,12 @@ const DRAFT_FALLBACKS = [
   'The scene continues: what happens next is smaller than expected, and heavier for it.'
 ]
 
-function simulateGeneratorContinuation(selection: string, sceneId: string | undefined, draftCount = 1): SuggestionRef[] {
+function simulateGeneratorContinuation(
+  selection: string,
+  sceneId: string | undefined,
+  draftCount = 1,
+  refinesSuggestionId?: string
+): SuggestionRef[] {
   const runId = randomUUID()
   const trimmed = selection.trim()
   const sentences = trimmed.split(/(?<=[.!?])\s+/).filter(Boolean)
@@ -1753,10 +1990,36 @@ function simulateGeneratorContinuation(selection: string, sceneId: string | unde
       kind: 'insertion',
       targetSceneId: sceneId,
       payload,
-      provenance: { capabilityId: 'global.tools.prose-continuation', capabilityVersion: '1.0.0', runId },
+      provenance: { capabilityId: 'global.tools.prose-continuation', capabilityVersion: '1.0.0', runId, refinesSuggestionId },
       state: 'pending'
     }
   })
+}
+
+// Phase 8 §7.1: threshold below which a selection is treated as "nothing to
+// draft from" by maybeAskGeneratorClarifyingQuestion() above — deliberately
+// small so this only fires on a genuinely empty/near-empty selection, not on
+// an ordinary short one.
+const GENERATOR_CLARIFY_MIN_LENGTH = 15
+
+// Phase 8 §7.1: renders the writer's Generator control set into a single
+// "Style guidance" block folded into the real model call's userIntent (see
+// runGenerator() above) — only fields the writer actually touched are
+// mentioned, so an untouched control set changes nothing about today's
+// prompt. Shapes what's asked for, not the output format (unlike Line
+// Editor's JSON-mode upgrade) — Generator's real output stays free-form
+// prose either way.
+function renderGeneratorStyleGuidance(controls: GeneratorControls): string | undefined {
+  const parts: string[] = []
+  if (controls.tone) parts.push(`Tone: ${controls.tone}.`)
+  if (controls.pacing) parts.push(`Pacing: ${controls.pacing}.`)
+  if (controls.povDepth) parts.push(`POV depth: ${controls.povDepth}.`)
+  if (controls.dialogueDensity) parts.push(`Dialogue density: ${controls.dialogueDensity}.`)
+  if (controls.exposition) parts.push(`Exposition: ${controls.exposition}.`)
+  if (controls.heatLevel) parts.push(`Heat/violence level: ${controls.heatLevel}.`)
+  if (controls.literaryStyle) parts.push(`Literary style: ${controls.literaryStyle}.`)
+  if (controls.styleSampleText) parts.push(`Match the voice of this sample: ${controls.styleSampleText}`)
+  return parts.length > 0 ? `Style guidance: ${parts.join(' ')}` : undefined
 }
 
 // Heuristic structural pass styled on the Phase 1 prototype's Story Editor

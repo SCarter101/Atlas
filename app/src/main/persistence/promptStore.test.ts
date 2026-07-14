@@ -32,17 +32,19 @@ describe('promptStore', () => {
 
   it('returns the seed default when no record exists yet on disk', async () => {
     const result = await getActivePrompt('Generator')
-    expect(result.version).toBe('1.2')
+    // Phase 8: bumped 1.2 -> 1.3 when the control-set/clarifying-question
+    // behavior was documented in this prompt's default text.
+    expect(result.version).toBe('1.3')
     expect(result.text).toContain('You are Generator')
   })
 
   it('persists a new version on setPrompt and returns it from getActivePrompt afterward', async () => {
     const setResult = await setPrompt('Line-Editor', 'Custom line-editor prompt.')
-    expect(setResult.version).toBe('1.4') // default Line-Editor version is 1.3
+    expect(setResult.version).toBe('1.5') // default Line-Editor version is 1.4 (Phase 8: bumped 1.3 -> 1.4)
 
     const getResult = await getActivePrompt('Line-Editor')
     expect(getResult.text).toBe('Custom line-editor prompt.')
-    expect(getResult.version).toBe('1.4')
+    expect(getResult.version).toBe('1.5')
   })
 
   it('appends the overwritten version to history on setPrompt', async () => {

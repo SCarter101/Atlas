@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { AgentGoal, AgentRole } from '@shared/schema/agent'
+import type { AgentGoal, AgentRole, GeneratorControls, LineEditorControls } from '@shared/schema/agent'
 import { describeProvider } from '@shared/privacy'
 import { encodeWorldBuilderInterview, genreTemplateLabel, type WorldBuilderInterviewAnswers } from '@shared/worldBuilderInterview'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
@@ -23,6 +23,21 @@ const AGENTS: AgentDef[] = [
   { role: 'World-Builder', name: 'World Builder', iconKind: 'globe', wired: true }
 ]
 
+// Phase 8 §7.1/§7.3: shared visual language for the new Generator/Line-Editor
+// control-set inputs below — matches the existing inline-style-object
+// convention used throughout this file rather than introducing a new UI kit.
+const controlInputStyle = {
+  width: '100%',
+  padding: '6px 8px',
+  borderRadius: 6,
+  border: '1px solid var(--c-border)',
+  background: 'var(--c-bg)',
+  color: 'var(--c-ink)',
+  fontSize: 12,
+  fontFamily: 'Public Sans, sans-serif',
+  boxSizing: 'border-box'
+} as const
+
 export function AgentRail({ getSelection, sceneId }: { getSelection: () => string; sceneId: string }): JSX.Element {
   const handleAgentStep = useAtlasStore((s) => s.handleAgentStep)
   const startAgentRun = useAtlasStore((s) => s.startAgentRun)
@@ -44,6 +59,24 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   // "multiple drafts"). Read at the moment a run is started, not baked into
   // AgentDef, since it's a per-run choice rather than a per-agent setting.
   const [generateAlternatives, setGenerateAlternatives] = useState(false)
+
+  // Phase 8 §7.1: Generator's writer-facing control set — Advanced-Mode-gated
+  // the same way generateAlternatives is above, local useState only (no
+  // persistence needed since AgentRail doesn't unmount between runs).
+  const [genTone, setGenTone] = useState('')
+  const [genPacing, setGenPacing] = useState<'' | NonNullable<GeneratorControls['pacing']>>('')
+  const [genPovDepth, setGenPovDepth] = useState<'' | NonNullable<GeneratorControls['povDepth']>>('')
+  const [genDialogueDensity, setGenDialogueDensity] = useState<'' | NonNullable<GeneratorControls['dialogueDensity']>>('')
+  const [genExposition, setGenExposition] = useState<'' | NonNullable<GeneratorControls['exposition']>>('')
+  const [genHeatLevel, setGenHeatLevel] = useState<'' | NonNullable<GeneratorControls['heatLevel']>>('')
+  const [genLiteraryStyle, setGenLiteraryStyle] = useState('')
+  const [genStyleSampleText, setGenStyleSampleText] = useState('')
+
+  // Phase 8 §7.3: Line-Editor's writer-facing control set, same pattern.
+  const [lineIntensity, setLineIntensity] = useState<LineEditorControls['intensity']>('standard')
+  const [lineHouseStyleRules, setLineHouseStyleRules] = useState('')
+  const [lineFlagAiSounding, setLineFlagAiSounding] = useState(false)
+
   const navigate = useNavigate()
 
   const runInFlight =
@@ -66,6 +99,52 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
 
   async function runAgent(agent: AgentDef, selectionText: string, userIntent: string): Promise<void> {
     const runId = crypto.randomUUID()
+
+    // Phase 8 §7.1/§7.3: only ever populated when Advanced Mode is on, the
+    // run targets the matching role, AND at least one control differs from
+    // its default — otherwise the whole object is omitted so an ordinary run
+    // (or a run against the other 3 roles) is completely unaffected, same
+    // convention generateAlternatives above already follows.
+    const generatorControls: GeneratorControls | undefined =
+      agent.role === 'Generator' &&
+      advancedMode &&
+      (genTone.trim() ||
+        genPacing ||
+        genPovDepth ||
+        genDialogueDensity ||
+        genExposition ||
+        genHeatLevel ||
+        genLiteraryStyle.trim() ||
+        genStyleSampleText.trim())
+        ? {
+            tone: genTone.trim() || undefined,
+            pacing: genPacing || undefined,
+            povDepth: genPovDepth || undefined,
+            dialogueDensity: genDialogueDensity || undefined,
+            exposition: genExposition || undefined,
+            heatLevel: genHeatLevel || undefined,
+            literaryStyle: genLiteraryStyle.trim() || undefined,
+            styleSampleText: genStyleSampleText.trim() || undefined
+          }
+        : undefined
+
+    const lineEditorControls: LineEditorControls | undefined =
+      agent.role === 'Line-Editor' && advancedMode && (lineIntensity !== 'standard' || lineHouseStyleRules.trim() || lineFlagAiSounding)
+        ? {
+            // intensity is the one required field on LineEditorControls, so
+            // it's always included once the object is included at all —
+            // defaults to 'standard' the same as the control's own useState.
+            intensity: lineIntensity,
+            houseStyleRules: lineHouseStyleRules.trim()
+              ? lineHouseStyleRules
+                  .split('\n')
+                  .map((rule) => rule.trim())
+                  .filter((rule) => rule.length > 0)
+              : undefined,
+            flagAiSoundingProse: lineFlagAiSounding || undefined
+          }
+        : undefined
+
     const goal: AgentGoal = {
       runId,
       agentRole: agent.role,
@@ -89,7 +168,9 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
         allowedCapabilityCategories: ['line-editing']
       },
       generateAlternatives: agent.role === 'Generator' && advancedMode && generateAlternatives ? true : undefined,
-      lmStudioFallback
+      lmStudioFallback,
+      generatorControls,
+      lineEditorControls
     }
 
     if (!(await authorizeRun(goal))) return
@@ -239,6 +320,137 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
                         />
                         Generate alternatives (3 drafts to compare)
                       </label>
+                    )}
+                    {agent.role === 'Generator' && advancedMode && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                          marginBottom: 10,
+                          paddingTop: 8,
+                          borderTop: '1px solid var(--c-border)'
+                        }}
+                      >
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--c-ink-soft)' }}>Style guidance (optional)</div>
+                        <input
+                          type="text"
+                          value={genTone}
+                          onChange={(e) => setGenTone(e.target.value)}
+                          placeholder="Tone (e.g. wry, tense, wistful)"
+                          style={controlInputStyle}
+                        />
+                        <select
+                          value={genPacing}
+                          onChange={(e) => setGenPacing(e.target.value as typeof genPacing)}
+                          style={controlInputStyle}
+                        >
+                          <option value="">Pacing — default</option>
+                          <option value="slow">Slow</option>
+                          <option value="moderate">Moderate</option>
+                          <option value="fast">Fast</option>
+                        </select>
+                        <select
+                          value={genPovDepth}
+                          onChange={(e) => setGenPovDepth(e.target.value as typeof genPovDepth)}
+                          style={controlInputStyle}
+                        >
+                          <option value="">POV depth — default</option>
+                          <option value="distant">Distant</option>
+                          <option value="close">Close</option>
+                          <option value="deep">Deep</option>
+                        </select>
+                        <select
+                          value={genDialogueDensity}
+                          onChange={(e) => setGenDialogueDensity(e.target.value as typeof genDialogueDensity)}
+                          style={controlInputStyle}
+                        >
+                          <option value="">Dialogue density — default</option>
+                          <option value="sparse">Sparse</option>
+                          <option value="balanced">Balanced</option>
+                          <option value="dialogue-heavy">Dialogue-heavy</option>
+                        </select>
+                        <select
+                          value={genExposition}
+                          onChange={(e) => setGenExposition(e.target.value as typeof genExposition)}
+                          style={controlInputStyle}
+                        >
+                          <option value="">Exposition — default</option>
+                          <option value="minimal">Minimal</option>
+                          <option value="moderate">Moderate</option>
+                          <option value="detailed">Detailed</option>
+                        </select>
+                        <select
+                          value={genHeatLevel}
+                          onChange={(e) => setGenHeatLevel(e.target.value as typeof genHeatLevel)}
+                          style={controlInputStyle}
+                        >
+                          <option value="">Heat/violence level — default</option>
+                          <option value="closed-door">Closed-door</option>
+                          <option value="suggestive">Suggestive</option>
+                          <option value="explicit">Explicit</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={genLiteraryStyle}
+                          onChange={(e) => setGenLiteraryStyle(e.target.value)}
+                          placeholder="Literary style (e.g. commercial thriller)"
+                          style={controlInputStyle}
+                        />
+                        <textarea
+                          value={genStyleSampleText}
+                          onChange={(e) => setGenStyleSampleText(e.target.value)}
+                          placeholder="Paste a prose sample to imitate its voice…"
+                          style={{ ...controlInputStyle, minHeight: 48, resize: 'vertical' }}
+                        />
+                      </div>
+                    )}
+                    {agent.role === 'Line-Editor' && advancedMode && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                          marginBottom: 10,
+                          paddingTop: 8,
+                          borderTop: '1px solid var(--c-border)'
+                        }}
+                      >
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--c-ink-soft)' }}>Editing controls (optional)</div>
+                        <select
+                          value={lineIntensity}
+                          onChange={(e) => setLineIntensity(e.target.value as LineEditorControls['intensity'])}
+                          style={controlInputStyle}
+                        >
+                          <option value="light">Light — only clear errors</option>
+                          <option value="standard">Standard — default thoroughness</option>
+                          <option value="heavy">Heavy — aggressive tightening</option>
+                          <option value="custom">Custom — follow house style rules</option>
+                        </select>
+                        <textarea
+                          value={lineHouseStyleRules}
+                          onChange={(e) => setLineHouseStyleRules(e.target.value)}
+                          placeholder="House style rules, one per line…"
+                          style={{ ...controlInputStyle, minHeight: 48, resize: 'vertical' }}
+                        />
+                        <label
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            fontSize: 12,
+                            color: 'var(--c-ink-soft)',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={lineFlagAiSounding}
+                            onChange={(e) => setLineFlagAiSounding(e.target.checked)}
+                          />
+                          Flag AI-sounding prose
+                        </label>
+                      </div>
                     )}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button

@@ -28,10 +28,15 @@ const ROLE_NAME: Record<AgentRole, string> = {
 // prototype's ReviewPanel.dc.html tracked-change cards.
 export function SuggestionCard({ suggestion }: { suggestion: SuggestionRef }): JSX.Element {
   const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
+  const refineSuggestion = useAtlasStore((s) => s.refineSuggestion)
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
 
-  const payload = suggestion.payload as { category: string; before: string; after: string }
+  // Phase 8 §7.3: isAiSoundingFlag is new (a real JSON-mode Line Editor call
+  // can now flag a finding as reading like AI-generated prose — see
+  // runLineEditor() in main/agent/simulator.ts) and optional, so a
+  // pre-Phase-8 or simulated finding without it renders exactly as before.
+  const payload = suggestion.payload as { category: string; before: string; after: string; isAiSoundingFlag?: boolean }
   const isResolved = suggestion.state === 'accepted' || suggestion.state === 'rejected'
 
   return (
@@ -62,18 +67,35 @@ export function SuggestionCard({ suggestion }: { suggestion: SuggestionRef }): J
         <span style={{ fontSize: 10.5, color: 'var(--c-ink-faint)' }}>{ROLE_NAME[suggestion.agentRole]}</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            padding: '2px 7px',
-            borderRadius: 10,
-            background: 'var(--c-accent-soft)',
-            color: 'var(--c-accent-text)'
-          }}
-        >
-          {payload.category}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '2px 7px',
+              borderRadius: 10,
+              background: 'var(--c-accent-soft)',
+              color: 'var(--c-accent-text)'
+            }}
+          >
+            {payload.category}
+          </span>
+          {payload.isAiSoundingFlag && (
+            <span
+              style={{
+                fontSize: 9.5,
+                fontWeight: 700,
+                padding: '2px 7px',
+                borderRadius: 10,
+                background: 'var(--c-amber-soft)',
+                color: 'var(--c-amber)'
+              }}
+              title="This phrasing reads as AI-generated or generic"
+            >
+              AI-sounding
+            </span>
+          )}
+        </div>
         <span style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', textTransform: 'capitalize' }}>{suggestion.state}</span>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', textDecoration: 'line-through', marginBottom: 4, lineHeight: 1.5 }}>
@@ -105,7 +127,8 @@ export function SuggestionCard({ suggestion }: { suggestion: SuggestionRef }): J
           />
           <button
             onClick={() => {
-              setSuggestionState(suggestion.id, 'refining')
+              if (refineText.trim().length === 0) return
+              void refineSuggestion(suggestion.id, refineText)
               setRefining(false)
             }}
             style={{
