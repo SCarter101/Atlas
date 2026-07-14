@@ -63,9 +63,30 @@ export function Settings(): JSX.Element {
   const [backups, setBackups] = useState<BackupMeta[]>([])
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
+  const [backupSchedule, setBackupSchedule] = useState<{ enabled: boolean; intervalMinutes: number }>({
+    enabled: false,
+    intervalMinutes: 60
+  })
 
   async function refreshBackups(): Promise<void> {
     setBackups(await window.atlas.backups.list())
+  }
+
+  async function refreshBackupSchedule(): Promise<void> {
+    setBackupSchedule(await window.atlas.backups.getSchedule())
+  }
+
+  async function handleToggleScheduledBackups(): Promise<void> {
+    const next = { ...backupSchedule, enabled: !backupSchedule.enabled }
+    setBackupSchedule(next)
+    await window.atlas.backups.setSchedule(next)
+  }
+
+  async function handleBackupIntervalChange(minutes: number): Promise<void> {
+    if (!Number.isFinite(minutes) || minutes <= 0) return
+    const next = { ...backupSchedule, intervalMinutes: minutes }
+    setBackupSchedule(next)
+    await window.atlas.backups.setSchedule(next)
   }
 
   async function refreshOpenRouterKeyState(): Promise<void> {
@@ -123,6 +144,7 @@ export function Settings(): JSX.Element {
 
   useEffect(() => {
     void refreshBackups()
+    void refreshBackupSchedule()
     void refreshOpenRouterKeyState()
     void loadModelCatalog()
     // loadModelCatalog is a stable store action reference (zustand), safe to
@@ -304,6 +326,47 @@ export function Settings(): JSX.Element {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 16,
+            marginTop: 18,
+            paddingTop: 16,
+            borderTop: '1px solid var(--c-border)'
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Automatic backups</div>
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-soft)', lineHeight: 1.5 }}>
+              Periodically creates a backup while the app is open, on top of the manual backups above.
+            </div>
+          </div>
+          <Switch checked={backupSchedule.enabled} onChange={() => void handleToggleScheduledBackups()} />
+        </div>
+        {backupSchedule.enabled && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+            <span style={{ fontSize: 12.5, color: 'var(--c-ink-soft)' }}>Every</span>
+            <input
+              type="number"
+              min={1}
+              value={backupSchedule.intervalMinutes}
+              onChange={(e) => void handleBackupIntervalChange(Number(e.target.value))}
+              style={{
+                width: 70,
+                padding: '6px 10px',
+                borderRadius: 7,
+                border: '1px solid var(--c-border)',
+                background: 'var(--c-surface-raised)',
+                color: 'var(--c-ink)',
+                fontSize: 12.5
+              }}
+            />
+            <span style={{ fontSize: 12.5, color: 'var(--c-ink-soft)' }}>minutes</span>
           </div>
         )}
       </Section>

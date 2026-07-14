@@ -11,7 +11,7 @@ import { AgentRunManager, proposeSceneMetadataPatch } from './simulator'
 import { waitForResultStep } from './simulator.testUtils'
 
 const BASE_META: SceneMeta = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: 'scene-1',
   chapterId: 'chapter-1',
   order: 0,

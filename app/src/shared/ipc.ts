@@ -80,7 +80,12 @@ export const IpcChannel = {
   // composes everything into a zip the writer saves and shares manually.
   TelemetryGetEnabled: 'telemetry:get-enabled',
   TelemetrySetEnabled: 'telemetry:set-enabled',
-  TelemetryExportFeedback: 'telemetry:export-feedback'
+  TelemetryExportFeedback: 'telemetry:export-feedback',
+  // Round 10/Phase 9: scheduled automatic backups — see
+  // main/persistence/backupStore.ts's maybeRunScheduledBackup() and the
+  // timer in main/index.ts's whenReady() that calls it.
+  BackupScheduleGet: 'backup:schedule-get',
+  BackupScheduleSet: 'backup:schedule-set'
 } as const
 
 export interface SceneReadResult {
@@ -228,6 +233,10 @@ export interface AtlasBridge {
     list(): Promise<BackupMeta[]>
     restore(backupId: string): Promise<{ restoredProjectRoot: string }>
     recoveryStatus(): Promise<{ recoveryAvailable: boolean }>
+    // Round 10/Phase 9: read/write ProjectManifest.backupSchedule, backing
+    // Settings' "Backups & snapshots" enable-toggle + interval control.
+    getSchedule(): Promise<NonNullable<ProjectManifest['backupSchedule']>>
+    setSchedule(schedule: NonNullable<ProjectManifest['backupSchedule']>): Promise<void>
   }
   secrets: {
     set(name: string, value: string): Promise<{ ok: boolean; error?: string }>

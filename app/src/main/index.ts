@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { is } from './is'
 import { installSeedCapabilities } from './capabilities/seedTools'
 import { registerIpcHandlers } from './ipc/handlers'
-import { removeProjectSessionLock } from './persistence/backupStore'
+import { maybeRunScheduledBackup, removeProjectSessionLock } from './persistence/backupStore'
+import { openProject } from './persistence/projectStore'
 import { getCurrentProjectSession } from './projectSession'
 import { recordCrash } from './telemetry/telemetryStore'
 
@@ -102,6 +103,35 @@ void app.whenReady().then(async () => {
   } catch (err) {
     console.error('[capabilities] failed to install seed capabilities', err)
   }
+
+  // Round 10/Phase 9: scheduled automatic backups. A single fixed-tick poll
+  // (rather than one setTimeout/setInterval re-armed per writer-configured
+  // intervalMinutes) so a schedule change made mid-session in Settings
+  // takes effect on the very next tick with no timer-teardown bookkeeping —
+  // see backupStore.maybeRunScheduledBackup's own doc comment for how it
+  // decides whether enough time has actually elapsed before creating one.
+  // Wrapped in the same try/catch-and-swallow pattern
+  // removeCurrentProjectLock() below already uses for "no project open yet"
+  // (getCurrentProjectSession() throws in that case), since this tick runs
+  // unconditionally regardless of whether a project happens to be open.
+  const BACKUP_SCHEDULE_POLL_MS = 5 * 60_000
+  setInterval(() => {
+    void (async () => {
+      try {
+        const projectRoot = getCurrentProjectSession().projectRoot
+        const manifest = await openProject(projectRoot)
+        await maybeRunScheduledBackup(projectRoot, manifest)
+      } catch (err) {
+        // No project open yet, or a transient read/write failure — a missed
+        // scheduled backup isn't worth surfacing to the writer; it's simply
+        // retried on the next tick.
+        if (!(err instanceof Error) || err.message !== 'No project is open yet') {
+          console.error('[backups] scheduled-backup check failed', err)
+        }
+      }
+    })()
+  }, BACKUP_SCHEDULE_POLL_MS)
+
   // NOTE: in unpackaged dev mode (`npm run dev`), Windows will still show
   // "Electron.exe" as the underlying binary's file description in some
   // places (e.g. hovering the taskbar icon) — that string is embedded in

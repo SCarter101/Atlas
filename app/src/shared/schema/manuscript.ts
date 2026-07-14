@@ -51,7 +51,13 @@ export interface SceneContinuityMeta {
 }
 
 export interface SceneMeta {
-  schemaVersion: 1
+  // v2 (Round 10/Phase 9): `localModelOnly` was added after v1 SceneMeta
+  // records already existed on disk (Round 6/Phase 5's privacy flag), so
+  // pre-existing scenes read back with the key entirely absent rather than
+  // an explicit `false`. See main/persistence/migrations.ts's registered
+  // 'SceneMeta' v1->v2 migration, which normalizes every scene read through
+  // migrateRecord() to carry an explicit value on this field.
+  schemaVersion: 2
   id: string
   chapterId: string
   order: number

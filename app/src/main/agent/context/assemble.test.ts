@@ -112,7 +112,7 @@ describe('assembleContext (Phase 7)', () => {
       db,
       'scene-1',
       {
-        meta: { schemaVersion: 1, id: 'scene-1', chapterId: 'chapter-1', order: 0, title: 'Scene One', status: 'drafting' },
+        meta: { schemaVersion: 2, id: 'scene-1', chapterId: 'chapter-1', order: 0, title: 'Scene One', status: 'drafting' },
         prose: 'Ray walked the levee road at dawn. He thought about Dale. The water was low.'
       },
       'book-1/part-1/chapter-1',
@@ -124,7 +124,7 @@ describe('assembleContext (Phase 7)', () => {
       'scene-2',
       {
         meta: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           id: 'scene-2',
           chapterId: 'chapter-2',
           order: 0,

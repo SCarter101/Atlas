@@ -49,13 +49,20 @@ export async function writeScene(
   const prose = patch.prose ?? (await readFile(proseFile, 'utf-8').catch(() => ''))
 
   const nextMeta: SceneMeta = {
-    schemaVersion: 1,
     id: sceneId,
     chapterId: existingMeta?.chapterId ?? '',
     order: existingMeta?.order ?? 0,
     title: existingMeta?.title ?? 'Untitled Scene',
     ...existingMeta,
     ...patch.meta,
+    // `existingMeta` above is read raw (not migrateRecord()'d), so a scene
+    // last saved before the SceneMeta v1->v2 migration (see
+    // shared/schema/manuscript.ts / migrations.ts) would otherwise spread
+    // its stale `schemaVersion: 1` straight through. Setting this after
+    // both spreads means any write opportunistically upgrades the
+    // persisted shape to current, same as `wordCount`/`status`/`updatedAt`
+    // below always reflect this write rather than the stale file.
+    schemaVersion: 2,
     wordCount: countWords(prose),
     status: patch.meta?.status ?? existingMeta?.status ?? 'drafting',
     updatedAt: new Date().toISOString()

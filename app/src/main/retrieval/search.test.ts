@@ -176,7 +176,7 @@ describe('markIndexed / ensureIndexed consistency (Phase 7)', () => {
       db,
       'scene-1',
       {
-        meta: { schemaVersion: 1, id: 'scene-1', chapterId: 'ch-01', order: 0, title: 'Scene One', status: 'drafting' },
+        meta: { schemaVersion: 2, id: 'scene-1', chapterId: 'ch-01', order: 0, title: 'Scene One', status: 'drafting' },
         prose: 'The levee held through the night.'
       },
       'book-01/part-01/ch-01',

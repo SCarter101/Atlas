@@ -86,7 +86,9 @@ const atlasBridge: AtlasBridge = {
     create: (label) => ipcRenderer.invoke(IpcChannel.BackupCreate, label),
     list: () => ipcRenderer.invoke(IpcChannel.BackupList),
     restore: (backupId) => ipcRenderer.invoke(IpcChannel.BackupRestore, backupId),
-    recoveryStatus: () => ipcRenderer.invoke(IpcChannel.SessionRecoveryStatus)
+    recoveryStatus: () => ipcRenderer.invoke(IpcChannel.SessionRecoveryStatus),
+    getSchedule: () => ipcRenderer.invoke(IpcChannel.BackupScheduleGet),
+    setSchedule: (schedule) => ipcRenderer.invoke(IpcChannel.BackupScheduleSet, schedule)
   },
   secrets: {
     set: (name, value) => ipcRenderer.invoke(IpcChannel.SecretsSet, name, value),

@@ -4,8 +4,37 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createBackup, listBackups, restoreBackup } from './backupStore'
+import type { ProjectManifest } from '@shared/schema/project'
+import { createBackup, listBackups, maybeRunScheduledBackup, restoreBackup } from './backupStore'
 import { projectPaths } from './paths'
+
+function manifestWithSchedule(schedule?: ProjectManifest['backupSchedule']): ProjectManifest {
+  return {
+    schemaVersion: 1,
+    id: 'proj-1',
+    title: 'Backup Test',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    books: [],
+    advancedMode: false,
+    theme: 'paper',
+    backupSchedule: schedule
+  }
+}
+
+// Pre-seeds the backup manifest.json with one entry at a given age, without
+// going through createBackup() — lets the interval-comparison logic be
+// tested against a specific injected "last backup time" instead of actually
+// sleeping, per the task's own guidance.
+async function seedBackupManifest(projectRoot: string, ageMinutes: number): Promise<void> {
+  const createdAt = new Date(Date.now() - ageMinutes * 60_000).toISOString()
+  await writeFile(
+    join(projectPaths(projectRoot).backupsDir, 'manifest.json'),
+    JSON.stringify([{ backupId: 'existing', label: 'Prior backup', createdAt, fileName: 'existing.zip', sizeBytes: 10 }], null, 2),
+    'utf-8'
+  )
+  await writeFile(join(projectPaths(projectRoot).backupsDir, 'existing.zip'), 'placeholder', 'utf-8')
+}
 
 describe('backupStore', () => {
   let projectRoot: string
@@ -53,5 +82,47 @@ describe('backupStore', () => {
     )
 
     rmSync(result.restoredProjectRoot, { recursive: true, force: true })
+  })
+
+  describe('maybeRunScheduledBackup', () => {
+    it('does nothing when no schedule is configured', async () => {
+      const result = await maybeRunScheduledBackup(projectRoot, manifestWithSchedule(undefined))
+      expect(result).toBeNull()
+      expect(await listBackups(projectRoot)).toHaveLength(0)
+    })
+
+    it('does nothing when the schedule exists but is disabled', async () => {
+      const result = await maybeRunScheduledBackup(projectRoot, manifestWithSchedule({ enabled: false, intervalMinutes: 30 }))
+      expect(result).toBeNull()
+      expect(await listBackups(projectRoot)).toHaveLength(0)
+    })
+
+    it('creates a backup immediately when enabled and no backup has ever been made', async () => {
+      const result = await maybeRunScheduledBackup(projectRoot, manifestWithSchedule({ enabled: true, intervalMinutes: 60 }))
+      expect(result).not.toBeNull()
+      expect(result?.label).toBe('Scheduled backup')
+      expect(await listBackups(projectRoot)).toHaveLength(1)
+    })
+
+    it('skips creating a backup when the most recent backup is within the configured interval', async () => {
+      await seedBackupManifest(projectRoot, 5) // 5 minutes ago
+      const result = await maybeRunScheduledBackup(projectRoot, manifestWithSchedule({ enabled: true, intervalMinutes: 60 }))
+      expect(result).toBeNull()
+      // Still just the one pre-seeded entry — no new backup was created.
+      expect(await listBackups(projectRoot)).toHaveLength(1)
+    })
+
+    it('creates a new backup once the most recent backup is older than the configured interval', async () => {
+      await seedBackupManifest(projectRoot, 120) // 2 hours ago
+      const result = await maybeRunScheduledBackup(projectRoot, manifestWithSchedule({ enabled: true, intervalMinutes: 60 }))
+      expect(result).not.toBeNull()
+      expect(await listBackups(projectRoot)).toHaveLength(2)
+    })
+
+    it('ignores a non-positive interval rather than backing up on every poll', async () => {
+      const result = await maybeRunScheduledBackup(projectRoot, manifestWithSchedule({ enabled: true, intervalMinutes: 0 }))
+      expect(result).toBeNull()
+      expect(await listBackups(projectRoot)).toHaveLength(0)
+    })
   })
 })

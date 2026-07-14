@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import JSZip from 'jszip'
 import type { BackupMeta } from '@shared/schema/backup'
+import type { ProjectManifest } from '@shared/schema/project'
 import { projectPaths } from './paths'
 
 let mostRecentRecoveryAvailable = false
@@ -139,4 +140,39 @@ export function getSessionRecoveryStatus(): { recoveryAvailable: boolean } {
 
 export function removeProjectSessionLock(projectRoot: string): void {
   rmSync(sessionLockPath(projectRoot), { force: true })
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled automatic backups (Round 10/Phase 9)
+// ---------------------------------------------------------------------------
+
+// Called on a periodic timer from main/index.ts's whenReady() — see that
+// file for why this is poll-based (a fixed-tick check against the
+// manifest's *current* schedule setting) rather than a per-project
+// setTimeout/setInterval keyed to intervalMinutes directly: the writer can
+// change the interval or turn scheduling off entirely mid-session via
+// Settings, and a poll that re-reads the manifest each tick picks that up
+// for free with no timer-teardown bookkeeping.
+//
+// Elapsed time is measured against the most recent entry in the existing
+// backup manifest (listBackups()) rather than a separate "last scheduled
+// run" timestamp — any backup, scheduled or manually triggered via
+// Settings' "Create backup" button, resets the clock. That's deliberate:
+// the point of scheduling is "don't go too long without a safety copy," and
+// a writer who just made a manual backup doesn't need another one seconds
+// later just because the poll happened to land right after.
+export async function maybeRunScheduledBackup(projectRoot: string, manifest: ProjectManifest): Promise<BackupMeta | null> {
+  const schedule = manifest.backupSchedule
+  if (!schedule?.enabled) return null
+  if (!Number.isFinite(schedule.intervalMinutes) || schedule.intervalMinutes <= 0) return null
+
+  const existing = await listBackups(projectRoot)
+  if (existing.length > 0) {
+    const mostRecent = existing[0] // listBackups() sorts newest-first
+    const elapsedMs = Date.now() - new Date(mostRecent.createdAt).getTime()
+    const intervalMs = schedule.intervalMinutes * 60_000
+    if (Number.isFinite(elapsedMs) && elapsedMs < intervalMs) return null
+  }
+
+  return createBackup(projectRoot, 'Scheduled backup')
 }
