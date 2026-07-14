@@ -52,6 +52,7 @@ vi.mock('./providers/openRouterAdapter', () => ({
 
 const { AgentRunManager } = await import('./simulator')
 const { openIndexDb } = await import('../persistence/db')
+const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
 const { waitForResultStep } = await import('./simulator.testUtils')
 
 function makeGoal(agentRole: AgentRole, provider: ModelProvider, runId: string): AgentGoal {
@@ -97,9 +98,13 @@ describe('AgentRunManager — real model output consumption (Phase 6)', () => {
   beforeEach(async () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-real-output-test-'))
     db = await openIndexDb(projectRoot)
+    // Phase 7: force the network-free hashing embedding adapter — see
+    // simulator.budget.test.ts for the fuller rationale.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(projectRoot, { recursive: true, force: true })
   })
 
@@ -115,6 +120,18 @@ describe('AgentRunManager — real model output consumption (Phase 6)', () => {
       const payload = suggestions[0].payload as InsertionPayload
       expect(payload.text).toBe(FAKE_OUTPUT_TEXT)
       expect(payload.draftGroupId).toBeUndefined()
+
+      // Phase 7: assembledContext.usedTokens must be the real adapter-
+      // reported inputTokens (12, per the fake OpenRouterAdapter above), not
+      // assemble.ts's own pre-call estimate — more honest once a real call
+      // has actually completed.
+      const modelCallStep = steps.find((s) => s.kind === 'model-call')!.detail as {
+        inputTokens: number
+        assembledContext?: { usedTokens: number; tokenBudget: number }
+      }
+      expect(modelCallStep.assembledContext).toBeDefined()
+      expect(modelCallStep.assembledContext?.usedTokens).toBe(12)
+      expect(modelCallStep.assembledContext?.usedTokens).toBe(modelCallStep.inputTokens)
     })
 
     it('still produces the old simulated multi-draft-capable behavior unchanged via the simulator adapter', async () => {

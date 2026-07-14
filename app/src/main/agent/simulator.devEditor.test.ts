@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
 const { installSeedCapabilities } = await import('../capabilities/seedTools')
 const { openIndexDb } = await import('../persistence/db')
 const { upsertCodexEntry } = await import('../persistence/codexStore')
+const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
 const { AgentRunManager } = await import('./simulator')
 const { waitForResultStep } = await import('./simulator.testUtils')
 
@@ -35,9 +36,13 @@ describe('AgentRunManager — Dev-Editor real Codex contradiction check', () => 
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-deveditor-'))
     db = await openIndexDb(projectRoot)
     await installSeedCapabilities()
+    // Phase 7: force the network-free hashing embedding adapter — see
+    // simulator.budget.test.ts for the fuller rationale.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(userDataRoot, { recursive: true, force: true })
     rmSync(projectRoot, { recursive: true, force: true })
   })

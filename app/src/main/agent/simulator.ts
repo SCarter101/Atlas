@@ -41,6 +41,7 @@ import { LmStudioAdapter } from './providers/lmStudioAdapter'
 import { OpenRouterAdapter } from './providers/openRouterAdapter'
 import { SimulatorAdapter } from './providers/simulatorAdapter'
 import type { ModelCallInput, ProviderAdapter } from './providers/types'
+import { assembleContext, type AssembledContext } from './context/assemble'
 
 // Phase 2 scope (data-contracts §6): the AgentGoal -> AgentStep[] ->
 // AgentRunRecord pipeline, and the permission/session-approval flow, are
@@ -396,8 +397,14 @@ export class AgentRunManager {
 
   // Phase 6: the single choke point for prompt resolution, real-provider
   // fallback, and error classification — every run<Role>() method still
-  // calls this exactly once per model-call step, same as before.
-  private async runModelCallStep(goal: AgentGoal, selection: string): Promise<ModelCallSummary> {
+  // calls this exactly once per model-call step, same as before. Phase 7:
+  // also the single choke point for attaching what main/agent/context/
+  // assemble.ts actually packed into this call's contextText onto the
+  // returned ModelCallSummary, for real Context Inspection display — usedTokens
+  // is the adapter's own real inputTokens rather than assemble.ts's own
+  // estimate, since the real count (once the call has actually completed) is
+  // more honest than a pre-estimate.
+  private async runModelCallStep(goal: AgentGoal, assembled: AssembledContext): Promise<ModelCallSummary> {
     const primary = selectAdapter(goal.modelRef)
 
     // Best-effort: getActivePrompt() reads from the OS user-data directory
@@ -413,10 +420,16 @@ export class AgentRunManager {
       systemPrompt = undefined
     }
 
-    const input: ModelCallInput = { modelRef: goal.modelRef, systemPrompt, userIntent: goal.userIntent, contextText: selection }
+    const input: ModelCallInput = {
+      modelRef: goal.modelRef,
+      systemPrompt,
+      userIntent: goal.userIntent,
+      contextText: assembled.contextText
+    }
 
+    let summary: ModelCallSummary
     try {
-      return await primary.runModelCall(input)
+      summary = await primary.runModelCall(input)
     } catch (err) {
       // No fallback worth attempting when the primary adapter already *is*
       // the fallback target (lm-studio) or the simulator (which never
@@ -430,7 +443,7 @@ export class AgentRunManager {
         throw new ModelCallFailure('LM Studio fallback is unavailable.', 'fallback-unavailable')
       }
       try {
-        return await lmStudio.runModelCall({
+        summary = await lmStudio.runModelCall({
           ...input,
           modelRef: { provider: 'lm-studio', modelId: 'local-fallback', viaOpenRouter: false }
         })
@@ -445,6 +458,15 @@ export class AgentRunManager {
           String(fallbackErr instanceof Error ? fallbackErr.message : fallbackErr),
           'fallback-failed'
         )
+      }
+    }
+
+    return {
+      ...summary,
+      assembledContext: {
+        sections: assembled.sections,
+        tokenBudget: assembled.tokenBudget,
+        usedTokens: summary.inputTokens
       }
     }
   }
@@ -568,7 +590,8 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
-    const modelCall = await this.runModelCallStep(goal, selection)
+    const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
+    const modelCall = await this.runModelCallStep(goal, assembledContext)
     if (await this.guardModelCall(goal, 'Line Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -692,7 +715,8 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
-    const modelCall = await this.runModelCallStep(goal, selection)
+    const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
+    const modelCall = await this.runModelCallStep(goal, assembledContext)
     if (await this.guardModelCall(goal, 'Generator', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -811,7 +835,8 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
-    const modelCall = await this.runModelCallStep(goal, selection)
+    const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
+    const modelCall = await this.runModelCallStep(goal, assembledContext)
     if (await this.guardModelCall(goal, 'Story Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1221,7 +1246,8 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
-    const modelCall = await this.runModelCallStep(goal, selection)
+    const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
+    const modelCall = await this.runModelCallStep(goal, assembledContext)
     if (await this.guardModelCall(goal, 'Dialogue Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -1392,7 +1418,19 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
-    const modelCall = await this.runModelCallStep(goal, modelCallContextText)
+    // The interview wizard's compiled answers ARE the context for this run —
+    // there's nothing else to retrieve yet (this run is what proposes the
+    // Codex entries in the first place) — so that path wraps
+    // modelCallContextText as a single section instead of running full
+    // retrieval. An ordinary single-selection run gets the full priority-
+    // order assembly like every other role.
+    const assembledContext = interview
+      ? await assembleContext(this.projectRoot, this.db, goal, {
+          overrideText: modelCallContextText,
+          overrideLabel: 'World Builder interview answers'
+        })
+      : await assembleContext(this.projectRoot, this.db, goal)
+    const modelCall = await this.runModelCallStep(goal, assembledContext)
     if (await this.guardModelCall(goal, 'World Builder', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,

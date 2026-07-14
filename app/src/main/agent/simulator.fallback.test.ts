@@ -19,6 +19,7 @@ vi.mock('../security/keyVault', () => ({
 
 const { AgentRunManager } = await import('./simulator')
 const { openIndexDb } = await import('../persistence/db')
+const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
 const { waitForResultStep } = await import('./simulator.testUtils')
 
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions'
@@ -63,9 +64,15 @@ describe('AgentRunManager — real-adapter model-call fallback (Phase 6)', () =>
     db = await openIndexDb(projectRoot)
     getSecretMock.mockReset()
     getSecretMock.mockResolvedValue('sk-or-test-key')
+    // Phase 7: force the network-free hashing embedding adapter so
+    // assembleContext()'s Codex-search step never issues extra fetch calls
+    // that would violate these tests' "only the primary/fallback adapter's
+    // exact URL was ever called" assertions.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     vi.unstubAllGlobals()
     rmSync(projectRoot, { recursive: true, force: true })
   })

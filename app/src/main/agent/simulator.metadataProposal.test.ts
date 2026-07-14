@@ -6,7 +6,9 @@ import type { AgentGoal, AgentStep, MetadataProposalPayload, PermissionRequest, 
 import type { SceneMeta } from '@shared/schema/manuscript'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { writeScene } from '../persistence/sceneStore'
+import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager, proposeSceneMetadataPatch } from './simulator'
+import { waitForResultStep } from './simulator.testUtils'
 
 const BASE_META: SceneMeta = {
   schemaVersion: 1,
@@ -75,9 +77,13 @@ describe('AgentRunManager — Dev-Editor metadata-proposal suggestion', () => {
   beforeEach(async () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-metadata-proposal-'))
     db = await openIndexDb(projectRoot)
+    // Phase 7: force the network-free hashing embedding adapter — see
+    // simulator.budget.test.ts for the fuller rationale.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(projectRoot, { recursive: true, force: true })
   })
 
@@ -110,7 +116,7 @@ describe('AgentRunManager — Dev-Editor metadata-proposal suggestion', () => {
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitForResultStep(steps)
 
     const resultStep = steps.find((s) => s.kind === 'result')!
     const result = resultStep.detail as { proposedManuscriptChanges?: SuggestionRef[] }
@@ -138,7 +144,7 @@ describe('AgentRunManager — Dev-Editor metadata-proposal suggestion', () => {
 
     const request = steps.find((s) => s.kind === 'permission-request')!.detail as PermissionRequest
     manager.respondToPermission(goal.runId, request.requestId, 'approved-once')
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitForResultStep(steps)
 
     const resultStep = steps.find((s) => s.kind === 'result')!
     const result = resultStep.detail as { proposedManuscriptChanges?: SuggestionRef[] }

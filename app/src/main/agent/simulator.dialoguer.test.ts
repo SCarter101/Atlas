@@ -7,6 +7,7 @@ import type { CodexEntry } from '@shared/schema/codex'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { upsertCodexEntry } from '../persistence/codexStore'
 import { writeScene } from '../persistence/sceneStore'
+import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager } from './simulator'
 
 function makeCharacter(overrides: Partial<CodexEntry> = {}): CodexEntry {
@@ -78,9 +79,13 @@ describe('AgentRunManager — Dialoguer voice-profile flow', () => {
   beforeEach(async () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-dialoguer-test-'))
     db = await openIndexDb(projectRoot)
+    // Phase 7: force the network-free hashing embedding adapter — see
+    // simulator.budget.test.ts for the fuller rationale.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(projectRoot, { recursive: true, force: true })
   })
 

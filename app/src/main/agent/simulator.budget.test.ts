@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentGoal, AgentStep } from '@shared/schema/agent'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
+import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager, detectDuplicateAction } from './simulator'
 import { waitForResultStep } from './simulator.testUtils'
 
@@ -32,9 +33,17 @@ describe('AgentRunManager — budget enforcement', () => {
   beforeEach(async () => {
     projectRoot = mkdtempSync(join(tmpdir(), 'atlas-test-'))
     db = await openIndexDb(projectRoot)
+    // Phase 7: assembleContext()'s Codex-search step resolves a real
+    // embedding provider by default (getPreferredEmbeddingProvider() ??
+    // 'lm-studio', same as the retrieval:search IPC handler) — force the
+    // network-free hashing adapter so this test never depends on (or is
+    // slowed down by) a real local LM Studio instance that may actually be
+    // running on the machine running this suite.
+    setPreferredEmbeddingProvider('hashing')
   })
 
   afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
     rmSync(projectRoot, { recursive: true, force: true })
   })
 
