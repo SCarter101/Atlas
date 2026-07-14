@@ -3,6 +3,9 @@ import { NavLink, useLocation } from 'react-router-dom'
 import type { ManuscriptTree } from '@shared/schema/manuscript'
 import type { Theme } from '@shared/schema/project'
 import { CommandPalette } from './CommandPalette'
+import { ProductTour } from './ProductTour'
+import { ShortcutCheatSheet } from './ShortcutCheatSheet'
+import { hasSeenCheatSheet, hasSeenTour } from '../lib/onboardingStorage'
 import { useAtlasStore } from '../state/store'
 
 const THEME_OPTIONS: { value: Theme; label: string }[] = [
@@ -50,6 +53,18 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
 
   const [snapshotOpen, setSnapshotOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false)
+  const [tourOpen, setTourOpen] = useState(false)
+  const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
+  const [cheatSheetIsNew, setCheatSheetIsNew] = useState(() => !hasSeenCheatSheet())
+
+  // Onboarding: offer the product tour once, automatically, the first time
+  // this shell mounts for a writer who's never dismissed it — renderer-only
+  // localStorage flag (see lib/onboardingStorage.ts), so this never fires
+  // again after the tour is skipped or finished, including across restarts.
+  useEffect(() => {
+    if (!hasSeenTour()) setTourOpen(true)
+  }, [])
 
   useEffect(() => {
     // Custom properties cascade to descendants only, so setting data-theme
@@ -231,6 +246,98 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
                 ⌘K
               </span>
             </button>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                onClick={() => setHelpMenuOpen((v) => !v)}
+                title="Help"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '7px 10px',
+                  borderRadius: 7,
+                  border: '1px solid var(--c-border)',
+                  background: 'var(--c-bg)',
+                  color: 'var(--c-ink-soft)',
+                  fontSize: 12.5,
+                  cursor: 'pointer',
+                  position: 'relative'
+                }}
+              >
+                <span>Help</span>
+                {cheatSheetIsNew && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 3,
+                      right: 3,
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: 'var(--c-amber)'
+                    }}
+                  />
+                )}
+              </button>
+              {helpMenuOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 34,
+                    right: 0,
+                    width: 200,
+                    background: 'var(--c-surface-raised)',
+                    border: '1px solid var(--c-border)',
+                    borderRadius: 10,
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.16)',
+                    padding: 6,
+                    zIndex: 40
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      setHelpMenuOpen(false)
+                      setTourOpen(true)
+                    }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--c-ink)',
+                      fontSize: 12.5,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Replay product tour
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHelpMenuOpen(false)
+                      setCheatSheetOpen(true)
+                      setCheatSheetIsNew(false)
+                    }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--c-ink)',
+                      fontSize: 12.5,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Keyboard shortcuts
+                  </button>
+                </div>
+              )}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', borderRadius: 7, border: '1px solid var(--c-border)', overflow: 'hidden' }}>
               {THEME_OPTIONS.map((option) => (
                 <button
@@ -326,6 +433,15 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
       )}
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+
+      <ProductTour open={tourOpen} onClose={() => setTourOpen(false)} />
+      <ShortcutCheatSheet
+        open={cheatSheetOpen}
+        onClose={() => {
+          setCheatSheetOpen(false)
+          setCheatSheetIsNew(false)
+        }}
+      />
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
