@@ -44,6 +44,7 @@ const ROLE_NAME: Record<AgentRole, string> = {
 // writing the entry into the Codex is out of scope for this pass.
 export function CodexAdditionCard({ suggestion }: { suggestion: SuggestionRef }): JSX.Element {
   const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
+  const refineSuggestion = useAtlasStore((s) => s.refineSuggestion)
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
 
@@ -139,7 +140,7 @@ export function CodexAdditionCard({ suggestion }: { suggestion: SuggestionRef })
           />
           <button
             onClick={() => {
-              setSuggestionState(suggestion.id, 'refining')
+              void refineSuggestion(suggestion.id, refineText)
               setRefining(false)
             }}
             style={{

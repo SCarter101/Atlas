@@ -51,9 +51,9 @@ describe('promptStore', () => {
 
     const history = await listPromptHistory('Dialoguer')
     expect(history).toHaveLength(2)
-    expect(history[0].version).toBe('1.0') // original default
+    expect(history[0].version).toBe('1.1') // original default (Phase 8 bump)
     expect(history[0].text).toContain('You are Dialogue Editor')
-    expect(history[1].version).toBe('1.1')
+    expect(history[1].version).toBe('1.2')
     expect(history[1].text).toBe('First edit.')
   })
 
@@ -61,7 +61,7 @@ describe('promptStore', () => {
     await setPrompt('World-Builder', 'A custom world-builder prompt.')
     const resetResult = await resetPrompt('World-Builder')
 
-    expect(resetResult.version).toBe('1.1') // default World-Builder version
+    expect(resetResult.version).toBe('1.2') // default World-Builder version (Phase 8 bump)
     expect(resetResult.text).toContain('You are World Builder')
 
     const getResult = await getActivePrompt('World-Builder')
@@ -70,7 +70,7 @@ describe('promptStore', () => {
 
     const history = await listPromptHistory('World-Builder')
     expect(history).toHaveLength(2)
-    expect(history[1].version).toBe('1.2') // the custom edit's version, overwritten by reset
+    expect(history[1].version).toBe('1.3') // the custom edit's version, overwritten by reset
     expect(history[1].text).toBe('A custom world-builder prompt.')
   })
 
