@@ -56,7 +56,7 @@ export function Landing(): JSX.Element {
           Atlas
         </div>
         <div style={{ fontSize: 18, color: 'var(--c-ink-faint)', marginBottom: 36 }}>
-          A writing companion for the long haul of a novel
+          A writing companion for the long haul of a novel — draft, revise, and world-build alongside five specialized agents
         </div>
 
         <div

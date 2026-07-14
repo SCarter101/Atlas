@@ -84,7 +84,7 @@ export function Dashboard(): JSX.Element {
   if (nextSteps.length === 1 && !isNewProject) {
     nextSteps.unshift({
       title: 'Select text in the manuscript and send it to an agent',
-      sub: 'Line Editor is wired up in this build — try it on Chapter Three',
+      sub: 'All five roles — Generator, Story Editor, Line Editor, Dialogue Editor, World Builder — respond from the Agent Rail',
       action: 'Open manuscript',
       go: () => navigate('/manuscript'),
       dot: 'var(--c-amber)'
