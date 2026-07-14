@@ -705,23 +705,166 @@ this phase); full end-to-end verification with a real LM Studio server or OpenRo
 key running was not performed in this environment, same as every prior round's real-model-call
 caveat.
 
-## Current verified state (as of Round 8 / Phase 7 completion)
+**Round 9 — Phase 8 ("Agent Quality & Craft Depth")**
+
+Scoped from `Atlas Beta Roadmap - Gap Analysis.md`'s Phase 8 write-up, which the roadmap itself
+flagged as too large for one round. Confirmed scope decisions with the user up front via
+`AskUserQuestion` before any code: **"Every role goes real"** — wire Dev-Editor, Dialoguer, and
+World-Builder to real structured (JSON-mode) model output, matching Generator/Line-Editor's
+Round 7 real-branch pattern; add the spec's per-role control sets (Generator §7.1, Line-Editor
+§7.3); close the Refine loop end-to-end. Explicitly deferred to a later round: outline
+frameworks, continuity validators, capability-lifecycle completion, pause/resume, and — a second
+explicit scope call — **no real web research for World Builder** this round (real model calls,
+real reasoning, but no actual internet access; every proposal stays honestly labeled as model
+inference, never presented as researched fact).
+
+*Ground-truth audit before planning:* an Explore-agent pass plus direct reads of every
+load-bearing file confirmed the roadmap's own assessment was accurate: only Generator and
+Line-Editor had ever produced a suggestion from a real model's actual output (one `isReal`
+branch each, added Round 7); Dev-Editor/Dialoguer/World-Builder were 100% template-simulated
+with zero real-model branch anywhere. The Refine loop was a fully-rendered UI dead end — every
+one of the 7 suggestion-card components had an identical "Send refinement" button that captured
+the writer's typed follow-up instruction in local state and then discarded it, only ever
+flipping the card to a `'refining'` state with no re-run of anything.
+
+*Planning note:* a `Plan`-agent validation pass (same process as Rounds 7-8) pressure-tested the
+draft wave design and caught a real collision risk one level deeper than the obvious one: not
+just that all three planned Wave-1 agents would touch `simulator.ts`'s role-method bodies (an
+already-known, already-precedented "disjoint named functions in a shared file" pattern), but that
+`runModelCallStep()` — the single shared choke point all 5 roles call to make a model call — had
+no parameter through which a JSON-mode request could be threaded at all, meaning each Wave-1
+agent would have independently had to edit that same shared method's body to add one. Moved into
+Wave 0 instead: widening `runModelCallStep()`'s own signature (not just `ModelCallInput`'s shape)
+before any fork. The same pass also surfaced a 7th dead Refine button
+(`CapabilityRecommendationCard.tsx`, a Dev-Editor-authored suggestion kind the draft ownership
+list had missed) and flagged a real JSON-mode reliability risk worth designing around up front:
+OpenRouter is a router over many upstream providers with inconsistent `response_format` support,
+and LM Studio's fallback retrying the *same* JSON demand on a different local model after the
+primary already failed for JSON-related reasons is unlikely to help — so the LM Studio fallback
+path in `runModelCallStep()` deliberately drops `responseFormat` rather than retrying it.
+
+*Wave 0 (orchestrator, direct):* widened `ModelCallInput` with an optional
+`responseFormat?: {type: 'json'; instructions: string}`; both real adapters
+(`openRouterAdapter.ts`/`lmStudioAdapter.ts`) send `response_format: {type:'json_object'}` *and*
+append `instructions` to the user message when set (belt-and-suspenders — some OpenRouter-routed
+models only honor one mechanism, not both); new `main/agent/structuredOutput.ts`'s
+`tryParseJson<T>()` strips a fenced ` ```json ` block if present and never throws, matching this
+file's established "augment, never break the fallback path" style. New additive schema fields:
+`AgentGoal.generatorControls`/`lineEditorControls` (typed control-set objects, spec §7.1/§7.3),
+`AgentGoal.refinesSuggestionId` (lets a refine re-run's goal carry which suggestion it's
+refining, so the resulting `SuggestionRef.provenance.refinesSuggestionId` can trace lineage back
+to it), and `EditorialFindingPayload.issueCategory`/`revisionPlan` — all mirrored into
+`shared/validation.ts` in the same pass per the Phase-4 zod-silently-strips-unmirrored-fields
+gotcha. Lifted `AgentRail.tsx`'s local `authorizeRun` (privacy/cloud-consent gating) into a store
+action `authorizeAgentRun(goal)` returning `{ok, message}` instead of writing to a
+component-local banner state, so a new `refineSuggestion(id, instruction)` store action could
+reuse the identical gating instead of duplicating it — `refineSuggestion` extracts the original
+suggestion's own prior output text (per suggestion kind — `payload.after`/`.text`/`.body`/etc.
+via a new `extractSuggestionText()` switch), builds a scoped `AgentGoal`, authorizes, and
+dispatches through the same `agentRuns.start`/`onStep` plumbing `AgentRail` already used for a
+fresh invocation. Bumped `AgentRail.tsx`'s hardcoded default `maxTokens` 4000 → 6000 (structured
+JSON output runs more output-token-hungry than equivalent free-form prose for the same content).
+
+*Wave 1 — 3 agents fully parallel* (forked only after Wave 0 merged and was independently
+verified — `tsc` both configs clean, `vitest run` unaffected):
+- **Agent A — Story Editor (Dev-Editor) real depth:** a real JSON-mode branch in `runDevEditor()`
+  requesting 1-4 structured findings, each `{issueCategory, title, body, severity, revisionPlan,
+  craftConceptIds?}` — covering spec §7.2's detection categories (continuity, pacing, POV,
+  stakes, hooks, setup/payoff) via real model reasoning guided by the prompt, not new regex
+  checks. Falls back to the existing `simulateStructuralFindings()` template on any parse
+  failure. `EditorialFindingCard.tsx` now displays the revision plan and issue-category badge
+  when present; wired its own and `MetadataProposalCard.tsx`/`CapabilityRecommendationCard.tsx`'s
+  dead refine buttons to `refineSuggestion`.
+- **Agent B — Dialogue Editor + World Builder real depth:** Dialoguer's real branch requests
+  exactly 3 tension-tier alternatives (`{alternatives: [{tier, text}]}`) reasoned over the
+  actual resolved character's Codex voice profile rather than the string-template heuristic
+  (`checkSimilarVoices()`'s real cross-character comparison is untouched — it was already
+  genuine data, not simulated). World-Builder's real branch requests 1-4 structured Codex-addition
+  proposals (`{proposals: [{entryType, name, summary}]}`) covering both the interview and
+  single-selection entry paths with one shared call — citations stay exactly as honestly labeled
+  as before (`'low'`/`'author-stated'`, never implying research), since real model reasoning
+  without real web access is still not research. Wired `DialogueAlternativeCard.tsx`/
+  `CodexAdditionCard.tsx`'s refine buttons.
+- **Agent C — Generator + Line Editor control sets & Refine UI:** Generator now folds
+  `generatorControls` (tone/pacing/POV-depth/dialogue-density/exposition/heat-level/
+  literary-style/style-sample) into its real model call's prompt, and asks a clarifying-question
+  suggestion instead of drafting blind when the selection is empty/tiny *and* the scene has no
+  outline to anchor on. Line-Editor's real branch upgraded from one whole-selection
+  tracked-change (Round 7's "deliberate simplification") to real structured multi-finding output
+  (`{findings: [{category, before, after, isAiSoundingFlag?}]}`) respecting `lineEditorControls`
+  (editing intensity light/standard/heavy/custom, house-style rules, AI-sounding-prose flagging).
+  New Advanced-Mode-gated control-set UI added to `AgentRail.tsx` (only included in the
+  dispatched goal when at least one control differs from default, same convention the existing
+  "Generate alternatives" checkbox already used). Wired `SuggestionCard.tsx`/
+  `GeneratorSuggestionCard.tsx`'s refine buttons; confirmed (didn't need to fix) that suggestion
+  dispatch in `ManuscriptWorkspace.tsx` is keyed by `suggestion.kind`, not `agentRole`, so a
+  Generator-authored `editorial-finding` (the clarifying-question path) already renders correctly
+  through the existing `EditorialFindingCard`.
+
+Merging Agent C's branch hit the round's only real conflict: a hand-resolved `promptStore.ts`
+`DEFAULT_VERSIONS` conflict, since Agent C's worktree forked before Agents A/B's version bumps
+landed — every other file across all three branches merged (2 clean, 1 auto-merged by git)
+exactly as the disjoint-ownership design predicted.
+
+*Codex adversarial-review (closing step, retained):* the full `ae30229..HEAD` diff surfaced 2
+findings, both HIGH, both confirmed against the code and fixed:
+- **HIGH — a JSON-parse failure in the new Line-Editor real branch could offer the model's raw
+  text as a whole-selection replacement.** The pre-existing Round 7 fallback (real adapter, no
+  parseable structure → use `outputText` verbatim as the "after" of a whole-selection
+  tracked-change) was safe when the model was asked for free-form prose directly. Once Line-Editor
+  started requesting JSON-mode output, that same fallback became dangerous: a parse failure
+  commonly *means* explanatory prose, a partial JSON fragment, or a refusal — none of which is
+  safe to present as literal replacement text, and accepting it would silently corrupt the
+  writer's selected prose. Now falls all the way through to the pre-existing simulated findings
+  instead. Parsed findings are also now dropped unless their `before` span is a verbatim
+  substring of the actual selection, guarding against a hallucinated span from ever being offered
+  at all.
+- **HIGH — accepting a tracked-change could silently edit the wrong occurrence of a repeated
+  phrase.** `setSuggestionState`'s accept path used `prose.replace(before, after)`, which only
+  ever rewrites the *first* match in the whole scene — harmless when `before` was almost always
+  an entire, effectively-unique paragraph (Round 7's one-whole-selection behavior), but Phase 8's
+  new real Line-Editor path routinely proposes short, specific spans (a few words), making a
+  repeated phrase a common case rather than a rare one. Now counts occurrences in the scene and
+  bails with a toast — same treatment the existing zero-match ("stale suggestion") case already
+  got — whenever the span isn't unique, rather than guessing which occurrence the writer meant.
+
+4 test updates/additions for the 2 fixed findings, including one exposing a test-fixture gap the
+fix itself caught: an existing multi-finding test's `before` spans didn't actually appear in its
+own selection-text fixture, which had been silently tolerated pre-fix and became a real failure
+once the new verbatim-substring guard was in place — exactly the kind of bug the fix exists to
+catch.
+
+**Explicitly deferred from Phase 8** (confirmed scope, not oversight): outline frameworks (§11:
+three-act, Save the Cat, Hero's Journey, mystery clue grid, thriller escalation map, custom);
+automated continuity validators (age/travel/date/injury/season checks on the Timeline);
+capability-lifecycle completion (compare/rollback/promote/fork/test-before-install, usage
+metrics); pause/resume with structured checkpoints (the `'paused'` `AgentRunStatus` still has no
+resume path); real web research/citations for World Builder (still zero internet access); a
+Codex-view-style structured-output quality bar beyond "valid JSON matching the requested shape,
+verified with a real HTTP-shape mock" — a genuine blind-comparison-against-the-simulator quality
+bar (this phase's originally-stated exit criterion) needs a human reader and wasn't attempted.
+Carried-over Phase 3-7 deferrals still stand.
+
+## Current verified state (as of Round 9 / Phase 8 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 345/345 tests passing across 53 files (was 267/45 at Round 7), stable
-  across multiple consecutive full-suite runs performed at each wave merge and after the
-  Codex-review fixes.
-- App launches cleanly via `npm run dev` after every wave and after the Codex-review fixes,
-  with only the expected dev-mode warnings (React DevTools suggestion, React Router v7 future
-  flags, Electron CSP insecure-policy) — no regressions, no circular-import/TDZ crash.
-- No real LM Studio server or OpenRouter embeddings/chat key was available in this environment
-  to exercise the real embedding/summarization call paths end-to-end (confirming real vectors
-  come back from LM Studio, real cost appears for summary-generation calls in Settings' usage
-  view). That remains a manual verification step for the user with their own local server/key.
-  Full interactive click-through of the new Phase 7 UI (the Embeddings-provider Settings
-  section, the Codex "view as of scene X" toggle, the upgraded Context Inspection panel) was
-  **not** performed for the same no-headless-Electron-driver reason noted in every prior round.
-  Verification relied on the automated suite (incl. mocked-`fetch` adapter tests exercising the
-  real HTTP request/response shapes, and integration-style tests against real temp `AtlasDb`
-  instances for retrieval/context-assembly), a real `npm run dev` boot check after every wave,
-  and an independent Codex adversarial-review of the whole diff.
+- `npx vitest run` — 380/380 tests passing across 54 files (was 345/53 at Round 8), stable
+  across multiple consecutive full-suite runs performed after Wave 0, after each of the 3
+  Wave-1 branch merges, and after the Codex-review fixes. One transient Windows-temp-dir-race
+  test failure was observed mid-round (reproduced in isolation and confirmed to pass cleanly,
+  not a real regression) — the same category of flake every round's test suite has occasionally
+  hit on this platform.
+- App boots cleanly via `npm run dev` after the full merge and after the Codex-review fixes —
+  main process, preload, and renderer all build and connect, with only the expected dev-mode
+  warnings (React DevTools suggestion, React Router v7 future flags, Electron CSP
+  insecure-policy) — no regressions, no circular-import/TDZ crash.
+- No real OpenRouter/LM Studio credentials were available in this environment, same caveat as
+  every prior round — real-call correctness (JSON-mode `response_format` actually being sent,
+  parse-failure fallback, control-set text reaching the model call) was verified via
+  mocked-`fetch`/mocked-adapter tests exercising the real request/response shapes, not a live
+  model. Full interactive click-through (invoking each of the 5 roles from the real UI, a
+  Refine-loop round-trip, the new Advanced-Mode control-set UI) was **not** performed for the
+  same no-headless-Electron-driver reason noted in every prior round — verification relied on
+  the automated suite, a real `npm run dev` boot check, and an independent Codex
+  adversarial-review of the whole diff (`ae30229..HEAD`), which surfaced and got 2 real HIGH
+  findings fixed this round.
