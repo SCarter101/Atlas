@@ -91,6 +91,7 @@ function diffRows(
 // conventions established by EditorialFindingCard.tsx and CodexAdditionCard.tsx.
 export function MetadataProposalCard({ suggestion }: { suggestion: SuggestionRef }): JSX.Element {
   const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
+  const refineSuggestion = useAtlasStore((s) => s.refineSuggestion)
   const manuscriptTree = useAtlasStore((s) => s.manuscriptTree)
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
@@ -194,8 +195,9 @@ export function MetadataProposalCard({ suggestion }: { suggestion: SuggestionRef
           />
           <button
             onClick={() => {
-              setSuggestionState(suggestion.id, 'refining')
+              void refineSuggestion(suggestion.id, refineText)
               setRefining(false)
+              setRefineText('')
             }}
             style={{
               width: '100%',

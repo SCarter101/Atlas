@@ -42,6 +42,7 @@ import { OpenRouterAdapter } from './providers/openRouterAdapter'
 import { SimulatorAdapter } from './providers/simulatorAdapter'
 import type { ModelCallInput, ProviderAdapter } from './providers/types'
 import { assembleContext, type AssembledContext } from './context/assemble'
+import { tryParseJson } from './structuredOutput'
 
 // Phase 2 scope (data-contracts §6): the AgentGoal -> AgentStep[] ->
 // AgentRunRecord pipeline, and the permission/session-approval flow, are
@@ -847,7 +848,10 @@ export class AgentRunManager {
     state.budget.toolCallsUsed += 1
 
     const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
-    const modelCall = await this.runModelCallStep(goal, assembledContext)
+    const modelCall = await this.runModelCallStep(goal, assembledContext, {
+      type: 'json',
+      instructions: DEV_EDITOR_JSON_INSTRUCTIONS
+    })
     if (await this.guardModelCall(goal, 'Story Editor', modelCall)) return
     this.emit(goal.runId, {
       stepIndex: state.record.steps.length,
@@ -856,6 +860,36 @@ export class AgentRunManager {
       detail: modelCall
     })
     this.recordModelCall(goal, modelCall)
+
+    // Phase 8 §7.2: when a real adapter actually produced text, try to parse
+    // it as the structured multi-finding JSON report requested via the
+    // responseFormat above (see parseRealStructuralFindings) — this is what
+    // covers the spec's developmental-editing detection categories
+    // (continuity, pacing, POV, stakes, hooks, setup/payoff) through real
+    // model reasoning instead of the single-check template. Falls back to
+    // the existing simulateStructuralFindings() output — same "augment,
+    // never break the fallback" pattern Generator/Line-Editor's real
+    // branches already use — whenever there's no real output at all, or a
+    // real adapter returned something that didn't parse into at least one
+    // well-formed finding.
+    const isReal = selectAdapter(goal.modelRef).id !== 'simulator' && !!modelCall.outputText
+    const parsedFindings = isReal ? parseRealStructuralFindings(modelCall.outputText as string) : undefined
+    const structuralFindings: SuggestionRef[] = parsedFindings
+      ? parsedFindings.map((finding) => ({
+          id: randomUUID(),
+          agentRole: 'Dev-Editor',
+          kind: 'editorial-finding',
+          targetSceneId: goal.scope.sceneIds?.[0],
+          payload: finding,
+          provenance: {
+            capabilityId: 'global.tools.structural-analysis',
+            capabilityVersion: '1.0.0',
+            runId: goal.runId,
+            refinesSuggestionId: goal.refinesSuggestionId
+          },
+          state: 'pending'
+        }))
+      : suggestions
 
     // Spec Phase 4 ("Capability recommendations based on repeated real
     // writing workflows"): checked once per Dev-Editor run, at the end,
@@ -866,13 +900,13 @@ export class AgentRunManager {
     const recommendation = await this.maybeRecommendCapability(goal)
 
     const allSuggestions = [
-      ...suggestions,
+      ...structuralFindings,
       ...(metadataSuggestion ? [metadataSuggestion] : []),
       ...(recommendation ? [recommendation] : [])
     ]
 
     const result: AgentResult = {
-      summary: `Story Editor found ${suggestions.length} structural note${suggestions.length === 1 ? '' : 's'}.${
+      summary: `Story Editor found ${structuralFindings.length} structural note${structuralFindings.length === 1 ? '' : 's'}.${
         contradictionNote ? ` ${contradictionNote.summary}` : ''
       }${metadataSuggestion ? ' Also proposed a scene metadata update for the writer to review.' : ''}${
         recommendation ? ' Also recommended a new capability based on a repeated tool-call pattern.' : ''
@@ -1638,6 +1672,75 @@ function simulateStructuralFindings(selection: string, sceneId?: string): Sugges
       state: 'pending'
     }
   ]
+}
+
+// Phase 8 §7.2: the JSON-mode prompt instructions handed to
+// runModelCallStep()'s responseFormat for a real Dev-Editor call — see
+// runDevEditor and parseRealStructuralFindings below. Kept as one literal
+// string (not templated per-run) since nothing in it varies by goal; the
+// contextText/userIntent already carry the run-specific material.
+const DEV_EDITOR_JSON_INSTRUCTIONS =
+  'Return ONLY a JSON object of the exact shape {"findings": [{"issueCategory": "continuity"|"pacing"|"pov"|"stakes"|"hooks"|"setup-payoff"|"other", "title": string, "body": string, "severity": "low"|"medium"|"high", "revisionPlan": string, "craftConceptIds": string[]}]} — no prose before or after the JSON. Include 1 to 4 findings, only for developmental-editing issues you actually find in the passage: broken continuity, pacing problems, point-of-view drift, weak or unclear stakes, a missing or weak hook, or a setup that never pays off (or a payoff with no setup). Each finding\'s revisionPlan must be a concrete, actionable next step for the writer — not a restatement of body. Only include craftConceptIds entries from this fixed list, and only when a finding clearly matches: hooks, scene-turns, causality, stakes, setup-and-payoff, point-of-view, pacing. Never rewrite the passage yourself — describe the issue and the fix.'
+
+// Phase 8 §7.2: category -> renderer/src/lib/craftReference.ts CRAFT_CONCEPTS
+// id, used only as a fallback when a real finding didn't supply its own
+// craftConceptIds — a deterministic safety net, not a substitute for the
+// model's own tagging. 'other' has no obvious single-concept match, so it's
+// intentionally absent here.
+const ISSUE_CATEGORY_CRAFT_CONCEPT: Record<string, string> = {
+  continuity: 'causality',
+  pacing: 'pacing',
+  pov: 'point-of-view',
+  stakes: 'stakes',
+  hooks: 'hooks',
+  'setup-payoff': 'setup-and-payoff'
+}
+
+const VALID_ISSUE_CATEGORIES = new Set(['continuity', 'pacing', 'pov', 'stakes', 'hooks', 'setup-payoff', 'other'])
+
+// Phase 8 §7.2: parses a real Dev-Editor model call's JSON-mode output (see
+// runDevEditor's isReal branch) into 1-4 EditorialFindingPayloads. Accepts
+// either `{"findings": [...]}` or a bare top-level array, in case a model
+// ignores the wrapper object despite the instructions. Minimal validation
+// only, matching this file's established "augment, never break the
+// fallback" style: any finding missing a non-empty title/body/severity is
+// dropped, and returns undefined (never throws, never partially-applies)
+// when nothing usable survives — the caller falls back to
+// simulateStructuralFindings() unchanged in that case. issueCategory
+// defaults to 'other' when missing/unrecognized; craftConceptIds falls back
+// to ISSUE_CATEGORY_CRAFT_CONCEPT when the model didn't supply its own.
+function parseRealStructuralFindings(outputText: string): EditorialFindingPayload[] | undefined {
+  const parsed = tryParseJson<{ findings?: unknown } | unknown[]>(outputText)
+  const rawFindings = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { findings?: unknown }).findings)
+      ? (parsed as { findings: unknown[] }).findings
+      : undefined
+  if (!rawFindings || rawFindings.length === 0) return undefined
+
+  const findings: EditorialFindingPayload[] = []
+  for (const raw of rawFindings) {
+    if (!raw || typeof raw !== 'object') continue
+    const candidate = raw as Record<string, unknown>
+    const title = typeof candidate.title === 'string' ? candidate.title.trim() : ''
+    const body = typeof candidate.body === 'string' ? candidate.body.trim() : ''
+    const severity = typeof candidate.severity === 'string' ? candidate.severity.trim() : ''
+    if (!title || !body || !severity) continue
+
+    const rawCategory = typeof candidate.issueCategory === 'string' ? candidate.issueCategory : undefined
+    const issueCategory = rawCategory && VALID_ISSUE_CATEGORIES.has(rawCategory) ? rawCategory : 'other'
+    const revisionPlan =
+      typeof candidate.revisionPlan === 'string' && candidate.revisionPlan.trim() ? candidate.revisionPlan.trim() : undefined
+    const craftConceptIds = Array.isArray(candidate.craftConceptIds)
+      ? candidate.craftConceptIds.filter((id): id is string => typeof id === 'string')
+      : ISSUE_CATEGORY_CRAFT_CONCEPT[issueCategory]
+        ? [ISSUE_CATEGORY_CRAFT_CONCEPT[issueCategory]]
+        : undefined
+
+    findings.push({ title, body, severity, issueCategory, revisionPlan, craftConceptIds })
+  }
+
+  return findings.length > 0 ? findings.slice(0, 4) : undefined
 }
 
 // Deterministic, testable heuristic behind the Dev-Editor role's

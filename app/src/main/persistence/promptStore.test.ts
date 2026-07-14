@@ -78,6 +78,6 @@ describe('promptStore', () => {
     await setPrompt('Generator', 'Generator override.')
     const devEditorResult = await getActivePrompt('Dev-Editor')
     expect(devEditorResult.text).toContain('You are Story Editor')
-    expect(devEditorResult.version).toBe('1.0')
+    expect(devEditorResult.version).toBe('1.1') // Phase 8: bumped when the Dev-Editor default prompt gained real-JSON-branch guidance
   })
 })
