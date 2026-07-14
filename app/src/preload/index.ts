@@ -107,6 +107,11 @@ const atlasBridge: AtlasBridge = {
   consent: {
     grant: (decision, runId) => ipcRenderer.invoke(IpcChannel.ConsentGrant, decision, runId),
     setRequireAuth: (value) => ipcRenderer.invoke(IpcChannel.ConsentSetRequireAuth, value)
+  },
+  telemetry: {
+    getEnabled: () => ipcRenderer.invoke(IpcChannel.TelemetryGetEnabled),
+    setEnabled: (enabled) => ipcRenderer.invoke(IpcChannel.TelemetrySetEnabled, enabled),
+    exportFeedback: () => ipcRenderer.invoke(IpcChannel.TelemetryExportFeedback)
   }
 }
 

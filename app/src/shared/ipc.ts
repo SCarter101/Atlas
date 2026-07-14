@@ -73,7 +73,14 @@ export const IpcChannel = {
   UsageSummary: 'usage:summary',
   ModelsCatalog: 'models:catalog',
   ConsentGrant: 'consent:grant',
-  ConsentSetRequireAuth: 'consent:set-require-auth'
+  ConsentSetRequireAuth: 'consent:set-require-auth',
+  // Phase 9 Track E: local-only crash reporting / opt-in local telemetry /
+  // in-app feedback channel — see main/telemetry/telemetryStore.ts. No
+  // external service exists to send any of this to; TelemetryExportFeedback
+  // composes everything into a zip the writer saves and shares manually.
+  TelemetryGetEnabled: 'telemetry:get-enabled',
+  TelemetrySetEnabled: 'telemetry:set-enabled',
+  TelemetryExportFeedback: 'telemetry:export-feedback'
 } as const
 
 export interface SceneReadResult {
@@ -247,5 +254,16 @@ export interface AtlasBridge {
   consent: {
     grant(decision: 'authorized-once' | 'authorized-session', runId: string): Promise<void>
     setRequireAuth(value: boolean): Promise<void>
+  }
+  // Phase 9 Track E: see main/telemetry/telemetryStore.ts. `getEnabled`/
+  // `setEnabled` control the opt-in local event log only (never anything
+  // transmitted); `exportFeedback` takes no renderer-supplied payload since
+  // it composes everything (crash log, opt-in event log, sanitized recent
+  // agent-run traces, app/OS version info) main-side and writes it via
+  // dialog.showSaveDialog, reusing the existing ExportResult shape.
+  telemetry: {
+    getEnabled(): Promise<boolean>
+    setEnabled(enabled: boolean): Promise<void>
+    exportFeedback(): Promise<ExportResult>
   }
 }

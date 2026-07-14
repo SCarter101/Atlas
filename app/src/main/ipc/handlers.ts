@@ -1,11 +1,12 @@
 import { app, dialog, ipcMain, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
+import { release } from 'node:os'
 import { join } from 'node:path'
 import { IpcChannel, type CodexExportFormat, type FoundationsCodexDraft, type ManuscriptExportFormat } from '@shared/ipc'
 import { AtlasError } from '@shared/errors'
 import { isCloudModel } from '@shared/privacy'
-import type { AgentGoal, AgentRole, PermissionDecision } from '@shared/schema/agent'
+import type { AgentGoal, AgentRole, AgentRunRecord, PermissionDecision } from '@shared/schema/agent'
 import type { CapabilityManifest, LifecycleState } from '@shared/schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
@@ -51,6 +52,15 @@ import { clearSecret, hasSecret, setSecret } from '../security/keyVault'
 import { getActivePrompt, resetPrompt, setPrompt } from '../persistence/promptStore'
 import { getUsageSummary } from '../persistence/usageStore'
 import { fetchOpenRouterCatalog } from '../agent/providers/openRouterCatalog'
+import {
+  buildFeedbackBundle,
+  defaultFeedbackFileName,
+  getTelemetryEnabled,
+  recordEvent,
+  sanitizeRunTrace,
+  setTelemetryEnabled,
+  type SanitizedRunTrace
+} from '../telemetry/telemetryStore'
 
 const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ['md', 'txt', 'pdf', 'docx', 'epub']
 const CODEX_EXPORT_FORMATS: CodexExportFormat[] = ['json', 'codex-md', 'series-bible', 'series-bible-pdf', 'series-bible-epub']
@@ -512,6 +522,57 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.ConsentSetRequireAuth, async (_evt, value: boolean) => {
     const session = getCurrentProjectSession()
     session.cloudConsent.setRequireCloudAuth(value)
+  })
+
+  // Phase 9 Track E: local-only telemetry/feedback — see
+  // main/telemetry/telemetryStore.ts's module comment for why there's no
+  // network call anywhere in this feature. Global (not project-scoped),
+  // same simplicity as prompts.*/secrets.* above.
+  ipcMain.handle(IpcChannel.TelemetryGetEnabled, async () => getTelemetryEnabled())
+
+  ipcMain.handle(IpcChannel.TelemetrySetEnabled, async (_evt, enabled: boolean) => {
+    await setTelemetryEnabled(enabled)
+    // Only ever logs the moment telemetry was turned ON — recordEvent()
+    // itself checks the opt-in flag, so turning it off never logs anything.
+    if (enabled) await recordEvent('telemetry_enabled')
+  })
+
+  ipcMain.handle(IpcChannel.TelemetryExportFeedback, async () => {
+    try {
+      let runTraces: SanitizedRunTrace[] = []
+      try {
+        const session = getCurrentProjectSession()
+        const summaries = listAgentRuns(session.projectRoot, session.db)
+        const records = await Promise.all(
+          summaries.slice(0, 20).map((s) => loadAgentRun(session.projectRoot, s.runId).catch(() => null))
+        )
+        runTraces = records.filter((r): r is AgentRunRecord => r !== null).map(sanitizeRunTrace)
+      } catch {
+        // No project open (or this run's steps failed to load) — the
+        // feedback bundle still works, just without run traces.
+      }
+
+      const bundle = await buildFeedbackBundle({
+        appVersion: app.getVersion(),
+        electronVersion: process.versions.electron ?? 'unknown',
+        platform: process.platform,
+        osRelease: release(),
+        telemetryEnabled: await getTelemetryEnabled(),
+        runTraces
+      })
+
+      const result = await dialog.showSaveDialog({
+        defaultPath: join(app.getPath('documents'), defaultFeedbackFileName()),
+        filters: [{ name: 'Zip Archive', extensions: ['zip'] }]
+      })
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+
+      await writeFile(result.filePath, bundle)
+      await recordEvent('feedback_bundle_exported')
+      return { ok: true, filePath: result.filePath }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
   })
 }
 
