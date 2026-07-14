@@ -69,6 +69,17 @@ a message that names exactly what's already done and what to finish, rather than
 from scratch. Verify the resumed agent's own report against the worktree's actual diff before
 committing, same as any other agent.
 
+**Gotcha found in Phase 7:** if an agent stalls *before making any file changes*, its worktree
+gets auto-cleaned (isolation:"worktree" removes a worktree with no diff). A resumed agent that
+naively looks for "the" worktree instead of confirming it owns one can land in a still-live
+sibling's worktree instead of getting a fresh one — this happened to two of three Phase 7 Wave
+1 agents, and both silently committed their (correctly-scoped, disjoint-file) work into the
+third sibling's directory. It caused no content collision here only because the original
+file-ownership split held, but don't rely on that: after resuming a stalled agent, always check
+`git worktree list` and confirm which worktree it actually used before trusting its own
+"here's what I built" report, and cross-check the combined `git diff --stat` against every
+agent's assigned file scope before merging.
+
 **Wave variant (used for Phase 3, a much larger build):** when the work is too big for
 one round of fully-independent agents, split into sequential *waves*. Wave 1 = several
 agents in parallel on genuinely independent file surfaces (still expect append-only
@@ -576,24 +587,141 @@ the default local port); direct Anthropic/OpenAI/Google provider keys (spec rout
 calls through one OpenRouter key by design). These are the natural scope of a later
 quality-focused phase.
 
-## Current verified state (as of Round 7 / Phase 6 completion)
+**Round 8 — Phase 7 ("Real Retrieval & Memory")**
+
+Scoped from `Atlas Beta Roadmap - Gap Analysis.md`'s Phase 7 write-up. An Explore-agent
+ground-truth audit before any code found the gap was deeper than the roadmap implied:
+`ModelCallInput.contextText` was **always** just `goal.scope.selectionText` at all 5 places
+`simulator.ts` calls a model — none of the real retrieval (`main/retrieval/search.ts`),
+summaries (`main/persistence/summaryStore.ts`), or spoiler-filtering
+(`filterBySpoilerReveal`/`getManuscriptReadingOrder`, fully implemented and tested since Phase
+3/4 with zero callers) ever fed an actual model call. Confirmed scope decisions up front via
+`AskUserQuestion`: embeddings = LM Studio local default + OpenRouter opt-in + the existing
+hashing-trick kept as fully-offline fallback; summaries = model-generated via a fallback chain
+(local LM Studio → OpenRouter → the existing extractive heuristic), reusing the **existing
+Phase 6 chat `ProviderAdapter`s** rather than a new adapter type; full 7-type spec §9 summary
+list this phase (chapter, scene, character-arc, timeline, world-state, open-promises,
+payoff-status).
+
+*Planning note:* a `Plan`-agent validation pass (mirroring Round 7's step) corrected the draft
+wave design: renderer-surfacing work (Context Inspection + the Codex spoiler toggle) had no
+real dependency on the embeddings/summaries waves — only on a Wave-0-staged type contract — so
+it was promoted to run fully parallel with them instead of waiting; the vectors-table schema
+change was corrected from a planned drop-and-recreate to a non-destructive `ALTER TABLE ADD
+COLUMN` (the table is a documented rebuildable cache, but there was no reason to force a full
+re-embed when a column add works); and the usage-schema widening needed one more fix inside
+`usageStore.ts`'s own aggregation logic (`byAgentRole` bucketing) beyond just its two call
+sites, to avoid a `strict: true` compile error indexing a `Record<AgentRole, X>` with a now-
+optional key.
+
+*Wave 0 (orchestrator, direct):* widened `UsageEntry`/`UsageSummary` (optional `callKind`/
+`runId`/`agentRole`, new `label`) for standalone embedding/summary calls that have neither a
+`runId` nor an `AgentRole`; added a nullable `model` column to `db.ts`'s `vectors` table
+(`PRAGMA table_info` check → `ALTER TABLE ADD COLUMN`, non-destructive) so vectors from
+different embedding spaces never get cosine-compared against each other; added `ContextSection`
++ `ModelCallSummary.assembledContext` to `shared/schema/agent.ts` (populated by Wave 2, read by
+Wave 1C — no new IPC channel needed since `ContextInspectionPanel` already receives `steps`);
+added additive `DerivedSummaryKind`/`DerivedSummary` to `shared/schema/retrieval.ts`; staged 2
+new IPC channels end-to-end (`EmbeddingsStatus`, `SummariesGetDerived`).
+
+*Wave 1 — 3 agents fully parallel* (two hit a transient stream-stall mid-task; both resumed via
+`SendMessage`, and — an operational surprise this round — the resumed agents' worktrees had
+already been auto-cleaned since they'd made no changes yet, so both ended up committing their
+work into the third (still-live) sibling's worktree instead of fresh ones of their own. Files
+stayed genuinely disjoint per the original file-ownership split, so this caused no content
+collision, just an unplanned single combined branch instead of three — verified via `git diff
+--stat` and a full green suite before merging):
+- **1A — Embeddings + incremental indexing:** new `EmbeddingAdapter` interface
+  (`main/retrieval/embeddings/`) with real `LmStudioEmbeddingAdapter`/`OpenRouterEmbeddingAdapter`
+  HTTP implementations and a `HashingEmbeddingAdapter` wrapping the existing `vectorize()` as
+  the always-available final fallback; confirmed via live docs that OpenRouter does have a
+  generally-available embeddings endpoint. `search.ts`'s `indexText`/`search` gained an
+  overloaded (not just optional) `model` param so every pre-Phase-7 synchronous call site keeps
+  working unmodified. Incremental reindexing wired into the `SceneWrite` handler. New
+  `EmbeddingsStatus`/`EmbeddingsSetProvider` IPC (the latter not originally planned — added so
+  the main process, which does reindexing outside any per-call renderer trigger, can learn the
+  writer's Settings choice, mirroring `consent.setRequireAuth`'s pattern) + Settings UI section.
+- **1B — Model-generated summaries:** `summaryStore.ts`'s scene/chapter generation now tries a
+  real model call (`main/persistence/modelSummaryFallback.ts`'s shared LM-Studio-then-
+  OpenRouter-then-heuristic chain) before falling back; new `derivedSummaryStore.ts` for the 5
+  additional spec-§9 kinds; new `shared/summaryPrompts.ts` (7 pure prompt builders). Found and
+  fixed a real pre-existing bug while wiring this: `CODEX_TYPE_DIRS` was missing a `'plot-thread'`
+  entry, meaning `listCodexEntries({type: 'plot-thread'})` — used by the new open-promises/
+  payoff-status gathering — would throw; plot-thread Codex entries had been unreadable/
+  unwritable end-to-end since Round 5/Phase 4 Wave 1F without ever surfacing as a bug report.
+- **1C — Renderer surfacing:** `ContextInspectionPanel.tsx` renders the new `assembledContext`
+  field (included/excluded-with-reason sections, token budget) when present, degrading
+  gracefully when absent; `CodexView.tsx` gained the long-deferred "view Codex as of scene X"
+  toggle, the first real caller of `filterBySpoilerReveal`/`getManuscriptReadingOrder` anywhere
+  in the app.
+
+*Wave 2 — Context assembly (solo, forked after Wave 1 merged):* new `main/agent/context/
+assemble.ts` implements spec §9's exact priority order (previous chapter summary → current
+scene outline → relevant Codex entries via real `search()` + spoiler-gating → character voice
+profiles → locked world rules → the writer's selection → full scene text as a last resort),
+greedily packed under `goal.constraints.maxTokens`, with excluded candidates recorded (budget
+or spoiler reason) instead of silently dropped. Wired into all 5 `runModelCallStep` call sites
+in `simulator.ts` — this is the first round any of Phases 3-7's retrieval/summary/Codex
+machinery actually reached a real model call; before this, `contextText` was unconditionally
+the bare selection. Verified both exit criteria with a concrete fixture: a later chapter's real
+summary and a relevant Codex entry both appear in an assembled context, and a spoiler-flagged
+entry is excluded (with reason) when the run is scoped to an earlier scene.
+
+*Codex adversarial-review (closing step, retained):* the full `b003d88..HEAD` diff surfaced 4
+findings, all confirmed against the code and fixed:
+- **HIGH — a `localModelOnly` Codex entry could still reach a cloud model.** The existing
+  `AgentRunStart` privacy gate only ever checked `SceneMeta.localModelOnly`; it never covered
+  individual Codex entries `assembleContext()` now pulls in via voice profiles, locked world
+  rules, or a retrieval match. Now excluded per-entry (reason `'entry is local-model-only'`)
+  whenever the run targets a cloud model, via the same `isCloudModel` classifier the existing
+  gate already uses.
+- **HIGH — `assembleContext()` packed all the way to `maxTokens`, leaving no headroom** for the
+  system prompt/userIntent/output `runModelCallStep()` adds on top — every real call
+  systematically overshot the writer's configured budget before `guardModelCall`'s post-call
+  check could do anything, by which point the (possibly billed) call had already happened.
+  Packing now targets 70% of `maxTokens`; the reported `tokenBudget` is unchanged.
+- **MED — a provider becoming available mid-session couldn't be found by search.** `search.ts`'s
+  `indexedKeysByDb` tracked only `kind:id`, not which embedding space a vector was actually
+  written in, so LM Studio becoming reachable after an earlier hashing-fallback index pass would
+  be silently skipped as "already indexed" — a search scoped to the new provider found nothing
+  for anything indexed earlier that session. `indexText()` now returns the resolved adapter id;
+  tracking keys (new `indexedKey()` helper) include it, so a provider change forces a re-embed.
+- **LOW — chapter summaries could be generated in the wrong scene order.** Wave 1B's refactor
+  accidentally fed the sceneId-sorted (not manuscript-order) list to the summarizer itself, not
+  just to the determinism fingerprint — scene ids don't reliably sort into story order. The
+  fingerprint keeps its sort; the actual summarized text now uses the caller's original order.
+
+4 new regression tests added for all 4 fixed findings (local-model-only exclusion, budget-
+headroom reservation, provider-switch re-embed — the LOW fix needed no new test, existing
+scene-order-insensitive fixtures already covered it).
+
+**Explicitly deferred from Phase 7** (confirmed scope, not oversight): a UI surface for the 5
+new derived-summary kinds beyond their `SummariesGetDerived` IPC (no "Story Memory" screen this
+round — they're consumed programmatically, not yet writer-facing); LM Studio base-URL
+configurability for embeddings (same hardcoded-default-port limitation Phase 6 left for chat);
+incremental reindexing is scene-write-triggered only, not Codex-entry-write-triggered (a Codex
+entry edited mid-session still waits for the next lazy `ensureIndexed()` pass, same as before
+this phase); full end-to-end verification with a real LM Studio server or OpenRouter embeddings
+key running was not performed in this environment, same as every prior round's real-model-call
+caveat.
+
+## Current verified state (as of Round 8 / Phase 7 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 267/267 tests passing across 45 files (was 224/38 at Round 6), stable
-  across multiple consecutive full-suite runs. One isolated flake was observed once in
-  `simulator.test.ts`'s `afterEach` `rmSync` cleanup (a transient Windows file-handle race
-  during test teardown, not an assertion failure) — reproduced as a clean pass in isolation
-  and in 3/3 subsequent full-suite runs; not a Phase 6 regression.
-- App launches cleanly via `npm run dev` after all three waves merged, with only the expected
-  dev-mode warnings (React DevTools suggestion, React Router v7 future flags, Electron CSP
-  insecure-policy) — no regressions, no circular-import/TDZ crash.
-- No real OpenRouter API key was available in this environment to exercise the actual
-  money-spending call path end-to-end (saving a key and running Generator/Line-Editor against
-  a real model, confirming real cost appears in Settings). That remains a manual verification
-  step for the user with their own key. Full interactive click-through of the new Phase 6 UI
-  (model routing dropdowns, prompt editor persistence across reload, the usage/cost section,
-  LM Studio fallback with a real local server) was **not** performed for the same
-  no-headless-Electron-driver reason noted in every prior round. Verification relied on the
-  automated suite (incl. mocked-`fetch` adapter tests exercising the real HTTP request/response
-  shapes), a real `npm run dev` boot check, and an independent Codex adversarial-review of the
-  whole diff.
+- `npx vitest run` — 345/345 tests passing across 53 files (was 267/45 at Round 7), stable
+  across multiple consecutive full-suite runs performed at each wave merge and after the
+  Codex-review fixes.
+- App launches cleanly via `npm run dev` after every wave and after the Codex-review fixes,
+  with only the expected dev-mode warnings (React DevTools suggestion, React Router v7 future
+  flags, Electron CSP insecure-policy) — no regressions, no circular-import/TDZ crash.
+- No real LM Studio server or OpenRouter embeddings/chat key was available in this environment
+  to exercise the real embedding/summarization call paths end-to-end (confirming real vectors
+  come back from LM Studio, real cost appears for summary-generation calls in Settings' usage
+  view). That remains a manual verification step for the user with their own local server/key.
+  Full interactive click-through of the new Phase 7 UI (the Embeddings-provider Settings
+  section, the Codex "view as of scene X" toggle, the upgraded Context Inspection panel) was
+  **not** performed for the same no-headless-Electron-driver reason noted in every prior round.
+  Verification relied on the automated suite (incl. mocked-`fetch` adapter tests exercising the
+  real HTTP request/response shapes, and integration-style tests against real temp `AtlasDb`
+  instances for retrieval/context-assembly), a real `npm run dev` boot check after every wave,
+  and an independent Codex adversarial-review of the whole diff.
