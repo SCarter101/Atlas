@@ -496,6 +496,13 @@ export function Settings(): JSX.Element {
           <PromptEditorSection />
         </>
       )}
+
+      {/* Phase 9 Track E: local-only crash reporting / opt-in local
+          telemetry / feedback export — see main/telemetry/telemetryStore.ts.
+          Deliberately NOT gated behind Advanced Mode: this is a basic,
+          writer-facing "how do I report a problem" affordance, not a
+          diagnostics-for-power-users feature. */}
+      <TelemetrySection />
     </div>
   )
 }
@@ -739,6 +746,90 @@ function PromptEditorSection(): JSX.Element {
           </div>
         </div>
       </div>
+    </Section>
+  )
+}
+
+function TelemetrySection(): JSX.Element {
+  const [enabled, setEnabled] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
+  const [exportMessage, setExportMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.atlas.telemetry.getEnabled().then((value) => {
+      if (!cancelled) {
+        setEnabled(value)
+        setLoaded(true)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleToggle(): Promise<void> {
+    const next = !enabled
+    setEnabled(next)
+    await window.atlas.telemetry.setEnabled(next)
+  }
+
+  async function handleExportFeedback(): Promise<void> {
+    setExportBusy(true)
+    setExportMessage(null)
+    try {
+      const result = await window.atlas.telemetry.exportFeedback()
+      if (result.canceled) {
+        // Writer backed out of the save dialog — nothing to report.
+      } else if (result.ok) {
+        setExportMessage(`Feedback bundle saved to ${result.filePath}`)
+      } else {
+        setExportMessage(`Export failed: ${result.error}`)
+      }
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
+  return (
+    <Section title="Telemetry & feedback">
+      <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', lineHeight: 1.5, marginBottom: 14 }}>
+        This build of Atlas has no external telemetry or crash-reporting service — nothing on this page is ever sent
+        anywhere. Crash details are always written to a local log file on this machine so problems can be diagnosed
+        later. Turning on local event logging below additionally records structural app-usage events (never your
+        manuscript text) to another local file, purely for your own reference or to include in a feedback bundle.
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <ToggleRow
+          label="Log local usage events (stays on this machine, never transmitted)"
+          checked={enabled}
+          onChange={() => void handleToggle()}
+        />
+      </div>
+      <button
+        onClick={() => void handleExportFeedback()}
+        disabled={exportBusy || !loaded}
+        style={{
+          padding: '8px 16px',
+          borderRadius: 7,
+          border: '1px solid var(--c-border)',
+          background: 'transparent',
+          color: 'var(--c-ink-soft)',
+          fontSize: 12.5,
+          fontWeight: 600,
+          cursor: exportBusy ? 'default' : 'pointer',
+          opacity: exportBusy ? 0.7 : 1
+        }}
+      >
+        {exportBusy ? 'Preparing…' : 'Save feedback bundle…'}
+      </button>
+      <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginTop: 10, lineHeight: 1.5 }}>
+        Packages your local crash log, opt-in event log (if any), and sanitized recent agent-run metadata (timestamps,
+        agent role, token/cost counts — never scene prose or model output text) into a zip you can attach to an email
+        or GitHub issue yourself.
+      </div>
+      {exportMessage && <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', marginTop: 10 }}>{exportMessage}</div>}
     </Section>
   )
 }

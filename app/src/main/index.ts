@@ -5,6 +5,7 @@ import { installSeedCapabilities } from './capabilities/seedTools'
 import { registerIpcHandlers } from './ipc/handlers'
 import { removeProjectSessionLock } from './persistence/backupStore'
 import { getCurrentProjectSession } from './projectSession'
+import { recordCrash } from './telemetry/telemetryStore'
 
 // Built main entry lives at out/main/index.js, so __dirname is out/main both
 // in `npm run dev` (electron-vite still builds/watches into out/) and in a
@@ -16,11 +17,17 @@ const iconPath = join(__dirname, '../../resources/icon.png')
 // seed-capabilities try/catch below — a single failed background operation
 // (a persistence write, an IPC handler edge case) shouldn't take the window
 // with it. We deliberately do NOT call app.quit()/process.exit() here.
+// Phase 9 Track E: also record the crash locally (see telemetryStore.ts —
+// this writes to a local, rotating crash.log only; there is no external
+// crash-reporting service in this build) so a writer's "Save feedback
+// bundle…" export in Settings has something real to include.
 process.on('uncaughtException', (err) => {
   console.error('[main] uncaughtException (continuing)', err)
+  recordCrash('uncaughtException', err)
 })
 process.on('unhandledRejection', (reason) => {
   console.error('[main] unhandledRejection (continuing)', reason)
+  recordCrash('unhandledRejection', reason)
 })
 
 function createWindow(): BrowserWindow {
