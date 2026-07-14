@@ -36,6 +36,7 @@ const ROLE_NAME: Record<AgentRole, string> = {
 // (Accept/Reject/Refine, spec §10) as EditorialFindingCard/SuggestionCard.
 export function GeneratorSuggestionCard({ suggestion }: { suggestion: SuggestionRef }): JSX.Element {
   const setSuggestionState = useAtlasStore((s) => s.setSuggestionState)
+  const refineSuggestion = useAtlasStore((s) => s.refineSuggestion)
   const [refining, setRefining] = useState(false)
   const [refineText, setRefineText] = useState('')
 
@@ -102,7 +103,8 @@ export function GeneratorSuggestionCard({ suggestion }: { suggestion: Suggestion
           />
           <button
             onClick={() => {
-              setSuggestionState(suggestion.id, 'refining')
+              if (refineText.trim().length === 0) return
+              void refineSuggestion(suggestion.id, refineText)
               setRefining(false)
             }}
             style={{
