@@ -6,3 +6,4 @@ dist/
 .claude/
 app/test-results/
 app/playwright-report/
+app/certs/
