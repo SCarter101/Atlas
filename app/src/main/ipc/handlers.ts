@@ -7,7 +7,7 @@ import { IpcChannel, type CodexExportFormat, type FoundationsCodexDraft, type Ma
 import { AtlasError } from '@shared/errors'
 import { isCloudModel } from '@shared/privacy'
 import type { AgentGoal, AgentRole, AgentRunRecord, PermissionDecision } from '@shared/schema/agent'
-import type { CapabilityManifest, LifecycleState } from '@shared/schema/capability'
+import type { CapabilityManifest, CapabilityScope, LifecycleState } from '@shared/schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from '@shared/schema/codex'
 import type { SceneMeta } from '@shared/schema/manuscript'
 import type { DerivedSummaryKind } from '@shared/schema/retrieval'
@@ -24,7 +24,17 @@ import {
   SceneWritePatchSchema,
   SessionGoalSchema as SessionGoalValidationSchema
 } from '@shared/validation'
-import { createCapability, listCapabilities, setLifecycleState, updateCapability } from '../capabilities/registry'
+import {
+  createCapability,
+  forkCapability,
+  getCapabilityUsageMetrics,
+  listCapabilities,
+  promoteCapability,
+  rollbackCapability,
+  setLifecycleState,
+  testCapability,
+  updateCapability
+} from '../capabilities/registry'
 import { listAgentRuns, loadAgentRun } from '../persistence/agentRunStore'
 import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persistence/codexStore'
 import { createProjectFromFoundations, slugify } from '../persistence/createProjectFromFoundations'
@@ -293,6 +303,32 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.CapabilitiesSetLifecycleState, async (_evt, id: string, state: LifecycleState) => {
     const session = getCurrentProjectSession()
     await setLifecycleState(session.projectRoot, id, state)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesRollback, async (_evt, id: string, versionId: string) => {
+    const session = getCurrentProjectSession()
+    await rollbackCapability(session.projectRoot, id, versionId)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesPromote, async (_evt, id: string, targetScope: CapabilityScope) => {
+    const session = getCurrentProjectSession()
+    await promoteCapability(session.projectRoot, id, targetScope)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesFork, async (_evt, id: string, newId: string, targetScope: CapabilityScope) => {
+    const session = getCurrentProjectSession()
+    await forkCapability(session.projectRoot, id, newId, targetScope)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesTest, async (_evt, manifest: CapabilityManifest, sampleInput: unknown) => {
+    const validatedManifest = CapabilityManifestSchema.parse(manifest)
+    const session = getCurrentProjectSession()
+    return testCapability(session.projectRoot, validatedManifest, sampleInput)
+  })
+
+  ipcMain.handle(IpcChannel.CapabilitiesUsageMetrics, async () => {
+    const session = getCurrentProjectSession()
+    return getCapabilityUsageMetrics(session.projectRoot, session.db)
   })
 
   ipcMain.handle(IpcChannel.PermissionsList, async () => {
