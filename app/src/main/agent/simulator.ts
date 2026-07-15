@@ -208,28 +208,7 @@ export class AgentRunManager {
       budget: { turnsUsed: 0, toolCallsUsed: 0, tokensUsed: 0, costUsdUsed: 0, startedAtMs: Date.now(), recentSignatures: [] }
     })
 
-    // Fire and forget — the renderer subscribes to steps via onStep(). Every
-    // finish() call below is itself fire-and-forget-from-here (this whole
-    // block runs inside a .catch(), nothing left to propagate a rejection
-    // to), so each gets its own .catch() logging any disk-write failure
-    // rather than becoming an unhandled promise rejection — same
-    // never-throw-into-the-caller contract as recordModelCall's
-    // recordUsage() call below.
-    void this.execute(goal).catch((err) => {
-      if (err instanceof ModelCallFailure) {
-        // Phase 6: a real provider failure (with no usable fallback) is
-        // recoverable — the writer can fix the underlying issue (start LM
-        // Studio, check network, etc.) and retry — so this gets its own
-        // 'paused' status rather than the generic 'error' terminal state.
-        void this.finish(goal.runId, 'paused', { code: err.code, message: err.message, recoverable: true }).catch(
-          (finishErr) => console.error('[simulator] failed to persist paused run', finishErr)
-        )
-      } else {
-        void this.finish(goal.runId, 'error', { code: 'simulator-error', message: String(err), recoverable: false }).catch(
-          (finishErr) => console.error('[simulator] failed to persist errored run', finishErr)
-        )
-      }
-    })
+    this.launchExecution(goal)
 
     return { runId: goal.runId }
   }
@@ -262,6 +241,94 @@ export class AgentRunManager {
       state.pendingPermission.resolve('denied')
       state.pendingPermission = undefined
     }
+  }
+
+  // Phase 9 (Track 4): resumes a run previously ended with a recoverable
+  // 'paused' status (see ModelCallFailure above and start()'s error
+  // classification, now factored into launchExecution() below). Two paths:
+  //
+  // 1. The common case — the app hasn't restarted since the pause. finish()
+  //    never removes a run from `this.runs`, so the exact in-memory
+  //    RunState (real budget counters, real listeners) is still sitting
+  //    there; reuse it as-is rather than reconstructing anything.
+  // 2. This manager instance never saw the run in memory (a fresh process,
+  //    or a run paused in an earlier session). Reconstruct a RunBudget from
+  //    the persisted AgentRunRecord's own steps: token/cost sums and turn
+  //    count from every 'model-call' step's ModelCallSummary, tool-call
+  //    count from every 'tool-call' step. `recentSignatures` intentionally
+  //    resets to [] here — duplicate-action detection doesn't carry across a
+  //    restart, a documented acceptable degradation (the persisted record
+  //    has no other trace of that transient state to rebuild from).
+  //    `startedAtMs` also resets to Date.now(), so the elapsed-time budget
+  //    restarts fresh rather than treating a paused-overnight run as
+  //    instantly over budget the moment it's resumed.
+  //
+  // If the run doesn't exist anywhere (not in memory, and loadAgentRun finds
+  // nothing on disk either), that error is left to propagate to the caller.
+  async resume(runId: string): Promise<{ runId: string }> {
+    const existing = this.runs.get(runId)
+    if (existing && existing.record.status === 'paused') {
+      existing.record.status = 'running'
+      this.launchExecution(existing.record.goal)
+      return { runId }
+    }
+
+    const record = await loadAgentRun(this.projectRoot, runId)
+    if (record.status !== 'paused') {
+      throw new Error('Run is not paused and cannot be resumed.')
+    }
+
+    let tokensUsed = 0
+    let costUsdUsed = 0
+    let turnsUsed = 0
+    let toolCallsUsed = 0
+    for (const step of record.steps) {
+      if (step.kind === 'model-call') {
+        const detail = step.detail as ModelCallSummary
+        tokensUsed += detail.inputTokens + detail.outputTokens
+        costUsdUsed += detail.estimatedCostUsd
+        turnsUsed += 1
+      } else if (step.kind === 'tool-call') {
+        toolCallsUsed += 1
+      }
+    }
+
+    record.status = 'running'
+    this.runs.set(runId, {
+      record,
+      listeners: new Set(),
+      budget: { turnsUsed, toolCallsUsed, tokensUsed, costUsdUsed, startedAtMs: Date.now(), recentSignatures: [] }
+    })
+    this.launchExecution(record.goal)
+    return { runId }
+  }
+
+  // Extracted from start() (Phase 9 Track 4) so resume() can drive the same
+  // fire-and-forget execution + error-classification path against a reused
+  // or reconstructed RunState, not just a brand-new one.
+  private launchExecution(goal: AgentGoal): void {
+    // Fire and forget — the renderer subscribes to steps via onStep(). Every
+    // finish() call below is itself fire-and-forget-from-here (this whole
+    // block runs inside a .catch(), nothing left to propagate a rejection
+    // to), so each gets its own .catch() logging any disk-write failure
+    // rather than becoming an unhandled promise rejection — same
+    // never-throw-into-the-caller contract as recordModelCall's
+    // recordUsage() call below.
+    void this.execute(goal).catch((err) => {
+      if (err instanceof ModelCallFailure) {
+        // Phase 6: a real provider failure (with no usable fallback) is
+        // recoverable — the writer can fix the underlying issue (start LM
+        // Studio, check network, etc.) and retry — so this gets its own
+        // 'paused' status rather than the generic 'error' terminal state.
+        void this.finish(goal.runId, 'paused', { code: err.code, message: err.message, recoverable: true }).catch(
+          (finishErr) => console.error('[simulator] failed to persist paused run', finishErr)
+        )
+      } else {
+        void this.finish(goal.runId, 'error', { code: 'simulator-error', message: String(err), recoverable: false }).catch(
+          (finishErr) => console.error('[simulator] failed to persist errored run', finishErr)
+        )
+      }
+    })
   }
 
   private emit(runId: string, step: AgentStep): void {

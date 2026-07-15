@@ -397,6 +397,40 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     session.agentRuns.cancel(runId)
   })
 
+  ipcMain.handle(IpcChannel.AgentRunResume, async (_evt, runId: string) => {
+    const session = getCurrentProjectSession()
+    // Load the run's own persisted goal so the exact same guards
+    // AgentRunStart enforces above can be re-checked here — a resumed run
+    // isn't exempt from either invariant just because it predates this
+    // session (or this process, if the pause happened before a restart).
+    const record = await loadAgentRun(session.projectRoot, runId)
+
+    if (isCloudModel(record.goal.modelRef)) {
+      for (const sceneId of record.goal.scope.sceneIds ?? []) {
+        const scene = await readScene(session.projectRoot, session.db, sceneId).catch(() => null)
+        if (scene?.meta.localModelOnly) {
+          throw new AtlasError(
+            'This scene is marked local-model-only and cannot be sent to a cloud model.',
+            'LOCAL_MODEL_ONLY'
+          )
+        }
+      }
+
+      if (session.cloudConsent.requireCloudAuth && !session.cloudConsent.hasConsent(record.goal.runId)) {
+        throw new AtlasError(
+          'This run requires cloud-model consent, which was not recorded for this session.',
+          'CLOUD_CONSENT_REQUIRED'
+        )
+      }
+    }
+
+    const { runId: resumedRunId } = await session.agentRuns.resume(runId)
+    session.agentRuns.onStep(resumedRunId, (step) => {
+      getWebContents().send(IpcChannel.AgentRunStep, { runId: resumedRunId, step })
+    })
+    return { runId: resumedRunId }
+  })
+
   ipcMain.handle(IpcChannel.AgentRunsList, async () => {
     const session = getCurrentProjectSession()
     return listAgentRuns(session.projectRoot, session.db)

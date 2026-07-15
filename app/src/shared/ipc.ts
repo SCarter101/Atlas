@@ -64,6 +64,7 @@ export const IpcChannel = {
   AgentRunStep: 'agent-run:step',
   AgentRunRespondToPermission: 'agent-run:respond-to-permission',
   AgentRunCancel: 'agent-run:cancel',
+  AgentRunResume: 'agent-run:resume',
   AgentRunsList: 'agent-runs:list',
   AgentRunGet: 'agent-runs:get',
   RetrievalSearch: 'retrieval:search',
@@ -232,6 +233,9 @@ export interface AtlasBridge {
     onStep(runId: string, onStep: (step: AgentStep) => void): () => void
     respondToPermission(runId: string, requestId: string, decision: PermissionDecision): Promise<void>
     cancel(runId: string): Promise<void>
+    // Phase 9 (Track 4): resumes a run previously ended with the recoverable
+    // 'paused' status (see AgentRunManager.resume() in main/agent/simulator.ts).
+    resume(runId: string): Promise<{ runId: string }>
     list(): Promise<AgentRunSummary[]>
     get(runId: string): Promise<AgentRunRecord>
   }
