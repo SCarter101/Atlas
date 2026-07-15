@@ -1,5 +1,17 @@
 import { AtlasError } from '@shared/errors'
+import { fetchWithTimeout } from '../../net/fetchWithTimeout'
 import type { EmbeddingAdapter } from './types'
+
+// isAvailable() is a cheap reachability probe (called on essentially every
+// retrieval/summary/agent-run path when no embedding provider preference is
+// set — see select.ts) — it should fail fast when nothing is listening,
+// not hang for the ~20s+ a bare fetch can take against a dead Windows
+// localhost port. embed() actually does real work once a server is
+// confirmed reachable, so it gets a longer budget that still bounds the
+// pathological "connection attempt itself hangs" case without cutting off
+// a legitimately slow local embedding pass.
+const PROBE_TIMEOUT_MS = 1500
+const EMBED_TIMEOUT_MS = 30_000
 
 // Real seam for a local LM Studio embeddings integration — the same local
 // server main/agent/providers/lmStudioAdapter.ts already talks to for chat
@@ -26,11 +38,15 @@ export class LmStudioEmbeddingAdapter implements EmbeddingAdapter {
   async embed(text: string): Promise<Float32Array> {
     let response: Response
     try {
-      response = await fetch(`${BASE_URL}/embeddings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: DEFAULT_MODEL, input: text })
-      })
+      response = await fetchWithTimeout(
+        `${BASE_URL}/embeddings`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: DEFAULT_MODEL, input: text })
+        },
+        EMBED_TIMEOUT_MS
+      )
     } catch {
       throw new AtlasError("LM Studio isn't running — start its local server.", 'LM_STUDIO_EMBEDDINGS_UNREACHABLE')
     }
@@ -56,7 +72,7 @@ export class LmStudioEmbeddingAdapter implements EmbeddingAdapter {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const response = await fetch(`${BASE_URL}/models`)
+      const response = await fetchWithTimeout(`${BASE_URL}/models`, undefined, PROBE_TIMEOUT_MS)
       return response.ok
     } catch {
       return false

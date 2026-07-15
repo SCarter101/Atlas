@@ -96,6 +96,42 @@ export async function openIndexDb(projectRoot: string): Promise<AtlasDb> {
   return atlasDb
 }
 
+// Round 10 / Phase 9 Track C (performance): every upsert* helper below calls
+// atlasDb.persist() unconditionally after each write, which serializes the
+// *entire* in-memory database (db.export()) and rewrites index.sqlite from
+// scratch (see the file-header comment above — sql.js has no incremental
+// persistence). That's the right default for a single interactive save
+// (one scene write, one Codex edit), but a bulk pass that writes many rows
+// in a row — a full retrieval reindex over an existing project
+// (retrieval/search.ts's ensureIndexed()) or importing a many-scene
+// manuscript (import/importManuscript.ts) — was calling it once per row,
+// so the total serialized-byte count written to disk grew roughly with the
+// square of the row count (each persist() re-serializes everything written
+// so far, not just the new row). Measured on a ~120k-word/450-scene fixture:
+// a full ensureIndexed() pass dropped from over a minute to well under a
+// second once batched (see search.perf.test.ts).
+//
+// withBatchedPersist swaps `atlasDb.persist` for a no-op that just marks the
+// batch dirty, runs `fn`, then restores the real persist and calls it once
+// (only if something was actually written). Every table this touches
+// (scenes, codex_entries, vectors) is a documented rebuildable cache — see
+// this file's header and the `vectors.model` column comment below — so
+// deferring persistence within one batch, or losing an in-flight batch to a
+// crash, loses no durability guarantee this file didn't already accept.
+export async function withBatchedPersist<T>(atlasDb: AtlasDb, fn: () => Promise<T> | T): Promise<T> {
+  const realPersist = atlasDb.persist
+  let dirty = false
+  atlasDb.persist = () => {
+    dirty = true
+  }
+  try {
+    return await fn()
+  } finally {
+    atlasDb.persist = realPersist
+    if (dirty) realPersist()
+  }
+}
+
 export function upsertSceneIndex(
   atlasDb: AtlasDb,
   row: {

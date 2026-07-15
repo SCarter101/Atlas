@@ -1,5 +1,6 @@
 import type { ModelCallSummary, ModelRef } from '@shared/schema/agent'
 import { AtlasError } from '@shared/errors'
+import { fetchWithTimeout } from '../../net/fetchWithTimeout'
 import type { ModelCallInput, ProviderAdapter } from './types'
 
 // Real seam for a local LM Studio integration (Settings' "LM Studio
@@ -7,6 +8,15 @@ import type { ModelCallInput, ProviderAdapter } from './types'
 // server; no configurability UI exists yet for the base URL, so it's a
 // simple internal constant for now.
 const BASE_URL = 'http://localhost:1234/v1'
+
+// See retrieval/embeddings/lmStudioEmbeddingAdapter.ts's identical comment:
+// a bare `fetch` against a dead local port has no timeout and can hang for
+// 20s+ on Windows. isAvailable() is a cheap reachability probe (called on
+// every runModelCall fallback attempt in simulator.ts's runModelCallStep)
+// and should fail fast; runModelCall() does real generation work once a
+// server answers, so it gets a longer budget.
+const PROBE_TIMEOUT_MS = 1500
+const CHAT_TIMEOUT_MS = 60_000
 
 interface LmStudioMessage {
   role: 'system' | 'user'
@@ -49,15 +59,19 @@ export class LmStudioAdapter implements ProviderAdapter {
   async runModelCall(input: ModelCallInput): Promise<ModelCallSummary> {
     let response: Response
     try {
-      response = await fetch(`${BASE_URL}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: input.modelRef.modelId,
-          messages: buildMessages(input),
-          ...(input.responseFormat?.type === 'json' ? { response_format: { type: 'json_object' } } : {})
-        })
-      })
+      response = await fetchWithTimeout(
+        `${BASE_URL}/chat/completions`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: input.modelRef.modelId,
+            messages: buildMessages(input),
+            ...(input.responseFormat?.type === 'json' ? { response_format: { type: 'json_object' } } : {})
+          })
+        },
+        CHAT_TIMEOUT_MS
+      )
     } catch {
       throw new AtlasError(
         `LM Studio is not connected — could not reach ${BASE_URL}. Start its local server in LM Studio's Developer tab.`,
@@ -95,7 +109,7 @@ export class LmStudioAdapter implements ProviderAdapter {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const response = await fetch(`${BASE_URL}/models`)
+      const response = await fetchWithTimeout(`${BASE_URL}/models`, undefined, PROBE_TIMEOUT_MS)
       return response.ok
     } catch {
       return false

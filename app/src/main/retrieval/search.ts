@@ -1,7 +1,7 @@
 import type { RetrievalResult } from '@shared/schema/retrieval'
 import type { EmbeddingProvider } from '@shared/schema/embeddings'
 import type { AtlasDb } from '../persistence/db'
-import { searchVectorIndex, upsertVectorIndex } from '../persistence/db'
+import { searchVectorIndex, upsertVectorIndex, withBatchedPersist } from '../persistence/db'
 import { listCodexEntries } from '../persistence/codexStore'
 import { readManuscriptTree } from '../persistence/manuscriptStore'
 import { readScene } from '../persistence/sceneStore'
@@ -126,31 +126,37 @@ export async function ensureIndexed(db: AtlasDb, projectRoot: string, model?: Em
   // it only depends on `model`, not on any per-item data.
   const resolvedModelId = model ? (await selectEmbeddingAdapter(model)).id : 'sync'
 
-  const codexEntries = await listCodexEntries(projectRoot)
-  for (const entry of codexEntries) {
-    const key = indexedKey('codex-entry', entry.id, resolvedModelId)
-    if (indexedKeys.has(key)) continue
-    const text = `${entry.name}\n${JSON.stringify(entry.body)}`
-    if (model) {
-      await indexText(db, entry.id, 'codex-entry', text, model)
-    } else {
-      indexText(db, entry.id, 'codex-entry', text)
+  // Batches the per-item upsertVectorIndex() writes below into one
+  // db.persist() at the end instead of one per codex entry/scene — see
+  // withBatchedPersist's own comment in persistence/db.ts for why an
+  // unbatched full pass goes quadratic on a large manuscript.
+  await withBatchedPersist(db, async () => {
+    const codexEntries = await listCodexEntries(projectRoot)
+    for (const entry of codexEntries) {
+      const key = indexedKey('codex-entry', entry.id, resolvedModelId)
+      if (indexedKeys.has(key)) continue
+      const text = `${entry.name}\n${JSON.stringify(entry.body)}`
+      if (model) {
+        await indexText(db, entry.id, 'codex-entry', text, model)
+      } else {
+        indexText(db, entry.id, 'codex-entry', text)
+      }
+      indexedKeys.add(key)
     }
-    indexedKeys.add(key)
-  }
 
-  const tree = await readManuscriptTree(projectRoot)
-  const scenes = tree.books.flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
-  for (const scene of scenes) {
-    const key = indexedKey('scene', scene.id, resolvedModelId)
-    if (indexedKeys.has(key)) continue
-    const { prose } = await readScene(projectRoot, db, scene.id)
-    const text = `${scene.title}\n${prose}`
-    if (model) {
-      await indexText(db, scene.id, 'scene', text, model)
-    } else {
-      indexText(db, scene.id, 'scene', text)
+    const tree = await readManuscriptTree(projectRoot)
+    const scenes = tree.books.flatMap((b) => b.parts.flatMap((p) => p.chapters.flatMap((c) => c.scenes)))
+    for (const scene of scenes) {
+      const key = indexedKey('scene', scene.id, resolvedModelId)
+      if (indexedKeys.has(key)) continue
+      const { prose } = await readScene(projectRoot, db, scene.id)
+      const text = `${scene.title}\n${prose}`
+      if (model) {
+        await indexText(db, scene.id, 'scene', text, model)
+      } else {
+        indexText(db, scene.id, 'scene', text)
+      }
+      indexedKeys.add(key)
     }
-    indexedKeys.add(key)
-  }
+  })
 }
