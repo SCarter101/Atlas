@@ -80,6 +80,20 @@ file-ownership split held, but don't rely on that: after resuming a stalled agen
 "here's what I built" report, and cross-check the combined `git diff --stat` against every
 agent's assigned file scope before merging.
 
+**Gotcha found in Phase 9:** if Wave 0 does orchestrator-direct setup work (e.g. `npm install`-ing
+shared devDependencies before forking, so parallel agents don't race each other on a junctioned
+`node_modules`), **push that commit to `origin` before forking any worktree**, not just commit it
+locally. Worktree creation forked from a ref that still predated the local-only Wave 0 commit,
+so every Wave-1 agent's `package.json` diff was relative to the *pre-Wave-0* file — harmless
+functionally (the junction shares the real `node_modules` regardless of what a branch's
+`package.json` declares), but it turned a should-have-been-clean `package.json` merge into an
+avoidable append-only conflict. Also worth remembering: **worktree agents almost never commit
+their own work** — every Wave 1/2 agent in this round left real, correct, uncommitted changes
+sitting in its worktree and reported "done" anyway (one Wave-2 agent was the sole exception).
+Always run `git status --short` in an agent's worktree before trusting `git log`/`git merge`
+output — "already up to date" from a merge attempt does not mean there's nothing to bring in, it
+can mean the work was never committed to the branch at all.
+
 **Wave variant (used for Phase 3, a much larger build):** when the work is too big for
 one round of fully-independent agents, split into sequential *waves*. Wave 1 = several
 agents in parallel on genuinely independent file surfaces (still expect append-only
@@ -845,26 +859,204 @@ verified with a real HTTP-shape mock" — a genuine blind-comparison-against-the
 bar (this phase's originally-stated exit criterion) needs a human reader and wasn't attempted.
 Carried-over Phase 3-7 deferrals still stand.
 
-## Current verified state (as of Round 9 / Phase 8 completion)
+**Round 10 — Phase 9 ("Beta Hardening & Distribution")**
+
+The largest round yet (7 tracks), and the first where several items depended on real
+infrastructure rather than being pure in-repo code work. Confirmed scope decisions with the
+user up front via `AskUserQuestion`, before any code: **GitHub remote set up now** (no remote
+existed; the user created an empty repo and handed over the URL — `origin` →
+`https://github.com/SCarter101/Atlas.git`, `master` tracking); **unsigned installer this
+round** (no code-signing certificate available — wire the signing seam via electron-builder's
+own `CSC_LINK`/`CSC_KEY_PASSWORD` env-var convention so a real cert drops in later with zero
+code changes); **macOS skipped entirely** (no Mac available to build or verify on); **full
+breadth in one round**, waved like Phase 3/4/8's larger builds.
+
+*Planning note:* given the scale, this round went through `EnterPlanMode` with a full
+`Plan`-agent validation pass over the draft wave/file-ownership design before any worktree was
+forked — the same bar the pattern note above sets for large builds. It corrected several real
+gaps: Track F (security) needed a `projectsRootDir()` helper that didn't exist yet
+(`main/persistence/projectStore.ts` had the "Documents/Atlas Projects" path inlined three
+separate times); Track B (E2E) needed a `vitest.config.ts` exclude for its new `e2e/`
+directory or the post-merge `vitest run` gate would break trying to load Playwright specs;
+Track C (performance) was pulled out of the parallel wave entirely into its own solo Wave 2,
+since "fix concrete hotspots found" is open-ended by design and its file list couldn't be
+pre-declared the way the other six tracks' could; and the CSP's `connect-src` was corrected —
+all OpenRouter/LM Studio HTTP calls happen in the **main process**, outside the renderer CSP's
+jurisdiction entirely, so those hosts never needed allowing there.
+
+*Wave 0 (orchestrator, direct):* `npm install -D electron-builder playwright @playwright/test`
+once in the main repo, before any worktree, specifically so parallel Wave-1 agents needing
+`electron-builder`/`playwright` wouldn't race `npm install` against the same junctioned
+`node_modules` directory. **Operational gotcha surfaced here, worth keeping:** the six Wave-1
+worktree branches all forked from the commit *before* Wave 0's devDependency bump landed —
+not because of a race, but because Wave 0's commit was never pushed to `origin` before
+forking, and the worktree-creation mechanism forked from a ref that predated it. Functionally
+harmless (the junction shares the physical `node_modules` directory regardless of which git
+ref a branch's `package.json` declares), and every agent's `npm run dist`/`test:e2e`/`vitest
+run` worked fine against the real installed packages — but every agent's own `package.json`
+diff was relative to the pre-Wave-0 file, producing an append-only merge conflict on that file
+that wouldn't otherwise have happened. Push shared-plumbing commits before forking worktrees
+next time, not just committing them locally.
+
+*Wave 1 — 6 agents fully parallel* (A/B/D/E/F/G; C deliberately excluded, see above). All six
+launches failed on the first dispatch attempt with an account-wide monthly spend limit error —
+paused, confirmed with the user, waited for the limit to be raised, cleaned up the one
+leftover empty worktree, and re-dispatched all six identically. No work was lost (every failed
+worktree was empty — the agents failed before making any edits).
+
+- **A — Packaging:** extended `package.json`'s `build` block with a real NSIS config
+  (`directories.output`, `files` pointing at electron-vite's `out/`, `artifactName`,
+  `win.target: ['nsis']`), `scripts.package`/`scripts.dist`. Verified via `app-builder-lib`'s
+  own source that `CSC_LINK`/`CSC_KEY_PASSWORD` are read with zero config — no custom signing
+  code needed. Built a real 93MB unsigned installer (`Atlas-Setup-0.1.0-x64.exe`), confirmed
+  genuinely unsigned via `Get-AuthenticodeSignature`, confirmed the packaged app resolves the
+  Round 3-documented "Electron.exe" dev-mode identity leak with **no changes to `main/index.ts`
+  needed** — Round 3's `app.setName`/`setAppUserModelId` work was already sufficient once
+  actually packaged.
+- **B — E2E automation:** a Playwright-for-Electron smoke suite (`app/e2e/`) driving the golden
+  path (open sample project → draft → run Line Editor against the simulator → accept a
+  suggestion → export to Markdown) plus a separate Story Foundations wizard spec, both targeting
+  the real `out/` build. Zero new `data-testid` attributes — every locator uses
+  `getByRole`/`getByText` against existing plain button/label text. Flagged (not fixed, out of
+  track scope) a real latency issue: `lmStudioEmbeddingAdapter.ts`'s `isAvailable()` probe had
+  no timeout, and a connection attempt to an unlistened Windows port can take 20+ seconds to
+  fail rather than an instant refusal — directly on the critical path of every agent run's
+  context assembly when no LM Studio server is running.
+- **D — Data safety:** registered ONE real migration in the previously-empty
+  `migrations.ts` registry — `SceneMeta.schemaVersion` 1→2, backfilling `localModelOnly` on
+  pre-existing on-disk records — with a round-trip test proving a genuine v1-shaped record
+  migrates correctly on read. Added scheduled automatic backups
+  (`ProjectManifest.backupSchedule`, a poll timer in `main/index.ts`'s `whenReady()`, Settings
+  UI extending the existing "Backups & snapshots" section). Added import/export round-trip
+  tests, which **caught and fixed a real data-loss bug**: `renderManuscript.ts`'s Markdown
+  export never emitted the document title and used H1 for chapter headings, colliding with
+  `parseManuscript.ts`'s documented H1-title/H2-chapter convention — a 2-chapter export would
+  silently drop the entire first chapter's prose on re-import.
+- **E — Crash reporting, local telemetry, feedback channel:** no external service/account
+  exists in this environment, so this is local-only by design and honestly labeled as such —
+  matches the project's established "honest placeholder" convention. New
+  `main/telemetry/telemetryStore.ts`: rotating local crash-log file wired into the existing
+  `process.on('uncaughtException'/'unhandledRejection', ...)` handlers, an opt-in local event
+  log, and a feedback-bundle zip export (sanitized run traces + logs + app version) via
+  `dialog.showSaveDialog`.
+- **F — Security pass:** a real CSP via `session.defaultSession.webRequest.onHeadersReceived`
+  (`style-src 'unsafe-inline'` is a documented, accepted trade-off for React's extensive inline
+  `style={{}}` usage; found empirically that Vite's dev-mode HMR needs *two* separate
+  relaxations — `'unsafe-eval'` for HMR itself and `'unsafe-inline'` for `@vitejs/plugin-react`'s
+  injected preamble script — both gated behind `is.dev`). Hardened `main/capabilities/sandbox.ts`'s
+  tool-call timeout to also bound async execution via a real `Promise.race` (the previous
+  `vm.runInContext` timeout only ever bounded synchronous code, so a hung async `tool.run`
+  escaped it entirely); documented the classic `node:vm` constructor-chain escape as an accepted
+  limitation given the actual threat model (user/dev-authored capabilities, not adversarial
+  remote content) rather than reaching for `vm2`/`isolated-vm`. Added a `projectsRootDir()`-based
+  path-containment guard on `ProjectOpen`/`ProjectCreate`/`ProjectDelete` (the real risk being
+  `ProjectDelete`'s recursive removal of whatever path it's handed).
+- **G — Onboarding polish:** a skippable product-tour overlay and keyboard-shortcut cheat sheet
+  (both renderer-only, `localStorage`-backed, no IPC/main-process changes — deliberately avoided
+  the shared-plumbing-file collision surface entirely), a "Help" nav entry in `AppShell.tsx`,
+  and refreshed empty-state copy in `Dashboard.tsx`/`Landing.tsx` pointing at the now-real
+  Phase 6-8 features instead of stale prototype-era text.
+
+*Two real integration bugs surfaced during sequential merge-and-verify (exactly what the
+per-merge verification discipline exists to catch):*
+- Merging Track G after Track B broke the just-merged E2E suite: Track G's product tour
+  auto-opens the first time `AppShell` mounts (a fresh Electron profile has no `localStorage`),
+  which only happens after navigating into a project, not at launch — its full-screen overlay
+  then intercepted clicks on the manuscript editor. Fixed with a `dismissTourIfShown()` helper
+  called at the right point in the E2E flow (after the in-app navigation, not right after
+  launch, which was the first, wrong place tried).
+- Merging Track F (last, as planned, specifically so a security-pass regression would be easy
+  to bisect) auto-resolved a `handlers.ts` import-block conflict **without a conflict marker**
+  but silently dropped the `app` import Track E's telemetry-export handler needed
+  (`app.getVersion()`, `app.getPath('documents')`) — a real `tsc` break invisible at merge time,
+  only caught by the mandatory post-merge typecheck. A reminder that a clean auto-merge isn't
+  automatically a correct one; the full `tsc`×2 + `vitest run` + `npm run dev` gate after
+  *every* individual merge is why this was caught immediately rather than compounding.
+
+*Wave 2 — Track C (performance), solo, forked fresh after Wave 1 fully merged:* built a
+120k-word fixture-generator from scratch (`main/perf/largeManuscriptFixture.ts` — 2 books/4
+parts/40 chapters/200 scenes, ~123k words, 52 Codex entries) and a profiling suite
+(`manuscriptScale.perf.test.ts`) timing manuscript-tree reads, indexing, summaries, diffing,
+and every export format with real `performance.now()` measurements. Found and fixed a genuine
+O(n²) hotspot: every SQLite-index upsert called `persist()` unconditionally, fully
+re-serializing the whole in-memory database on each row (sql.js has no incremental
+persistence) — a bulk pass like a full retrieval reindex was doing that once per row. New
+`withBatchedPersist()` wrapper measured **~30x faster** on an isolated 2,400-row benchmark
+(3.42s → 0.11s), applied to `ensureIndexed()` and manuscript import. Also fixed the LM Studio
+fetch-timeout issue Track B flagged as a follow-up (added a shared `fetchWithTimeout()` helper
+to both the chat and embeddings LM Studio adapters). Documented, but deliberately did not fix,
+`diffText.ts`'s O(n·m) LCS diff scaling limit at true manuscript scale (~3.7-5.3s at 20k
+words/side) — no real caller diffs at more than scene scale today, so a Myers-diff rewrite
+would be a real algorithmic change with no current benefit.
+
+*Codex adversarial-review (closing step, retained):* Codex CLI was installed but not
+authenticated at first attempt — paused and asked the user to run `codex login` interactively
+(cannot be done through automated tools) before proceeding, rather than guessing around it.
+The full `b06789a..HEAD` diff surfaced 4 findings, all MEDIUM, all confirmed against the actual
+code and fixed:
+- **`withBatchedPersist()`'s capture/restore of `atlasDb.persist` corrupted state across
+  overlapping batches** on the same `AtlasDb` — a lazy `ensureIndexed()` pass racing a
+  scene-write-triggered incremental reindex could leave `atlasDb.persist` permanently stuck as
+  a no-op until process restart, silently losing index writes. Rewritten with a per-`AtlasDb`
+  `WeakMap`-tracked reentrant depth counter so restoration always happens exactly once, from
+  the correct original function, regardless of interleaving.
+- **`createBackup()`'s manifest write was non-atomic and race-prone** — a crash mid-write
+  could leave truncated JSON, which the existing catch-and-return-`[]` behavior turns into
+  "every prior backup vanished from the UI" despite intact ZIPs; two overlapping calls (now a
+  realistic case given this same round's scheduled-backup timer) could also silently discard
+  one entry via a read-modify-write race. Fixed with a write-temp-then-`rename()` atomic write
+  plus a per-project in-memory async write queue.
+- **`assertWithinProjectsRoot()`'s lexical-only `resolve()`/`relative()` check didn't follow
+  symlinks/junctions** — a junction living inside Atlas Projects but pointing outside it
+  defeated the stated containment invariant even though `..`-traversal was correctly rejected.
+  Fixed by walking up to the deepest existing ancestor and resolving *that* path's real
+  filesystem target before comparing (handles `ProjectCreate`'s not-yet-existing target path
+  correctly by rejoining the non-existent tail).
+- **Feedback-bundle crash logs were zipped verbatim**, unlike the carefully sanitized run
+  traces — an error message or stack could legitimately contain a username-bearing absolute
+  path or, if a failed network request's error text echoed part of the request, something
+  resembling a leaked API token. Added a redaction pass applied only at bundle-export time (the
+  local `crash.log` itself stays unredacted, since it's never transmitted automatically and
+  redacting it would degrade the writer's own troubleshooting).
+
+4 new regression tests added for the 4 fixed findings — one of which caught a real bug in its
+own first draft: the crash-log redaction test (deliberately using a *sensitive* message, not
+the prior test's benign one, per Codex's own note that the existing test never actually
+exercised sensitive content) failed against the first version of the redaction regex, which
+assumed single backslashes in Windows paths — but `crash.log` stores `JSON.stringify()`'d
+entries, so on-disk paths are double-escaped. Fixed to match 1-2 backslashes.
+
+**Explicitly deferred from Phase 9** (confirmed scope, not oversight): macOS build/verification
+(no Mac available); a real code-signing certificate (the seam is wired, nothing to sign with);
+real CI execution (the GitHub remote now exists, but no GitHub Actions workflow was added this
+round — Phase 9's scope was the E2E suite itself, not wiring it into a CI runner); a real
+external telemetry/crash-reporting backend (local-only by design, matches this round's own
+stated constraint); GUI installer click-through (verified the exact `win-unpacked` payload the
+installer extracts instead, which is the more decisive check for an unattended background
+job). Carried-over Phase 3-8 deferrals still stand.
+
+## Current verified state (as of Round 10 / Phase 9 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 380/380 tests passing across 54 files (was 345/53 at Round 8), stable
-  across multiple consecutive full-suite runs performed after Wave 0, after each of the 3
-  Wave-1 branch merges, and after the Codex-review fixes. One transient Windows-temp-dir-race
-  test failure was observed mid-round (reproduced in isolation and confirmed to pass cleanly,
-  not a real regression) — the same category of flake every round's test suite has occasionally
-  hit on this platform.
-- App boots cleanly via `npm run dev` after the full merge and after the Codex-review fixes —
-  main process, preload, and renderer all build and connect, with only the expected dev-mode
-  warnings (React DevTools suggestion, React Router v7 future flags, Electron CSP
-  insecure-policy) — no regressions, no circular-import/TDZ crash.
-- No real OpenRouter/LM Studio credentials were available in this environment, same caveat as
-  every prior round — real-call correctness (JSON-mode `response_format` actually being sent,
-  parse-failure fallback, control-set text reaching the model call) was verified via
-  mocked-`fetch`/mocked-adapter tests exercising the real request/response shapes, not a live
-  model. Full interactive click-through (invoking each of the 5 roles from the real UI, a
-  Refine-loop round-trip, the new Advanced-Mode control-set UI) was **not** performed for the
-  same no-headless-Electron-driver reason noted in every prior round — verification relied on
-  the automated suite, a real `npm run dev` boot check, and an independent Codex
-  adversarial-review of the whole diff (`ae30229..HEAD`), which surfaced and got 2 real HIGH
-  findings fixed this round.
+- `npx vitest run` — 443/443 tests passing across 63 files (was 380/54 at Round 9), stable
+  across multiple consecutive full-suite runs performed after Wave 0, after each of the 6
+  Wave-1 track merges, after the Wave-2 (Track C) merge, and after the Codex-review fixes.
+- `npm run test:e2e` — 2/2 Playwright specs passing against the real `out/` build (golden path:
+  draft → run Line Editor → accept a suggestion → export; Story Foundations wizard fast path).
+- `npm run dist` produces a real, working, unsigned Windows installer
+  (`Atlas-Setup-0.1.0-x64.exe`) — confirmed unsigned via `Get-AuthenticodeSignature`, confirmed
+  the packaged app resolves the "Electron.exe" dev-mode identity leak with no code changes
+  needed, confirmed all production `node_modules` dependencies bundle correctly into the asar.
+- App boots cleanly via `npm run dev` after every individual merge this round and after the
+  Codex-review fixes — main process, preload, and renderer all build and connect, with only the
+  expected dev-mode warnings (React DevTools suggestion, React Router v7 future flags, Electron
+  CSP dev-mode `unsafe-eval` notice — the production CSP itself is strict `script-src 'self'`).
+  No regressions, no circular-import/TDZ crash.
+- GitHub remote is live at `https://github.com/SCarter101/Atlas.git` (`origin`, `master`
+  tracking), pushed through the Codex-review-fix commit. No GitHub Actions workflow exists yet
+  — the E2E suite runs locally only.
+- No real OpenRouter/LM Studio credentials or macOS hardware were available in this
+  environment, same caveat as every prior round for the model-call paths; this round's own new
+  surfaces (packaging, E2E, telemetry, security, performance) were all verified for real,
+  directly, in-environment — not simulated or mocked — since none of them depend on a live
+  model credential the way Phases 6-8's work did.
