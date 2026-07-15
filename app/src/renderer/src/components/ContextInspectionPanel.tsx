@@ -19,7 +19,8 @@ const SECTION_CLASS_LABEL: Record<ContextSectionClass, string> = {
   'voice-profile': 'Voice profiles',
   'locked-world-rule': 'Locked world rules',
   'recent-excerpt': 'Recent manuscript excerpts',
-  'full-text': 'Full text'
+  'full-text': 'Full text',
+  'web-research': 'Web search results'
 }
 
 function groupSectionsByClass(sections: ContextSection[]): Array<[ContextSectionClass, ContextSection[]]> {
