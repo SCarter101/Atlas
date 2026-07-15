@@ -1035,28 +1035,141 @@ stated constraint); GUI installer click-through (verified the exact `win-unpacke
 installer extracts instead, which is the more decisive check for an unattended background
 job). Carried-over Phase 3-8 deferrals still stand.
 
-## Current verified state (as of Round 10 / Phase 9 completion)
+**Round 11 — Phase 8 remainder ("Editors worth paying for," closing the loop)**
+
+Closed out the four items Round 9 explicitly deferred as too large for one round: outline
+frameworks (§11), continuity validators, capability-lifecycle completion (§14), and pause/resume
+of agent runs. Confirmed scope with the user via `AskUserQuestion` before planning: **all 4
+tracks in one round**, continuity validators get **real structured data** (typed fields, not
+heuristic-only free-text parsing), and capability rollback gets **real version snapshots** (not
+just diff notes). A ground-truth Explore-agent audit before planning confirmed the roadmap's own
+framing of all four gaps was accurate.
+
+*Planning note:* this was the first round where all 4 tracks turned out to have **no dependency
+edge on each other** — each owns its own schema file, persistence/logic module, and renderer
+route/component — so a `Plan`-agent validation pass (same bar as every large round since Round 7)
+was used to *confirm* a single fully-parallel wave rather than to correct a wrongly-assumed one.
+It still caught 4 real corrections before dispatch: Track 1's `runDevEditor()` edit needed to also
+touch the model-facing `DEV_EDITOR_JSON_INSTRUCTIONS` prompt string (adding a category to the
+parser allow-list without also telling the model it may emit that value means the model never
+produces it); Track 3's "3 seed tools" claim was wrong (only `word-count` and
+`codex-contradiction-check` have a registered `SandboxedTool` — `codex-search` and every
+writer-authored draft always fall to the structural-check path); Track 4's budget-reconstruction
+phrasing conflated two genuinely separate counters (`turnsUsed` per model-call step,
+`toolCallsUsed` per tool-call step); and Track 4's new `AgentRunResume` IPC handler needed to
+replicate the exact same `localModelOnly`/cloud-consent guards `AgentRunStart` already enforces,
+which the original plan omitted entirely — without it, a resumed cloud-model run could bypass both
+invariants.
+
+*Track 1 — Outline frameworks:* new `shared/schema/outline.ts` (`OutlineFramework`/`OutlineBeat`,
+one active framework per project) + `main/persistence/outlineStore.ts` + `shared/outlineLogic.ts`
+(dependency-free, mirrors `codexLogic.ts`'s renderer-importable style) with real seed beat lists
+for all 5 named templates (three-act's 8 beats, Save the Cat's full 15, Hero's Journey's 12, a
+role-tagged mystery clue grid, a role-tagged thriller escalation map) plus `'custom'`. `Outline.tsx`
+gained a framework picker and a beat list with per-beat chapter/scene assignment and
+mapped/unmapped/order-violation status badges, rendered below the existing flat scene list.
+`runDevEditor()`'s real-model branch folds `getGenreExpectationFindings()`'s output (unmapped
+beats past their expected manuscript position, order violations) into context when a framework is
+active, tagged via a new `'genre-expectation'` `issueCategory`.
+
+*Track 2 — Continuity validators:* `CodexEntry` gained `continuityProfile` (birthDate + structured
+injuries, for characters) and `travelLinks` (day-counts to other locations, for locations), and
+`SceneContinuityMeta` gained `storyDate`/`season`/`isFlashback` — all optional/additive, following
+the exact precedent `voiceProfile` set (no migration needed). New `shared/continuityChecks.ts`: 5
+pure, deterministic checks — timeline monotonicity (manuscript order vs. story-date order, flashback-
+aware), injury continuity (occurred-after-healed structural checks), travel time (structured
+location-adjacency lookups), season-vs-calendar-month consistency, and a heuristic stated-age
+cross-check against the structured birthDate (explicitly labeled as heuristic, matching
+`detectContradictions()`'s existing style). Surfaced on a new 5th "Continuity Checks" tab on
+`Timeline.tsx`; data entered via new sections in `CodexEntryForm.tsx` and the scene metadata
+panel's existing Tier-3 continuity section.
+
+*Track 3 — Capability lifecycle completion:* `CapabilityManifest.history` entries gained an
+optional `snapshot` (the full prior manifest state, mirroring `CodexVersion.snapshot` exactly) so
+`rollbackCapability()` can genuinely restore a prior version rather than just displaying a diff
+note; old history entries without one simply can't be rolled back to (UI disables that action
+rather than erroring). New `compareCapabilityVersions()` (pure field diff, no IPC needed),
+`promoteCapability()`/`forkCapability()` (move/copy between global and project scope, id-collision
+guarded), `testCapability()` (real `runSandboxed()` execution when a seed tool is registered for
+the manifest id, else an honestly-labeled structural shape-check — closes the previously-dead
+`ValidationStatus` field), and `getCapabilityUsageMetrics()` (scans real agent-run tool-call steps,
+explicitly labeled as an estimate derived from each capability's own declared cost characteristics,
+not a measured counterfactual). `Library.tsx` gained Compare/Rollback/Promote/Fork/Test UI plus a
+"Usage & Efficiency" section.
+
+*Track 4 — Pause/resume of agent runs:* the `'paused'` `AgentRunStatus` (a producer existed since
+Round 7, no consumer until now) finally gets a real resume path. `AgentRunManager.resume()`: if the
+run is still held in memory (the common case — `finish()` was already confirmed to never remove a
+run from `this.runs`), reuses the exact real budget/listeners and relaunches; otherwise reconstructs
+a `RunBudget` from the persisted `AgentRunRecord`'s own steps (token/cost/turn sums from
+`model-call` steps, count from `tool-call` steps), resetting the elapsed-time clock so a
+paused-overnight run isn't instantly over budget on resume. New `AgentRunResume` IPC channel, a
+Resume button in `AgentRunsView.tsx`, and a `resumeAgentRun` store action.
+
+*Codex adversarial-review (closing step, retained):* the full diff surfaced 4 findings, all
+confirmed against the code and fixed:
+- **HIGH — `SceneMetadataPanel`'s continuity-field updater closed over the stale `scene` prop.**
+  Two quick edits (e.g. storyDate then season — a realistic sequence when filling in continuity
+  data) could race: the second call's shallow-merge read the first call's *pre-edit* continuity
+  object (since the component hadn't re-rendered with fresh data yet), silently dropping it. Fixed
+  with a ref tracking the latest intended value synchronously across calls, resynced from the prop
+  via an effect.
+- **HIGH — `testCapability()` persisted the caller-supplied manifest verbatim** instead of
+  re-fetching current on-disk state the way every other mutator in `registry.ts` does (`updateCapability`
+  itself re-fetches `previous` rather than trusting a caller's copy). A stale renderer-side `selected`
+  capability object could silently revert fields (e.g. lifecycleState) and drop history entries
+  written since — now re-fetches fresh via `getCapability()` before persisting, using the
+  caller-supplied manifest only to pick a seed tool and check the sample input's shape.
+- **MEDIUM — a paused run could be resumed twice concurrently.** `resume()` fell through to the
+  disk-reconstruction path whenever an in-memory run's status wasn't exactly `'paused'` — including
+  `'running'`, which a first resume() call flips it to synchronously — so a second concurrent call
+  would reconstruct a *second* RunState from the stale on-disk record and launch a duplicate
+  execution of the same run, corrupting the trace. Found-but-not-`'paused'` now rejects immediately;
+  a new synchronous `resuming` claim set also closes the narrower window where two calls both miss
+  the in-memory map (only reachable right after a restart, before either has completed once).
+- **LOW — `CodexEntryForm`'s travel-link dropdown had no duplicate guard on retarget** (only on
+  add), so picking an already-linked location for a different row created two rows keyed by the
+  same `locationId` — a React key collision, and `updateTravelLink`/`removeTravelLink` (both keyed
+  by `locationId`) would then apply to both rows at once, with `continuityChecks.ts`'s lookup
+  silently picking an arbitrary match. Fixed with the same duplicate-prevention `addTravelLink`
+  already applied, extended to the retarget path.
+
+3 new regression tests added for the 3 fixable-with-existing-infrastructure findings
+(`registry.test.ts`, `simulator.resume.test.ts` ×2). The two renderer-only fixes (`SceneMetadataPanel`,
+`CodexEntryForm`) have no existing component-test infrastructure in this project to extend (no
+renderer test file has ever existed) — introducing one for two small closure-scoped fixes was
+judged disproportionate scope creep for a review-fix pass; verified manually instead via a real
+`npm run dev` smoke pass (screenshots of all 4 new routes/tabs with real data, both existing E2E
+specs still green against the rebuilt `out/`).
+
+**Phase 8 is now fully closed out** — every item the roadmap listed for it (per-role real model
+output, control sets, the Refine loop, outline frameworks, continuity validators,
+capability-lifecycle completion, pause/resume) has shipped. Only Phase 9's own explicitly-deferred
+items (macOS, real signing, real CI, a real external telemetry backend) remain open across
+Phases 6-9.
+
+## Current verified state (as of Round 11 / Phase 8 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 443/443 tests passing across 63 files (was 380/54 at Round 9), stable
-  across multiple consecutive full-suite runs performed after Wave 0, after each of the 6
-  Wave-1 track merges, after the Wave-2 (Track C) merge, and after the Codex-review fixes.
-- `npm run test:e2e` — 2/2 Playwright specs passing against the real `out/` build (golden path:
-  draft → run Line Editor → accept a suggestion → export; Story Foundations wizard fast path).
-- `npm run dist` produces a real, working, unsigned Windows installer
-  (`Atlas-Setup-0.1.0-x64.exe`) — confirmed unsigned via `Get-AuthenticodeSignature`, confirmed
-  the packaged app resolves the "Electron.exe" dev-mode identity leak with no code changes
-  needed, confirmed all production `node_modules` dependencies bundle correctly into the asar.
-- App boots cleanly via `npm run dev` after every individual merge this round and after the
-  Codex-review fixes — main process, preload, and renderer all build and connect, with only the
-  expected dev-mode warnings (React DevTools suggestion, React Router v7 future flags, Electron
-  CSP dev-mode `unsafe-eval` notice — the production CSP itself is strict `script-src 'self'`).
-  No regressions, no circular-import/TDZ crash.
+- `npx vitest run` — 492/492 tests passing across 67 files (was 443/63 at Round 10), stable
+  across multiple consecutive full-suite runs performed after each of the 4 Wave-1 track merges
+  and after the Codex-review fixes. One known pre-existing flake (unrelated to this round):
+  `simulator.lineEditor.test.ts`'s `afterEach` occasionally hits an `ENOTEMPTY`/`ENOENT` Windows
+  temp-directory cleanup race against its own fire-and-forget usage-log write; passes reliably
+  in isolation and on most full-suite runs — not chased down further this round.
+- `npm run test:e2e` — 2/2 Playwright specs still passing against the rebuilt `out/` (golden
+  path; Story Foundations wizard fast path), run both before and after the Codex-review fixes.
+- A real `npm run dev`/`npm run build` smoke pass drove all 4 of this round's new UI surfaces via
+  a one-off Playwright-for-Electron script (not committed — no renderer-component test
+  infrastructure exists in this repo to extend): the Outline framework picker + beat list, the
+  Timeline "Continuity Checks" tab, Library's capability-lifecycle controls (confirmed real data
+  in the "Usage & Efficiency" table, Advanced-Mode gating behaving identically to the
+  pre-existing Enable/Disable/Deprecate buttons), and Agent Runs — no console errors beyond 3
+  pre-existing, unrelated `ERR_FILE_NOT_FOUND` resource warnings present on every route.
 - GitHub remote is live at `https://github.com/SCarter101/Atlas.git` (`origin`, `master`
-  tracking), pushed through the Codex-review-fix commit. No GitHub Actions workflow exists yet
-  — the E2E suite runs locally only.
+  tracking). No GitHub Actions workflow exists yet — the E2E suite runs locally only.
 - No real OpenRouter/LM Studio credentials or macOS hardware were available in this
   environment, same caveat as every prior round for the model-call paths; this round's own new
-  surfaces (packaging, E2E, telemetry, security, performance) were all verified for real,
-  directly, in-environment — not simulated or mocked — since none of them depend on a live
-  model credential the way Phases 6-8's work did.
+  surfaces (outline frameworks, continuity checks, capability lifecycle, pause/resume) were all
+  verified for real, directly, in-environment — not simulated or mocked — since none of them
+  depend on a live model credential.
