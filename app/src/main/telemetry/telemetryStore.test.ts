@@ -247,6 +247,43 @@ describe('telemetryStore', () => {
       expect(allContents.join('\n')).not.toContain('SECRET_MANUSCRIPT_TEXT')
     })
 
+    // Codex adversarial-review finding (Round 10/Phase 9 closing pass): the
+    // prior test only ever recorded a benign crash message, so it never
+    // actually exercised whether *sensitive* crash content survives into
+    // the exported bundle. This drives a crash message/stack containing a
+    // Windows-username-bearing path and an API-key-shaped token — the two
+    // concretely identifiable patterns buildFeedbackBundle's redaction
+    // pass targets — and asserts neither appears verbatim anywhere in the
+    // zip, while confirming the crash log is still present and useful
+    // (the generic "boom"/error type text survives redaction).
+    it('redacts a username-bearing path and an API-key-shaped token from a real sensitive crash message', async () => {
+      const sensitiveError = new Error(
+        'ENOENT: no such file or directory, open \'C:\\Users\\jsmith\\AppData\\Local\\atlas\\secrets.json\' ' +
+          '(request failed with Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz0123456789)'
+      )
+      recordCrash('uncaughtException', sensitiveError)
+      await flush()
+
+      const buffer = await buildFeedbackBundle({
+        appVersion: '0.1.0',
+        electronVersion: '33.2.1',
+        platform: 'win32',
+        osRelease: '10.0.26200',
+        telemetryEnabled: false,
+        runTraces: []
+      })
+
+      const zip = await JSZip.loadAsync(buffer)
+      const crashLog = await zip.file('crash.log')!.async('string')
+
+      expect(crashLog).not.toContain('jsmith')
+      expect(crashLog).not.toContain('sk-abcdefghijklmnopqrstuvwxyz0123456789')
+      expect(crashLog).toContain('[redacted-user]')
+      expect(crashLog).toContain('[redacted-token]')
+      // The redaction shouldn't destroy the log's diagnostic value entirely.
+      expect(crashLog).toContain('ENOENT')
+    })
+
     it('omits log files entirely when nothing has been written yet', async () => {
       const buffer = await buildFeedbackBundle({
         appVersion: '0.1.0',

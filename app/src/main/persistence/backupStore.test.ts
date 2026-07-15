@@ -125,4 +125,21 @@ describe('backupStore', () => {
       expect(await listBackups(projectRoot)).toHaveLength(0)
     })
   })
+
+  // Codex adversarial-review finding (Round 10/Phase 9 closing pass): a
+  // plain writeFile(manifestPath, ...) let two overlapping createBackup()
+  // calls read the same manifest and independently overwrite it, silently
+  // discarding whichever entry finished writing first — a realistic
+  // scenario now that Track D's scheduled-backup timer can fire while the
+  // writer also clicks "Create backup" manually. Both entries must survive
+  // regardless of which write actually lands last.
+  it('does not lose either backup entry when two createBackup() calls overlap', async () => {
+    const [a, b] = await Promise.all([createBackup(projectRoot, 'Manual A'), createBackup(projectRoot, 'Manual B')])
+
+    const manifest = await listBackups(projectRoot)
+    expect(manifest).toHaveLength(2)
+    const ids = manifest.map((m) => m.backupId)
+    expect(ids).toContain(a.backupId)
+    expect(ids).toContain(b.backupId)
+  })
 })

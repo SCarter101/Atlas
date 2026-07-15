@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from 'node:fs'
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import JSZip from 'jszip'
 import type { BackupMeta } from '@shared/schema/backup'
@@ -10,6 +10,48 @@ let mostRecentRecoveryAvailable = false
 
 function manifestPath(projectRoot: string): string {
   return join(projectPaths(projectRoot).backupsDir, 'manifest.json')
+}
+
+// Codex adversarial-review finding (Round 10/Phase 9 closing pass): a plain
+// writeFile(manifestPath, ...) has two real failure modes now that Track D's
+// scheduled backups make overlapping createBackup() calls a realistic case
+// (a scheduled backup firing while the writer clicks "Create backup"
+// manually), not just a theoretical double-click:
+//   1. Non-atomic write — an interruption mid-write leaves truncated/invalid
+//      JSON, which listBackupsOldestFirst()'s catch silently turns into [],
+//      making every prior backup disappear from the UI despite intact ZIPs.
+//   2. Read-modify-write race — two overlapping calls both read the same
+//      manifest, append independently, and whichever writeFile() finishes
+//      last silently discards the other's entry.
+// Fixed with (1) an atomic write (write to a temp file in the same
+// directory, then rename() — rename is atomic on the same volume, so a
+// crash mid-write can never leave a torn manifest.json) and (2) a
+// per-projectRoot in-memory promise chain so overlapping createBackup()
+// calls serialize their manifest read-modify-write instead of racing.
+const manifestWriteQueues = new Map<string, Promise<void>>()
+
+async function withManifestWriteLock(projectRoot: string, fn: () => Promise<void>): Promise<void> {
+  const previous = manifestWriteQueues.get(projectRoot) ?? Promise.resolve()
+  const next = previous.then(fn, fn)
+  // Swallow so a failed write doesn't wedge the queue for later callers —
+  // each caller still awaits `next` directly and sees its own rejection.
+  manifestWriteQueues.set(
+    projectRoot,
+    next.catch(() => {})
+  )
+  return next
+}
+
+async function writeManifestAtomically(projectRoot: string, manifest: BackupMeta[]): Promise<void> {
+  const finalPath = manifestPath(projectRoot)
+  const tmpPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(tmpPath, JSON.stringify(manifest, null, 2), 'utf-8')
+  try {
+    await rename(tmpPath, finalPath)
+  } catch (err) {
+    await unlink(tmpPath).catch(() => {})
+    throw err
+  }
 }
 
 function sessionLockPath(projectRoot: string): string {
@@ -82,9 +124,13 @@ export async function createBackup(projectRoot: string, label?: string): Promise
     sizeBytes: fileStat.size
   }
 
-  const manifest = await listBackupsOldestFirst(projectRoot)
-  manifest.push(meta)
-  await writeFile(manifestPath(projectRoot), JSON.stringify(manifest, null, 2), 'utf-8')
+  // Read-modify-write of the shared manifest must be serialized per project
+  // — see withManifestWriteLock's comment above the manifest-write helpers.
+  await withManifestWriteLock(projectRoot, async () => {
+    const manifest = await listBackupsOldestFirst(projectRoot)
+    manifest.push(meta)
+    await writeManifestAtomically(projectRoot, manifest)
+  })
 
   return meta
 }

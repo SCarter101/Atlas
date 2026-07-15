@@ -261,13 +261,40 @@ it anywhere. It contains:
   - run-traces.json   Sanitized metadata for your most recent agent runs (timestamps, agent
                        role, run status, token/cost counts, error codes). Manuscript prose,
                        model output text, and suggestion content are deliberately excluded.
-  - crash.log         Local crash log (error message + stack trace only, no manuscript text).
+  - crash.log         Local crash log (error message + stack trace only, no manuscript text;
+                       file paths and anything resembling an API key are redacted).
   - events.log        Local usage-event log, only present if you opted in under Settings ->
                        Telemetry & feedback. Structural events only, no manuscript text.
 
 To actually report a problem, attach this zip to an email or a GitHub issue yourself —
 Atlas has no external service to submit it to automatically.
 `
+
+// Codex adversarial-review finding (Round 10/Phase 9 closing pass):
+// sanitizeRunTrace() carefully strips manuscript prose and model output from
+// run traces, but recordCrash() stores arbitrary error messages/stacks
+// verbatim, and buildFeedbackBundle() previously zipped crash.log/crash.log.1
+// unchanged. An uncaught exception's message or stack can legitimately
+// contain an absolute path with the OS username (e.g. "C:\Users\Alice\..."),
+// or — if a failed network request's error message echoes back part of the
+// request — text that resembles an API key/bearer token. This can't be made
+// airtight for genuinely free-form error text, but the two concretely
+// identifiable, common patterns are redacted before the log ever leaves the
+// machine via the feedback bundle. The local crash.log file itself is left
+// unredacted (it's only ever read locally, never transmitted automatically —
+// see the module comment), so a writer's own troubleshooting isn't degraded.
+function redactSensitiveText(text: string): string {
+  // crash.log stores one JSON.stringify()'d entry per line (see
+  // recordCrash() below), so every real single backslash in an original
+  // Windows path is doubled in the file's raw text ("C:\Users\name" is
+  // stored as the literal characters "C:\\Users\\name"). Match 1-2
+  // backslashes so this works whether redaction ever runs against raw
+  // in-memory text or the JSON-escaped on-disk form.
+  return text
+    .replace(/([A-Za-z]:\\{1,2}Users\\{1,2})[^"\\]+/g, '$1[redacted-user]')
+    .replace(/(\/(?:home|Users)\/)[^/"]+/g, '$1[redacted-user]')
+    .replace(/\b(sk-[A-Za-z0-9_-]{10,}|Bearer\s+[A-Za-z0-9._-]{10,}|[A-Za-z0-9_-]{32,})\b/g, '[redacted-token]')
+}
 
 export async function buildFeedbackBundle(input: FeedbackBundleInput): Promise<Buffer> {
   const zip = new JSZip()
@@ -292,9 +319,9 @@ export async function buildFeedbackBundle(input: FeedbackBundleInput): Promise<B
   zip.file('README.txt', FEEDBACK_README)
 
   const crashLog = await readLogFileSafe(crashLogPath())
-  if (crashLog) zip.file('crash.log', crashLog)
+  if (crashLog) zip.file('crash.log', redactSensitiveText(crashLog))
   const rotatedCrashLog = await readLogFileSafe(`${crashLogPath()}.1`)
-  if (rotatedCrashLog) zip.file('crash.log.1', rotatedCrashLog)
+  if (rotatedCrashLog) zip.file('crash.log.1', redactSensitiveText(rotatedCrashLog))
 
   const eventLog = await readLogFileSafe(eventLogPath())
   if (eventLog) zip.file('events.log', eventLog)

@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -51,6 +53,35 @@ describe('assertWithinProjectsRoot', () => {
   it('rejects the Atlas Projects root folder itself, not just paths outside it', () => {
     const rootItself = join(documentsDir, 'Atlas Projects')
     expect(() => assertWithinProjectsRoot(rootItself)).toThrow(/outside the Atlas Projects folder/i)
+  })
+
+  it('rejects a junction inside Atlas Projects that actually points outside it (Codex adversarial-review finding, Round 10/Phase 9)', () => {
+    // Real filesystem I/O, not the fake mocked documentsDir above — a
+    // junction needs somewhere real to point through. Skips cleanly if
+    // junction creation isn't permitted in this environment rather than
+    // failing the whole suite over an environment limitation unrelated to
+    // the guard logic itself.
+    const realRoot = mkdtempSync(join(tmpdir(), 'atlas-pathguard-real-'))
+    documentsDir = realRoot
+    const projectsRoot = join(realRoot, 'Atlas Projects')
+    mkdirSync(projectsRoot, { recursive: true })
+    const outsideTarget = mkdtempSync(join(tmpdir(), 'atlas-pathguard-outside-'))
+    const junctionPath = join(projectsRoot, 'linked.atlas')
+
+    try {
+      symlinkSync(outsideTarget, junctionPath, 'junction')
+    } catch {
+      rmSync(realRoot, { recursive: true, force: true })
+      rmSync(outsideTarget, { recursive: true, force: true })
+      return // junction creation unavailable in this environment — nothing to assert
+    }
+
+    try {
+      expect(() => assertWithinProjectsRoot(junctionPath)).toThrow(/outside the Atlas Projects folder/i)
+    } finally {
+      rmSync(realRoot, { recursive: true, force: true })
+      rmSync(outsideTarget, { recursive: true, force: true })
+    }
   })
 
   it('throws an AtlasError with a machine-readable code for a rejected path', async () => {

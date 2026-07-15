@@ -118,17 +118,45 @@ export async function openIndexDb(projectRoot: string): Promise<AtlasDb> {
 // this file's header and the `vectors.model` column comment below — so
 // deferring persistence within one batch, or losing an in-flight batch to a
 // crash, loses no durability guarantee this file didn't already accept.
+// Codex adversarial-review finding (Round 10/Phase 9 closing pass): the
+// original implementation captured/restored `atlasDb.persist` directly on
+// the object, which is only correct for a single, non-overlapping call. Two
+// batches on the same AtlasDb that overlap in time (e.g. a lazy
+// ensureIndexed() pass racing a scene-write-triggered incremental reindex)
+// corrupt each other — the second batch's "real" persist is actually the
+// first batch's no-op, so restoring it on exit leaves atlasDb.persist
+// permanently inert until process restart. Tracked per-AtlasDb state in a
+// WeakMap instead of nested-capture-and-restore: only the outermost call
+// installs/removes the no-op and holds the one real persist reference;
+// inner/overlapping calls just increment a depth counter and share the
+// dirty flag, so restoration always happens exactly once, from the correct
+// original function, regardless of interleaving.
+interface BatchState {
+  depth: number
+  dirty: boolean
+  realPersist: () => void
+}
+const batchStates = new WeakMap<AtlasDb, BatchState>()
+
 export async function withBatchedPersist<T>(atlasDb: AtlasDb, fn: () => Promise<T> | T): Promise<T> {
-  const realPersist = atlasDb.persist
-  let dirty = false
-  atlasDb.persist = () => {
-    dirty = true
+  let state = batchStates.get(atlasDb)
+  if (!state) {
+    state = { depth: 0, dirty: false, realPersist: atlasDb.persist }
+    batchStates.set(atlasDb, state)
+    atlasDb.persist = () => {
+      state!.dirty = true
+    }
   }
+  state.depth += 1
   try {
     return await fn()
   } finally {
-    atlasDb.persist = realPersist
-    if (dirty) realPersist()
+    state.depth -= 1
+    if (state.depth === 0) {
+      atlasDb.persist = state.realPersist
+      batchStates.delete(atlasDb)
+      if (state.dirty) state.realPersist()
+    }
   }
 }
 
