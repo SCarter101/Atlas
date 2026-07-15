@@ -48,6 +48,17 @@ export interface SceneContinuityMeta {
   themeIds?: string[]
   motifIds?: string[]
   relatedCodexIds?: string[]
+  // Phase 9 continuity validators (see shared/continuityChecks.ts). All three
+  // purely additive/optional, no migration needed — same treatment as the
+  // rest of this object's fields. storyDate is the in-world calendar date
+  // ('YYYY-MM-DD') this scene takes place on; season is a fixed-Northern-
+  // Hemisphere label cross-checked against storyDate's month by
+  // checkSeasonConsistency; isFlashback suppresses timeline-monotonicity
+  // flagging for a scene that's intentionally out of story-chronological
+  // order relative to its manuscript position.
+  storyDate?: string
+  season?: 'spring' | 'summer' | 'autumn' | 'winter'
+  isFlashback?: boolean
 }
 
 export interface SceneMeta {

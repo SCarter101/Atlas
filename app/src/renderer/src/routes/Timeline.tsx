@@ -1,17 +1,20 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CodexEntry } from '@shared/schema/codex'
+import { runAllContinuityChecks, type ContinuityCheckKind, type ContinuityFinding } from '@shared/continuityChecks'
 import { CharacterPresenceMap } from '../components/CharacterPresenceMap'
 import { ConflictCurveChart } from '../components/ConflictCurveChart'
 import { PlotThreadBoard } from '../components/PlotThreadBoard'
+import { useAtlasStore } from '../state/store'
 
-type TimelineTab = 'timeline' | 'plot-threads' | 'character-map' | 'conflict-curve'
+type TimelineTab = 'timeline' | 'plot-threads' | 'character-map' | 'conflict-curve' | 'continuity-checks'
 
 const TABS: Array<{ key: TimelineTab; label: string }> = [
   { key: 'timeline', label: 'Timeline' },
   { key: 'plot-threads', label: 'Plot Threads' },
   { key: 'character-map', label: 'Character Map' },
-  { key: 'conflict-curve', label: 'Conflict Curve' }
+  { key: 'conflict-curve', label: 'Conflict Curve' },
+  { key: 'continuity-checks', label: 'Continuity Checks' }
 ]
 
 interface TimelineEvent {
@@ -40,7 +43,11 @@ const TAB_META: Record<TimelineTab, { title: string; subtitle: string }> = {
     subtitle: 'Setups, clues, promises, and payoffs tracked across the manuscript'
   },
   'character-map': { title: 'Character Presence Map', subtitle: 'Which characters appear in which chapters' },
-  'conflict-curve': { title: 'Conflict / Tension Curve', subtitle: 'Conflict level by reading order, scene by scene' }
+  'conflict-curve': { title: 'Conflict / Tension Curve', subtitle: 'Conflict level by reading order, scene by scene' },
+  'continuity-checks': {
+    title: 'Continuity Checks',
+    subtitle: 'Automated age, timeline, injury, travel-time, and season checks (spec §11)'
+  }
 }
 
 // Extended per spec §11/Phase 3-4 into a tabbed view: the original static
@@ -68,6 +75,7 @@ export function Timeline(): JSX.Element {
       {tab === 'plot-threads' && <PlotThreadBoard />}
       {tab === 'character-map' && <CharacterPresenceMap />}
       {tab === 'conflict-curve' && <ConflictCurveChart />}
+      {tab === 'continuity-checks' && <ContinuityChecksView />}
     </div>
   )
 }
@@ -166,4 +174,147 @@ function EventCard({ event }: { event: TimelineEvent }): JSX.Element {
       <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', lineHeight: 1.5 }}>{event.body}</div>
     </div>
   )
+}
+
+const CONTINUITY_KIND_LABEL: Record<ContinuityCheckKind, string> = {
+  age: 'Age consistency',
+  timeline: 'Timeline monotonicity',
+  injury: 'Injury continuity',
+  travel: 'Travel time',
+  season: 'Season consistency'
+}
+const CONTINUITY_KIND_ORDER: ContinuityCheckKind[] = ['timeline', 'age', 'injury', 'travel', 'season']
+
+// Spec §11 automated continuity validators — runs shared/continuityChecks.ts's
+// 5 pure checks against the already-loaded Codex entries + manuscript tree
+// (both already fetched elsewhere in the renderer; this view just needs its
+// own copy of the full, unfiltered Codex list, since the other tabs above
+// only ever fetch one type at a time). No new IPC.
+function ContinuityChecksView(): JSX.Element {
+  const manuscriptTree = useAtlasStore((s) => s.manuscriptTree)
+  const setActiveScene = useAtlasStore((s) => s.setActiveScene)
+  const navigate = useNavigate()
+  const [entries, setEntries] = useState<CodexEntry[]>([])
+
+  useEffect(() => {
+    void window.atlas.codex.list().then(setEntries)
+  }, [])
+
+  const sceneTitleById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const book of manuscriptTree?.books ?? []) {
+      for (const part of book.parts) {
+        for (const chapter of part.chapters) {
+          for (const scene of chapter.scenes) map.set(scene.id, scene.title)
+        }
+      }
+    }
+    return map
+  }, [manuscriptTree])
+
+  const codexNameById = useMemo(() => new Map(entries.map((e) => [e.id, e.name])), [entries])
+
+  const findings = useMemo(
+    () => (manuscriptTree ? runAllContinuityChecks(entries, manuscriptTree) : []),
+    [entries, manuscriptTree]
+  )
+
+  const grouped = useMemo(() => {
+    const map = new Map<ContinuityCheckKind, ContinuityFinding[]>()
+    for (const finding of findings) {
+      const list = map.get(finding.kind)
+      if (list) list.push(finding)
+      else map.set(finding.kind, [finding])
+    }
+    return map
+  }, [findings])
+
+  function jumpToScene(sceneId: string): void {
+    setActiveScene(sceneId)
+    navigate('/manuscript')
+  }
+
+  if (!manuscriptTree) {
+    return <div style={{ color: 'var(--c-ink-soft)', fontSize: 14 }}>Loading manuscript…</div>
+  }
+
+  if (findings.length === 0) {
+    return (
+      <div style={{ color: 'var(--c-ink-soft)', fontSize: 14, lineHeight: 1.6 }}>
+        No continuity issues detected. These checks run against character birth dates and injuries, location travel
+        links, and scene story dates/seasons — add those fields (via a Codex character/location entry's Continuity
+        section, or a scene's Continuity &amp; Threads panel) to get more coverage.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {CONTINUITY_KIND_ORDER.filter((kind) => grouped.has(kind)).map((kind) => (
+        <div key={kind}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              color: 'var(--c-ink-faint)',
+              marginBottom: 8
+            }}
+          >
+            {CONTINUITY_KIND_LABEL[kind]} ({grouped.get(kind)!.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {grouped.get(kind)!.map((finding) => (
+              <div key={finding.id} style={continuityFindingCardStyle(finding.severity)}>
+                <div style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 8 }}>{finding.message}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {finding.relatedSceneIds.map((sceneId) => (
+                    <button key={sceneId} onClick={() => jumpToScene(sceneId)} style={continuityChipButtonStyle}>
+                      Jump to "{sceneTitleById.get(sceneId) ?? sceneId}" ↦
+                    </button>
+                  ))}
+                  {finding.relatedCodexEntryIds.map((entryId) => (
+                    <span key={entryId} style={continuityCodexChipStyle}>
+                      {codexNameById.get(entryId) ?? entryId}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function continuityFindingCardStyle(severity: ContinuityFinding['severity']): CSSProperties {
+  const accent = severity === 'high' ? 'var(--c-red)' : severity === 'medium' ? 'var(--c-amber)' : 'var(--c-border-strong)'
+  return {
+    padding: '12px 14px',
+    borderRadius: 10,
+    border: '1px solid var(--c-border)',
+    borderLeft: `3px solid ${accent}`,
+    background: 'var(--c-surface)'
+  }
+}
+
+const continuityChipButtonStyle: CSSProperties = {
+  fontSize: 11,
+  padding: '3px 10px',
+  borderRadius: 12,
+  border: '1px solid var(--c-border-strong)',
+  background: 'transparent',
+  color: 'var(--c-ink-soft)',
+  cursor: 'pointer'
+}
+
+const continuityCodexChipStyle: CSSProperties = {
+  fontSize: 11,
+  padding: '3px 10px',
+  borderRadius: 12,
+  border: '1px solid var(--c-border)',
+  background: 'var(--c-surface-raised)',
+  color: 'var(--c-ink-faint)'
 }
