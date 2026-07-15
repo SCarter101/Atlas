@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanupTestDir } from '../testUtils'
 
 // pathGuard.ts -> projectStore.ts calls electron's app.getPath('documents')
 // to locate the "Atlas Projects" root — outside a running Electron process
@@ -71,16 +72,16 @@ describe('assertWithinProjectsRoot', () => {
     try {
       symlinkSync(outsideTarget, junctionPath, 'junction')
     } catch {
-      rmSync(realRoot, { recursive: true, force: true })
-      rmSync(outsideTarget, { recursive: true, force: true })
+      cleanupTestDir(realRoot)
+      cleanupTestDir(outsideTarget)
       return // junction creation unavailable in this environment — nothing to assert
     }
 
     try {
       expect(() => assertWithinProjectsRoot(junctionPath)).toThrow(/outside the Atlas Projects folder/i)
     } finally {
-      rmSync(realRoot, { recursive: true, force: true })
-      rmSync(outsideTarget, { recursive: true, force: true })
+      cleanupTestDir(realRoot)
+      cleanupTestDir(outsideTarget)
     }
   })
 

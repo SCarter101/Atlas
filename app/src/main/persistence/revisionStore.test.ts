@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SceneMeta } from '@shared/schema/manuscript'
+import { cleanupTestDir } from '../testUtils'
 import { createSnapshot, diffSnapshots, getSnapshot, listSnapshots } from './revisionStore'
 
 const SCENE_META: SceneMeta = {
@@ -24,7 +25,7 @@ describe('revisionStore', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   describe('createSnapshot / listSnapshots / getSnapshot', () => {

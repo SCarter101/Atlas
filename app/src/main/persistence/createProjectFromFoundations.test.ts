@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { cleanupTestDir } from '../testUtils'
 import { createProjectFromFoundations, slugify } from './createProjectFromFoundations'
 import { listCodexEntries } from './codexStore'
 import { openIndexDb, type AtlasDb } from './db'
@@ -27,7 +28,7 @@ describe('createProjectFromFoundations', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('creates a real project manifest and writes each answered entry to the Codex', async () => {

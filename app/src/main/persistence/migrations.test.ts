@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { cleanupTestDir } from '../testUtils'
 import { openIndexDb, type AtlasDb } from './db'
 import { sceneFilePaths } from './paths'
 import { readScene, writeScene } from './sceneStore'
@@ -149,7 +150,7 @@ describe('real migration: SceneMeta v1 -> v2 (localModelOnly)', () => {
     })
 
     afterEach(() => {
-      rmSync(projectRoot, { recursive: true, force: true })
+      cleanupTestDir(projectRoot)
     })
 
     it('upgrades a genuine v1 .meta.json file on disk when readScene() reads it back', async () => {

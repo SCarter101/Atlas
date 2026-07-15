@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openIndexDb, upsertVectorIndex, type AtlasDb } from '../persistence/db'
 import { writeBookMeta, writeChapterMeta, writePartMeta } from '../persistence/manuscriptStore'
 import { writeScene } from '../persistence/sceneStore'
+import { cleanupTestDir } from '../testUtils'
 import { ensureIndexed, indexedKey, indexText, markIndexed, search } from './search'
 import { cosineSimilarity, vectorize } from './vectorize'
 
@@ -60,7 +61,7 @@ describe('vector BLOB round trip through a real sql.js index db', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('preserves exact vector bytes across an upsert + search round trip', () => {
@@ -121,7 +122,7 @@ describe('model-tagged retrieval (real embedding adapters, Phase 7)', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('indexText(..., model) is async and search(..., {model}) retrieves what it wrote, tagged with the adapter id', async () => {
@@ -185,7 +186,7 @@ describe('markIndexed / ensureIndexed consistency (Phase 7)', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('markIndexed() keeps ensureIndexed() from re-embedding a scene the scene-write hook already indexed', async () => {

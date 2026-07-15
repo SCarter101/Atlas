@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { deriveChapterStatus } from '@shared/deriveChapterStatus'
+import { cleanupTestDir } from '../testUtils'
 import { listCapabilityManifests } from './capabilityStore'
 import { openIndexDb, type AtlasDb } from './db'
 import { readManuscriptTree } from './manuscriptStore'
@@ -19,7 +20,7 @@ describe('seedCottonmouthProject', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('seeds a project manifest with the writer display name', async () => {

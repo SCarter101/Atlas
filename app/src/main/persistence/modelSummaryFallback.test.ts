@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SummaryPromptPair } from '@shared/summaryPrompts'
+import { cleanupTestDir } from '../testUtils'
 
 // generateSummaryViaModel() routes through the real OpenRouterAdapter, which
 // reads its key via main/security/keyVault.ts's getSecret() — mocked the
@@ -35,7 +36,7 @@ describe('generateSummaryViaModel', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('uses LM Studio when it succeeds and never touches OpenRouter', async () => {

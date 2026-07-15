@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { diffWords } from '@shared/diffText'
+import { cleanupTestDir } from '../testUtils'
 import { openIndexDb, upsertVectorIndex, withBatchedPersist, type AtlasDb } from '../persistence/db'
 import { readManuscriptTree } from '../persistence/manuscriptStore'
 import { readScene, writeScene } from '../persistence/sceneStore'
@@ -73,7 +74,7 @@ describe('performance at ~120k-word manuscript scale', () => {
   }, FIXTURE_TIMEOUT_MS)
 
   afterAll(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('generated a real ~120k-word manuscript (sanity check on the fixture itself)', () => {
@@ -196,7 +197,7 @@ describe('performance at ~120k-word manuscript scale', () => {
       // doesn't flake on a fast machine where n=300 is cheap either way.
       expect(batchedMs).toBeLessThan(unbatchedMs / 2)
     } finally {
-      rmSync(benchRoot, { recursive: true, force: true })
+      cleanupTestDir(benchRoot)
     }
   }, 30_000)
 

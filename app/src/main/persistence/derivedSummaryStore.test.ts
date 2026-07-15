@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodexEntry } from '@shared/schema/codex'
 import type { Book, Chapter, Part, SceneMeta } from '@shared/schema/manuscript'
+import { cleanupTestDir } from '../testUtils'
 
 // derivedSummaryStore.ts routes through generateSummaryViaModel(), which
 // calls the real OpenRouterAdapter (reads its key via
@@ -133,7 +134,7 @@ describe('getOrGenerateDerivedSummary', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   describe('character-arc', () => {

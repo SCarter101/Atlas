@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunRecord } from '@shared/schema/agent'
+import { cleanupTestDir } from '../testUtils'
 
 // telemetryStore.ts calls electron's app.getPath('userData') to locate the
 // local telemetry/logs directories — outside a running Electron process
@@ -98,7 +99,7 @@ describe('telemetryStore', () => {
   })
 
   afterEach(() => {
-    rmSync(userDataDir, { recursive: true, force: true })
+    cleanupTestDir(userDataDir)
   })
 
   describe('crash log', () => {

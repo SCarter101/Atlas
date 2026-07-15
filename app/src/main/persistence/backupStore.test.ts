@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ProjectManifest } from '@shared/schema/project'
+import { cleanupTestDir } from '../testUtils'
 import { createBackup, listBackups, maybeRunScheduledBackup, restoreBackup } from './backupStore'
 import { projectPaths } from './paths'
 
@@ -50,7 +51,7 @@ describe('backupStore', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('creates and lists a backup without recursing into backups', async () => {
@@ -81,7 +82,7 @@ describe('backupStore', () => {
       'Scene prose'
     )
 
-    rmSync(result.restoredProjectRoot, { recursive: true, force: true })
+    cleanupTestDir(result.restoredProjectRoot)
   })
 
   describe('maybeRunScheduledBackup', () => {

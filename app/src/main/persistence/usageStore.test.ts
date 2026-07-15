@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { UsageEntry } from '@shared/schema/usage'
+import { cleanupTestDir } from '../testUtils'
 import { getUsageSummary, recordUsage } from './usageStore'
 
 function entry(partial: Partial<UsageEntry> & Pick<UsageEntry, 'agentRole' | 'modelRef'>): UsageEntry {
@@ -24,7 +25,7 @@ describe('usageStore', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('returns an all-zero summary when no usage has been recorded yet', async () => {

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +6,7 @@ import type { AgentGoal, AgentRunRecord } from '@shared/schema/agent'
 import type { CapabilityManifest } from '@shared/schema/capability'
 import { openIndexDb } from '../persistence/db'
 import { saveAgentRun } from '../persistence/agentRunStore'
+import { cleanupTestDir } from '../testUtils'
 
 // registry.ts calls electron's app.getPath('userData') to locate the real
 // global capability directory — outside a running Electron process (i.e.
@@ -78,9 +79,9 @@ describe('capabilities/registry — global vs project scope', () => {
   })
 
   afterEach(() => {
-    rmSync(userDataRoot, { recursive: true, force: true })
-    rmSync(projectA, { recursive: true, force: true })
-    rmSync(projectB, { recursive: true, force: true })
+    cleanupTestDir(userDataRoot)
+    cleanupTestDir(projectA)
+    cleanupTestDir(projectB)
   })
 
   it('globalCapabilitiesDir() lives under app.getPath("userData")/atlas/capabilities', () => {

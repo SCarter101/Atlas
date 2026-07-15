@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanupTestDir } from '../testUtils'
 
 // promptStore.ts calls electron's app.getPath('userData') to locate the
 // global prompts directory — outside a running Electron process (i.e. under
@@ -27,7 +28,7 @@ describe('promptStore', () => {
   })
 
   afterEach(() => {
-    rmSync(userDataDir, { recursive: true, force: true })
+    cleanupTestDir(userDataDir)
   })
 
   it('returns the seed default when no record exists yet on disk', async () => {

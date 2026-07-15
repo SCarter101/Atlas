@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CodexEntry } from '@shared/schema/codex'
 import type { ManuscriptTree } from '@shared/schema/manuscript'
+import { cleanupTestDir } from '../testUtils'
 import { openIndexDb, type AtlasDb } from './db'
 import {
   detectContradictions,
@@ -44,7 +45,7 @@ describe('upsertCodexEntry — history append', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('does not append a history entry on first create', async () => {

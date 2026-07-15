@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,6 +10,7 @@ import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { writeBookMeta, writeChapterMeta, writePartMeta } from '../persistence/manuscriptStore'
 import { createProject } from '../persistence/projectStore'
 import { writeScene } from '../persistence/sceneStore'
+import { cleanupTestDir } from '../testUtils'
 import { readSourceFile } from './readSourceFile'
 import { parseManuscript } from './parseManuscript'
 
@@ -92,8 +93,8 @@ describe('manuscript export -> import round trip', () => {
   })
 
   afterEach(() => {
-    rmSync(sourceDir, { recursive: true, force: true })
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(sourceDir)
+    cleanupTestDir(projectRoot)
   })
 
   it('preserves title, chapter titles, and scene prose through export -> file -> parse', async () => {

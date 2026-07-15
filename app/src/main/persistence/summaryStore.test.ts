@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanupTestDir } from '../testUtils'
 
 // Phase 7: getOrGenerateSceneSummary/getOrGenerateChapterSummary now attempt
 // a real model call (LM Studio, then OpenRouter — see
@@ -42,7 +43,7 @@ describe('getOrGenerateSceneSummary', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('generates a heuristic summary on first call when no real provider is available', async () => {
@@ -133,7 +134,7 @@ describe('getOrGenerateChapterSummary', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('generates a heuristic summary on first call from its scene summaries', async () => {

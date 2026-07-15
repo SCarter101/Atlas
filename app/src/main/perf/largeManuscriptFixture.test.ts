@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { readManuscriptTree } from '../persistence/manuscriptStore'
 import { listCodexEntries } from '../persistence/codexStore'
+import { cleanupTestDir } from '../testUtils'
 import { generateLargeManuscriptFixture } from './largeManuscriptFixture'
 
 // Small-scale sanity checks for the fixture generator itself, run at a tiny
@@ -21,7 +22,7 @@ describe('generateLargeManuscriptFixture', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('writes the requested book/chapter/scene shape to real project files', async () => {
@@ -95,8 +96,8 @@ describe('generateLargeManuscriptFixture', () => {
       expect(resultA.totalWordCount).toBe(resultB.totalWordCount)
       expect(resultA.sceneIds).toEqual(resultB.sceneIds)
     } finally {
-      rmSync(rootA, { recursive: true, force: true })
-      rmSync(rootB, { recursive: true, force: true })
+      cleanupTestDir(rootA)
+      cleanupTestDir(rootB)
     }
   })
 })
