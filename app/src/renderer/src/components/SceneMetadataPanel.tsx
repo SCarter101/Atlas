@@ -1,9 +1,10 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import type { CodexEntry } from '@shared/schema/codex'
-import type { SceneMeta } from '@shared/schema/manuscript'
+import type { SceneContinuityMeta, SceneMeta } from '@shared/schema/manuscript'
 import { useAtlasStore } from '../state/store'
 
 const CONFLICT_LEVELS = [1, 2, 3, 4, 5]
+const SEASON_OPTIONS: NonNullable<SceneContinuityMeta['season']>[] = ['spring', 'summer', 'autumn', 'winter']
 
 // Tier 1 is always-visible pills; Tier 2 (Story Craft) and Tier 3
 // (Continuity & Threads) are progressive disclosure per spec §5 — hidden
@@ -36,6 +37,12 @@ export function SceneMetadataPanel({ scene }: { scene: SceneMeta }): JSX.Element
 
   function toggleLocalModelOnly(): void {
     void updateSceneMeta(scene.id, { localModelOnly: !scene.localModelOnly })
+  }
+
+  // Phase 9 continuity validators (shared/continuityChecks.ts) — storyDate/
+  // season/isFlashback feed the Timeline's "Continuity Checks" tab.
+  function updateContinuityField(patch: Partial<SceneContinuityMeta>): void {
+    void updateSceneMeta(scene.id, { continuity: { ...scene.continuity, ...patch } })
   }
 
   const craftFields = fieldsFor(scene.craft, {
@@ -140,15 +147,72 @@ export function SceneMetadataPanel({ scene }: { scene: SceneMeta }): JSX.Element
         </div>
       )}
 
-      {continuityFields.length > 0 && (
-        <ToggleChip onClick={() => setContinuityOpen((v) => !v)} style={{ marginTop: 10, marginBottom: continuityOpen ? 0 : undefined }}>
-          {continuityOpen ? 'Hide continuity & threads ▾' : 'Continuity & Threads ▸'}
-        </ToggleChip>
-      )}
+      <ToggleChip onClick={() => setContinuityOpen((v) => !v)} style={{ marginTop: 10, marginBottom: continuityOpen ? 0 : undefined }}>
+        {continuityOpen ? 'Hide continuity & threads ▾' : 'Continuity & Threads ▸'}
+      </ToggleChip>
 
-      {continuityOpen && continuityFields.length > 0 && <FieldGrid fields={continuityFields} style={{ marginTop: 10 }} />}
+      {continuityOpen && (
+        <div style={{ marginTop: 10 }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 14,
+              padding: '10px 14px',
+              border: '1px solid var(--c-border)',
+              borderRadius: 10,
+              background: 'var(--c-surface)',
+              marginBottom: continuityFields.length > 0 ? 10 : 0
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--c-ink-faint)' }}>
+              Story date:
+              <input
+                type="date"
+                value={continuity?.storyDate ?? ''}
+                onChange={(e) => updateContinuityField({ storyDate: e.target.value || undefined })}
+                style={dateInputStyle}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--c-ink-faint)' }}>
+              Season:
+              <select
+                value={continuity?.season ?? ''}
+                onChange={(e) =>
+                  updateContinuityField({ season: (e.target.value || undefined) as SceneContinuityMeta['season'] })
+                }
+                style={dateInputStyle}
+              >
+                <option value="">Unset</option>
+                {SEASON_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <ToggleChip
+              onClick={() => updateContinuityField({ isFlashback: !continuity?.isFlashback })}
+              selected={continuity?.isFlashback === true}
+            >
+              Flashback
+            </ToggleChip>
+          </div>
+          {continuityFields.length > 0 && <FieldGrid fields={continuityFields} />}
+        </div>
+      )}
     </div>
   )
+}
+
+const dateInputStyle: CSSProperties = {
+  padding: '4px 8px',
+  borderRadius: 6,
+  border: '1px solid var(--c-border)',
+  background: 'var(--c-surface-raised)',
+  color: 'var(--c-ink)',
+  fontSize: 11.5
 }
 
 function presenceOptionStyle(selected: boolean): CSSProperties {

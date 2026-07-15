@@ -58,6 +58,23 @@ export interface CharacterVoiceProfile {
   powerDynamics?: string
 }
 
+// Phase 9 continuity validators (Timeline "Continuity Checks" tab, see
+// shared/continuityChecks.ts) — only meaningful when
+// CodexEntry.type === 'character'. Optional and degrades gracefully when
+// absent, same treatment as voiceProfile above: a character with no
+// continuityProfile simply never participates in age/injury checks.
+export interface CharacterContinuityProfile {
+  birthDate?: string
+  injuries?: {
+    id: string
+    description: string
+    occurredSceneId?: string
+    occurredDate?: string
+    healedDate?: string
+    healedSceneId?: string
+  }[]
+}
+
 export interface CodexEntry {
   schemaVersion: 1
   id: string
@@ -74,6 +91,14 @@ export interface CodexEntry {
   manuscriptLinks: ManuscriptLink[]
   spoilerRevealSceneId?: string
   voiceProfile?: CharacterVoiceProfile
+  // Only meaningful when type === 'character' — see CharacterContinuityProfile above.
+  continuityProfile?: CharacterContinuityProfile
+  // Only meaningful when type === 'location' — known one-way travel times (in
+  // days) to other location Codex entries, used by checkTravelTime in
+  // shared/continuityChecks.ts. Optional/absent means "no known travel time
+  // recorded yet," not "zero days" — checkTravelTime simply skips a pair with
+  // no link in either direction rather than assuming instant travel.
+  travelLinks?: { locationId: string; days: number }[]
   createdAt: string
   updatedAt: string
   history: CodexVersion[]

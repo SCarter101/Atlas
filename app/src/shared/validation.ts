@@ -12,6 +12,7 @@ import { z } from 'zod'
 import type { AgentGoal, GeneratorControls, LineEditorControls, ModelRef } from './schema/agent'
 import type { CapabilityManifest, JsonSchema } from './schema/capability'
 import type {
+  CharacterContinuityProfile,
   CharacterVoiceProfile,
   CodexEntry,
   CodexEntryType,
@@ -89,6 +90,33 @@ export const CharacterVoiceProfileSchema = z.object({
   powerDynamics: z.string().optional()
 })
 
+// Phase 9 continuity-validator fields — see CharacterContinuityProfile in
+// schema/codex.ts. Only relevant when CodexEntry.type === 'character', but
+// (like CharacterVoiceProfileSchema above) validated unconditionally since
+// CodexEntrySchema doesn't branch on `type`.
+export const CharacterContinuityProfileSchema = z.object({
+  birthDate: z.string().optional(),
+  injuries: z
+    .array(
+      z.object({
+        id: z.string(),
+        description: z.string(),
+        occurredSceneId: z.string().optional(),
+        occurredDate: z.string().optional(),
+        healedDate: z.string().optional(),
+        healedSceneId: z.string().optional()
+      })
+    )
+    .optional()
+})
+
+// Only relevant when CodexEntry.type === 'location' — see travelLinks in
+// schema/codex.ts.
+export const TravelLinkSchema = z.object({
+  locationId: z.string(),
+  days: z.number()
+})
+
 export const CodexEntrySchema = z.object({
   schemaVersion: z.literal(1),
   id: z.string(),
@@ -105,6 +133,8 @@ export const CodexEntrySchema = z.object({
   manuscriptLinks: z.array(ManuscriptLinkSchema),
   spoilerRevealSceneId: z.string().optional(),
   voiceProfile: CharacterVoiceProfileSchema.optional(),
+  continuityProfile: CharacterContinuityProfileSchema.optional(),
+  travelLinks: z.array(TravelLinkSchema).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   history: z.array(CodexVersionSchema)
@@ -120,6 +150,9 @@ type _CodexVersionCheck = z.infer<typeof CodexVersionSchema> extends CodexVersio
 type _CharacterVoiceProfileCheck = z.infer<typeof CharacterVoiceProfileSchema> extends CharacterVoiceProfile
   ? true
   : never
+type _CharacterContinuityProfileCheck = z.infer<typeof CharacterContinuityProfileSchema> extends CharacterContinuityProfile
+  ? true
+  : never
 type _CodexEntryCheck = z.infer<typeof CodexEntrySchema> extends CodexEntry ? true : never
 const _codexEntryTypeCheck: _CodexEntryTypeCheck = true
 const _factStatusCheck: _FactStatusCheck = true
@@ -127,6 +160,7 @@ const _codexRelationshipCheck: _CodexRelationshipCheck = true
 const _manuscriptLinkCheck: _ManuscriptLinkCheck = true
 const _codexVersionCheck: _CodexVersionCheck = true
 const _characterVoiceProfileCheck: _CharacterVoiceProfileCheck = true
+const _characterContinuityProfileCheck: _CharacterContinuityProfileCheck = true
 const _codexEntryCheck: _CodexEntryCheck = true
 void _codexEntryTypeCheck
 void _factStatusCheck
@@ -134,6 +168,7 @@ void _codexRelationshipCheck
 void _manuscriptLinkCheck
 void _codexVersionCheck
 void _characterVoiceProfileCheck
+void _characterContinuityProfileCheck
 void _codexEntryCheck
 
 // ---------------------------------------------------------------------------
@@ -161,7 +196,10 @@ const SceneContinuityMetaSchema = z.object({
   foreshadowingNotes: z.string().optional(),
   themeIds: z.array(z.string()).optional(),
   motifIds: z.array(z.string()).optional(),
-  relatedCodexIds: z.array(z.string()).optional()
+  relatedCodexIds: z.array(z.string()).optional(),
+  storyDate: z.string().optional(),
+  season: z.enum(['spring', 'summer', 'autumn', 'winter']).optional(),
+  isFlashback: z.boolean().optional()
 })
 
 const SceneStatusSchema = z.enum(['outline', 'drafting', 'drafted', 'revised', 'final'])

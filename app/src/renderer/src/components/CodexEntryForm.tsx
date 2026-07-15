@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
 import type {
+  CharacterContinuityProfile,
   CharacterVoiceProfile,
   CodexEntry,
   CodexEntryType,
@@ -112,6 +113,52 @@ export function CodexEntryForm({
     setVoiceProfile((v) => ({ ...v, ...patch }))
   }
 
+  // Phase 9 continuity validators (shared/continuityChecks.ts) — only
+  // relevant/shown for type === 'character' (birth date + injuries) and
+  // type === 'location' (travel links), same "kept in state unconditionally
+  // so switching the type dropdown doesn't lose what's typed" treatment as
+  // voiceProfile above.
+  const [continuityProfile, setContinuityProfile] = useState<CharacterContinuityProfile>(
+    entry?.continuityProfile ?? {}
+  )
+  const [travelLinks, setTravelLinks] = useState<NonNullable<CodexEntry['travelLinks']>>(entry?.travelLinks ?? [])
+
+  const injuries = continuityProfile.injuries ?? []
+
+  function addInjury(): void {
+    setContinuityProfile((p) => ({
+      ...p,
+      injuries: [...(p.injuries ?? []), { id: crypto.randomUUID(), description: '' }]
+    }))
+  }
+
+  function updateInjury(id: string, patch: Partial<NonNullable<CharacterContinuityProfile['injuries']>[number]>): void {
+    setContinuityProfile((p) => ({
+      ...p,
+      injuries: (p.injuries ?? []).map((inj) => (inj.id === id ? { ...inj, ...patch } : inj))
+    }))
+  }
+
+  function removeInjury(id: string): void {
+    setContinuityProfile((p) => ({ ...p, injuries: (p.injuries ?? []).filter((inj) => inj.id !== id) }))
+  }
+
+  const locationTargets = allEntries.filter((e) => e.type === 'location' && e.id !== entry?.id)
+
+  function addTravelLink(): void {
+    if (locationTargets.length === 0) return
+    if (travelLinks.some((l) => l.locationId === locationTargets[0].id)) return
+    setTravelLinks((links) => [...links, { locationId: locationTargets[0].id, days: 1 }])
+  }
+
+  function updateTravelLink(locationId: string, patch: Partial<{ locationId: string; days: number }>): void {
+    setTravelLinks((links) => links.map((l) => (l.locationId === locationId ? { ...l, ...patch } : l)))
+  }
+
+  function removeTravelLink(locationId: string): void {
+    setTravelLinks((links) => links.filter((l) => l.locationId !== locationId))
+  }
+
   const relationshipTargets = allEntries.filter((e) => e.id !== entry?.id)
 
   function updateRelationship(id: string, patch: Partial<CodexRelationship>): void {
@@ -151,6 +198,11 @@ export function CodexEntryForm({
       manuscriptLinks,
       spoilerRevealSceneId,
       voiceProfile: type === 'character' && Object.keys(voiceProfile).length > 0 ? voiceProfile : undefined,
+      continuityProfile:
+        type === 'character' && (continuityProfile.birthDate || (continuityProfile.injuries ?? []).length > 0)
+          ? continuityProfile
+          : undefined,
+      travelLinks: type === 'location' && travelLinks.length > 0 ? travelLinks : undefined,
       createdAt: entry?.createdAt ?? now,
       updatedAt: now,
       history: entry?.history ?? []
@@ -371,6 +423,133 @@ export function CodexEntryForm({
                   style={inputStyle}
                 />
               </Field>
+            </div>
+
+            <SectionLabel>Continuity</SectionLabel>
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginBottom: 10, lineHeight: 1.5 }}>
+              Feeds the Timeline's continuity checks (age and injury/healing consistency) — see Timeline → Continuity
+              Checks.
+            </div>
+            <Field label="Birth date">
+              <input
+                type="date"
+                value={continuityProfile.birthDate ?? ''}
+                onChange={(e) =>
+                  setContinuityProfile((p) => ({ ...p, birthDate: e.target.value || undefined }))
+                }
+                style={inputStyle}
+              />
+            </Field>
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginBottom: 6 }}>Injuries</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+              {injuries.map((injury) => (
+                <div
+                  key={injury.id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: 10,
+                    borderRadius: 8,
+                    border: '1px solid var(--c-border)'
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      value={injury.description}
+                      onChange={(e) => updateInjury(injury.id, { description: e.target.value })}
+                      placeholder="Injury description"
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <RemoveButton onClick={() => removeInjury(injury.id)} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <select
+                      value={injury.occurredSceneId ?? ''}
+                      onChange={(e) => updateInjury(injury.id, { occurredSceneId: e.target.value || undefined })}
+                      style={inputStyle}
+                    >
+                      <option value="">Occurred in scene…</option>
+                      {sceneOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="date"
+                      value={injury.occurredDate ?? ''}
+                      onChange={(e) => updateInjury(injury.id, { occurredDate: e.target.value || undefined })}
+                      style={inputStyle}
+                      placeholder="Occurred date"
+                    />
+                    <select
+                      value={injury.healedSceneId ?? ''}
+                      onChange={(e) => updateInjury(injury.id, { healedSceneId: e.target.value || undefined })}
+                      style={inputStyle}
+                    >
+                      <option value="">Healed in scene…</option>
+                      {sceneOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="date"
+                      value={injury.healedDate ?? ''}
+                      onChange={(e) => updateInjury(injury.id, { healedDate: e.target.value || undefined })}
+                      style={inputStyle}
+                      placeholder="Healed date"
+                    />
+                  </div>
+                </div>
+              ))}
+              <AddButton onClick={addInjury}>Add injury</AddButton>
+            </div>
+          </>
+        )}
+
+        {type === 'location' && (
+          <>
+            <SectionLabel>Travel links</SectionLabel>
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', marginBottom: 10, lineHeight: 1.5 }}>
+              Known one-way travel times to other locations — feeds the Timeline's travel-time continuity check.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+              {travelLinks.map((link) => (
+                <div key={link.locationId} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <select
+                    value={link.locationId}
+                    onChange={(e) => {
+                      const nextId = e.target.value
+                      setTravelLinks((links) =>
+                        links.map((l) => (l.locationId === link.locationId ? { ...l, locationId: nextId } : l))
+                      )
+                    }}
+                    style={{ ...inputStyle, flex: 2 }}
+                  >
+                    {locationTargets.map((target) => (
+                      <option key={target.id} value={target.id}>
+                        {target.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={0}
+                    value={link.days}
+                    onChange={(e) => updateTravelLink(link.locationId, { days: Number(e.target.value) || 0 })}
+                    style={{ ...inputStyle, flex: 1 }}
+                    placeholder="Days"
+                  />
+                  <span style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', flexShrink: 0 }}>days</span>
+                  <RemoveButton onClick={() => removeTravelLink(link.locationId)} />
+                </div>
+              ))}
+              <AddButton onClick={addTravelLink} disabled={locationTargets.length === 0}>
+                Add travel link
+              </AddButton>
             </div>
           </>
         )}
