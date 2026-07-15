@@ -42,11 +42,13 @@ import { ensureIndexed, search } from '../retrieval/search'
 import { runSandboxed } from '../capabilities/sandbox'
 import { getSeedTool } from '../capabilities/seedTools'
 import { buildSessionApproval, SessionApprovalStore } from '../permissions/sessionApprovals'
+import { hasSecret } from '../security/keyVault'
+import { runBraveWebSearch } from '../mcp/braveSearchAdapter'
 import { LmStudioAdapter } from './providers/lmStudioAdapter'
 import { OpenRouterAdapter } from './providers/openRouterAdapter'
 import { SimulatorAdapter } from './providers/simulatorAdapter'
 import type { ModelCallInput, ProviderAdapter } from './providers/types'
-import { assembleContext, type AssembledContext } from './context/assemble'
+import { assembleContext, type AssembledContext, type WebResearchContext } from './context/assemble'
 import { tryParseJson } from './structuredOutput'
 
 // Phase 2 scope (data-contracts §6): the AgentGoal -> AgentStep[] ->
@@ -1704,6 +1706,54 @@ export class AgentRunManager {
     }
   }
 
+  // Round 12 §8: World Builder's opt-in real web-research path. Gated behind
+  // goal.webResearchEnabled AND a real (non-simulator) model — every check
+  // below (capability enabled, API key configured, permission granted,
+  // real results non-empty) degrades to `undefined` ("no research this run")
+  // rather than throwing or cancelling the run, matching this file's
+  // established "augment, never block" contract for every other real-tool
+  // call. The permission request here is a SECOND, additive gate distinct
+  // from the whole-run capabilityId at the top of runWorldBuilder — a denial
+  // here skips research only; unlike that top-of-method gate, it must never
+  // cancel the run.
+  private async maybeResearchForWorldBuilder(
+    goal: AgentGoal,
+    interview: WorldBuilderInterviewAnswers | null,
+    selection: string
+  ): Promise<WebResearchContext | undefined> {
+    if (!goal.webResearchEnabled) return undefined
+    if (selectAdapter(goal.modelRef).id === 'simulator') return undefined
+
+    try {
+      const capabilities = await listCapabilities(this.projectRoot)
+      const capability = capabilities.find(
+        (c) =>
+          c.id === 'global.tools.web-search-brave' &&
+          c.lifecycleState === 'enabled' &&
+          c.compatibleAgentRoles.includes('World-Builder')
+      )
+      if (!capability) return undefined
+      if (!(await hasSecret('brave-search-api-key'))) return undefined
+
+      const decision = await this.requestPermission(goal, {
+        requestId: randomUUID(),
+        capabilityId: 'global.tools.web-search-brave@1.0.0',
+        actionType: 'web-research',
+        dataScope: goal.scope.sceneIds?.[0] ? `scene:${goal.scope.sceneIds[0]}` : 'selection',
+        destination: 'external'
+      })
+      if (decision === 'denied') return undefined
+
+      const query = buildWorldBuilderResearchQuery(interview, selection)
+      const results = await runBraveWebSearch(query)
+      if (!results || results.length === 0) return undefined
+
+      return { query, results }
+    } catch {
+      return undefined
+    }
+  }
+
   private async runWorldBuilder(goal: AgentGoal): Promise<void> {
     const requestId = randomUUID()
     const decision = await this.requestPermission(goal, {
@@ -1785,27 +1835,45 @@ export class AgentRunManager {
     })
     state.budget.toolCallsUsed += 1
 
+    // Round 12 §8: opt-in real web research via a Brave Search MCP connection
+    // (main/mcp/braveSearchAdapter.ts). A complete no-op — no extra
+    // permission request, no network call — unless the writer opted in
+    // (goal.webResearchEnabled) on a real (non-simulator) run; see
+    // maybeResearchForWorldBuilder's own doc comment for every other gate
+    // (capability enabled, API key configured, permission granted, results
+    // non-empty) that also has to pass before this is anything but
+    // undefined.
+    const webResearch = await this.maybeResearchForWorldBuilder(goal, interview, selection)
+
     // The interview wizard's compiled answers ARE the context for this run —
     // there's nothing else to retrieve yet (this run is what proposes the
     // Codex entries in the first place) — so that path wraps
     // modelCallContextText as a single section instead of running full
     // retrieval. An ordinary single-selection run gets the full priority-
-    // order assembly like every other role.
+    // order assembly like every other role. webResearch (see above) is
+    // additive on top of either branch — undefined is a no-op, so this call
+    // shape is unchanged from before Round 12 whenever research isn't in play.
     const assembledContext = interview
-      ? await assembleContext(this.projectRoot, this.db, goal, {
-          overrideText: modelCallContextText,
-          overrideLabel: 'World Builder interview answers'
-        })
-      : await assembleContext(this.projectRoot, this.db, goal)
+      ? await assembleContext(
+          this.projectRoot,
+          this.db,
+          goal,
+          { overrideText: modelCallContextText, overrideLabel: 'World Builder interview answers' },
+          webResearch
+        )
+      : await assembleContext(this.projectRoot, this.db, goal, undefined, webResearch)
 
     // Phase 8 §7.5 real branch: request JSON-mode output describing 1-4
     // proposed Codex entries reasoned over the selection or the decoded
     // interview answers, covering both entry paths with one shared request.
-    // Explicitly out of scope this round (confirmed): no real web research —
-    // there is no internet access here, so a real proposal's content
-    // generation is upgraded from template to real reasoning, but every
-    // citation still stays honestly labeled as model inference, never
-    // research (see the citation construction below).
+    // Real web research (Round 12) is still the exception, not the default:
+    // without it, there is no internet access here, so a real proposal's
+    // content generation is upgraded from template to real reasoning, but
+    // every citation still stays honestly labeled as model inference, never
+    // research (see the citation construction below). When webResearch *is*
+    // present, the instructions are adjusted accordingly — telling the model
+    // it has no internet access while a real "Web search results" section
+    // sits in its own context would be actively wrong, not just conservative.
     const modelCall = await this.runModelCallStep(goal, assembledContext, {
       type: 'json',
       instructions:
@@ -1814,8 +1882,12 @@ export class AgentRunManager {
         '"entryType" must be one of: character, location, faction, object, event, world-rule, timeline-item, ' +
         'plot-thread, relationship, theme, motif, research-note, historical-reference, scene-note, private-author-note. ' +
         'Propose new Codex entries worth tracking, reasoned over the manuscript selection or the World Builder interview ' +
-        'answers given in the context above. You have no access to external research or the internet — every proposal must ' +
-        'be your own inference from what you were given, never presented as a researched or verified fact.'
+        'answers given in the context above.' +
+        (webResearch
+          ? ' A "Web search results" section in the context above contains real external search results you may treat ' +
+            'as genuine research and cite accordingly.'
+          : ' You have no access to external research or the internet — every proposal must be your own inference from ' +
+            'what you were given, never presented as a researched or verified fact.')
     })
     if (await this.guardModelCall(goal, 'World Builder', modelCall)) return
     this.emit(goal.runId, {
@@ -1841,6 +1913,28 @@ export class AgentRunManager {
     let finalContradictionNote = contradictionNote
     if (realProposals) {
       const realRunId = randomUUID()
+      const baseCitations: Array<{ note: string; reliability: 'author-stated' | 'low' | 'researched'; sourceUrl?: string }> =
+        interview
+          ? [worldBuilderCitation('your World Builder interview answers')]
+          : [
+              {
+                note: 'Simulated inference from the selected passage — no external research was performed.',
+                reliability: 'low'
+              }
+            ]
+      // Round 12: when real Brave Search results actually made it into this
+      // call's context, every real proposal gets an additional 'researched'
+      // citation per result (capped the same way webResearch's own results
+      // already are by the adapter/query) — appended, not substituted, so
+      // the pre-existing interview/low-reliability citation is preserved
+      // exactly as before whenever webResearch is undefined.
+      const researchCitations: Array<{ note: string; reliability: 'researched'; sourceUrl: string }> = webResearch
+        ? webResearch.results.map((r) => ({
+            note: `From a real web search for "${webResearch.query}": ${r.title}`,
+            reliability: 'researched',
+            sourceUrl: r.url
+          }))
+        : []
       const rawRealSuggestions = realProposals.map((p) =>
         worldBuilderProposal(
           realRunId,
@@ -1848,14 +1942,7 @@ export class AgentRunManager {
           p.entryType,
           p.name,
           p.summary,
-          interview
-            ? [worldBuilderCitation('your World Builder interview answers')]
-            : [
-                {
-                  note: 'Simulated inference from the selected passage — no external research was performed.',
-                  reliability: 'low'
-                }
-              ],
+          [...baseCitations, ...researchCitations],
           goal.refinesSuggestionId
         )
       )
@@ -1881,8 +1968,8 @@ export class AgentRunManager {
       // handleAgentStep() in state/store.ts. The suggestion's own `kind`
       // ('codex-addition') is what the UI actually branches on.
       summary: `World Builder proposed ${finalSuggestions.length} Codex addition${finalSuggestions.length === 1 ? '' : 's'}.${
-        finalContradictionNote ? ` ${finalContradictionNote.summary}` : ''
-      }`,
+        webResearch ? ' Includes findings from a real web search.' : ''
+      }${finalContradictionNote ? ` ${finalContradictionNote.summary}` : ''}`,
       proposedManuscriptChanges: finalSuggestions,
       proposedCodexChanges: finalSuggestions,
       warnings: finalContradictionNote ? [finalContradictionNote.summary] : undefined
@@ -2614,6 +2701,22 @@ const SOCIETY_ENTRY_TYPE: Record<WorldBuilderInterviewAnswers['genreTemplate'], 
   custom: 'faction'
 }
 
+// Round 12: a short, real-search-engine-friendly query derived from whichever
+// context this run actually has — the interview's own compiled answers when
+// present, else the writer's plain selection. Truncated well under Brave's
+// own 400-char/50-word query limit (see the installed
+// @brave/brave-search-mcp-server README) rather than sending the whole
+// context blob verbatim.
+function buildWorldBuilderResearchQuery(interview: WorldBuilderInterviewAnswers | null, selection: string): string {
+  if (interview) {
+    const parts = [genreTemplateLabel(interview.genreTemplate), interview.worldGrounding, interview.consistencyFacts].filter(
+      (part): part is string => !!part && part.trim().length > 0
+    )
+    return parts.join(' — ').slice(0, 300)
+  }
+  return selection.slice(0, 300)
+}
+
 function worldBuilderCitation(topic: string): { note: string; reliability: 'author-stated' } {
   return {
     // Distinct from simulateCodexAdditions' 'low'-reliability regex guess
@@ -2635,8 +2738,10 @@ function worldBuilderProposal(
   // Widened to also accept the single-selection flow's 'low'-reliability
   // regex-guess citation (Phase 8's real branch below reuses this helper for
   // both entry paths) — deriveWorldBuilderProposals below only ever passes
-  // 'author-stated' citations, unchanged.
-  citations: Array<{ note: string; reliability: 'author-stated' | 'low' }>,
+  // 'author-stated' citations, unchanged. Round 12 widens this again for
+  // 'researched' citations (real Brave Search MCP results, with sourceUrl) —
+  // see maybeResearchForWorldBuilder below.
+  citations: Array<{ note: string; reliability: 'author-stated' | 'low' | 'researched'; sourceUrl?: string }>,
   // Phase 8: threaded straight into provenance.refinesSuggestionId when this
   // proposal comes from a refineSuggestion() re-run — see AgentGoal.refinesSuggestionId's
   // own doc comment in shared/schema/agent.ts. Undefined on an ordinary run,
