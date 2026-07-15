@@ -56,15 +56,14 @@ export class StdioMcpAdapter implements McpAdapter {
   }
 }
 
-// Example entries only — illustrative of the kind of external research/
-// world-building tools a novelist might wire up (a sandboxed filesystem
-// reader for source material, a web-search server for fact-checking), not
-// servers Atlas actually talks to. Nothing in the runtime calls
-// discoverTools()/invokeTool() on these (simulator.ts's discovery loop is a
-// documented no-op — see the comment there), so listing them here has no
-// effect on behavior; it only makes the intended shape of a real entry
-// legible. Configuring a *real* server and implementing a real McpAdapter
-// for it is the Phase 3+ path to production MCP connectivity.
+// 'example-research-filesystem' remains illustrative only — nothing in the
+// runtime calls discoverTools()/invokeTool() on it. 'brave-search' below is
+// Round 12's first real entry: a genuine McpAdapter (main/mcp/
+// braveSearchAdapter.ts) spawns this exact command over stdio and speaks the
+// real MCP wire protocol to it, used by World-Builder's opt-in web-research
+// path (see runWorldBuilder() in main/agent/simulator.ts). This entry is
+// still just data — the live connection logic lives in the main-process-only
+// adapter file, never in this renderer-safe module.
 export const configuredMcpServers: McpServerConfig[] = [
   {
     id: 'example-research-filesystem',
@@ -73,9 +72,9 @@ export const configuredMcpServers: McpServerConfig[] = [
     command: 'mcp-server-filesystem --root ~/Documents/Research'
   },
   {
-    id: 'example-web-search',
-    name: 'Example: Web Search (illustrative, not connected)',
-    transport: 'http',
-    url: 'https://example.invalid/mcp/web-search'
+    id: 'brave-search',
+    name: 'Brave Search',
+    transport: 'stdio',
+    command: 'npx -y @brave/brave-search-mcp-server'
   }
 ]

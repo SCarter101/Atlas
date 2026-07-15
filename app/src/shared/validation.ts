@@ -302,7 +302,8 @@ export const AgentGoalSchema = z.object({
   lmStudioFallback: z.boolean().optional(),
   generatorControls: GeneratorControlsSchema.optional(),
   lineEditorControls: LineEditorControlsSchema.optional(),
-  refinesSuggestionId: z.string().optional()
+  refinesSuggestionId: z.string().optional(),
+  webResearchEnabled: z.boolean().optional()
 })
 
 type _AgentGoalCheck = z.infer<typeof AgentGoalSchema> extends AgentGoal ? true : never
