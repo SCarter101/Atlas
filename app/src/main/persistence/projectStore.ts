@@ -6,12 +6,23 @@ import { AtlasError } from '@shared/errors'
 import { migrateRecord } from './migrations'
 import { projectPaths } from './paths'
 
+// The single source of truth for where every Atlas project lives on disk —
+// previously this "Documents/Atlas Projects" path was independently inlined
+// in three places (sampleProjectRoot() and listProjects() here, plus
+// handlers.ts's ProjectCreateFromFoundations handler), which is both a
+// duplication smell and, per handlers.ts's new path-containment guard, the
+// root a candidate project path is checked against before any destructive
+// operation (e.g. ProjectDelete's recursive rm) is allowed to proceed.
+export function projectsRootDir(): string {
+  return join(app.getPath('documents'), 'Atlas Projects')
+}
+
 // Central place for where the bundled "Cottonmouth" demo project lives on
 // disk — seedSampleProject.ts creates it here on first run, and listProjects()
 // callers use this to exclude it from the generic project list since it
 // already has its own dedicated tile on Landing.
 export function sampleProjectRoot(): string {
-  return join(app.getPath('documents'), 'Atlas Projects', 'Cottonmouth Sample.atlas')
+  return join(projectsRootDir(), 'Cottonmouth Sample.atlas')
 }
 
 export async function openProject(projectRoot: string): Promise<ProjectManifest> {
@@ -39,7 +50,7 @@ export async function openProject(projectRoot: string): Promise<ProjectManifest>
 // read (e.g. a project.json that doesn't exist yet, mid-creation) are
 // skipped rather than throwing, so one bad folder doesn't blank the list.
 export async function listProjects(): Promise<{ projectRoot: string; manifest: ProjectManifest }[]> {
-  const rootDir = join(app.getPath('documents'), 'Atlas Projects')
+  const rootDir = projectsRootDir()
   let entries: string[]
   try {
     const dirents = await readdir(rootDir, { withFileTypes: true })
