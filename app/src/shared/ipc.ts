@@ -4,6 +4,7 @@ import type { CapabilityManifest, LifecycleState, SessionApproval } from './sche
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { CodexCandidate } from './schema/import'
 import type { OpenRouterCatalogEntry } from './schema/models'
+import type { OutlineFramework } from './schema/outline'
 import type { ProjectManifest } from './schema/project'
 import type { ManuscriptTree, SceneMeta } from './schema/manuscript'
 import type { ChapterSummary, ContextWarning, DerivedSummary, DerivedSummaryKind, RetrievalResult, SceneSummary } from './schema/retrieval'
@@ -85,7 +86,12 @@ export const IpcChannel = {
   // main/persistence/backupStore.ts's maybeRunScheduledBackup() and the
   // timer in main/index.ts's whenReady() that calls it.
   BackupScheduleGet: 'backup:schedule-get',
-  BackupScheduleSet: 'backup:schedule-set'
+  BackupScheduleSet: 'backup:schedule-set',
+  // Outline frameworks (spec §11) — see main/persistence/outlineStore.ts.
+  // One active OutlineFramework per project; get returns null when none has
+  // been created yet.
+  OutlineGetFramework: 'outline:get-framework',
+  OutlineSetFramework: 'outline:set-framework'
 } as const
 
 export interface SceneReadResult {
@@ -274,5 +280,12 @@ export interface AtlasBridge {
     getEnabled(): Promise<boolean>
     setEnabled(enabled: boolean): Promise<void>
     exportFeedback(): Promise<ExportResult>
+  }
+  // Outline frameworks (spec §11) — see main/persistence/outlineStore.ts /
+  // shared/outlineLogic.ts. getFramework returns null before the writer has
+  // picked a template or started a custom outline.
+  outline: {
+    getFramework(): Promise<OutlineFramework | null>
+    setFramework(framework: OutlineFramework): Promise<void>
   }
 }

@@ -13,11 +13,13 @@ import type { SceneMeta } from '@shared/schema/manuscript'
 import type { DerivedSummaryKind } from '@shared/schema/retrieval'
 import type { SessionGoal } from '@shared/schema/session'
 import type { EmbeddingProvider } from '@shared/schema/embeddings'
+import type { OutlineFramework } from '@shared/schema/outline'
 import {
   AgentGoalSchema,
   BackupScheduleSchema,
   CapabilityManifestSchema,
   CodexEntrySchema,
+  OutlineFrameworkSchema,
   ProjectManifestSeedSchema,
   SceneWritePatchSchema,
   SessionGoalSchema as SessionGoalValidationSchema
@@ -28,6 +30,7 @@ import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persist
 import { createProjectFromFoundations, slugify } from '../persistence/createProjectFromFoundations'
 import { findSceneLocation } from '../persistence/db'
 import { readManuscriptTree } from '../persistence/manuscriptStore'
+import { loadOutlineFramework, saveOutlineFramework } from '../persistence/outlineStore'
 import {
   createProject,
   deleteProject,
@@ -606,6 +609,20 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
     const validated = BackupScheduleSchema.parse(schedule)
     const session = getCurrentProjectSession()
     await updateProjectManifest(session.projectRoot, { backupSchedule: validated })
+  })
+
+  // Outline frameworks (spec §11) — see main/persistence/outlineStore.ts /
+  // shared/outlineLogic.ts. getFramework returns null before the writer has
+  // picked a template or started a custom outline.
+  ipcMain.handle(IpcChannel.OutlineGetFramework, async () => {
+    const session = getCurrentProjectSession()
+    return loadOutlineFramework(session.projectRoot)
+  })
+
+  ipcMain.handle(IpcChannel.OutlineSetFramework, async (_evt, framework: OutlineFramework) => {
+    const validated = OutlineFrameworkSchema.parse(framework)
+    const session = getCurrentProjectSession()
+    await saveOutlineFramework(session.projectRoot, validated)
   })
 }
 
