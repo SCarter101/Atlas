@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { CodexEntry } from '@shared/schema/codex'
 import type { SceneContinuityMeta, SceneMeta } from '@shared/schema/manuscript'
 import { useAtlasStore } from '../state/store'
@@ -41,8 +41,26 @@ export function SceneMetadataPanel({ scene }: { scene: SceneMeta }): JSX.Element
 
   // Phase 9 continuity validators (shared/continuityChecks.ts) — storyDate/
   // season/isFlashback feed the Timeline's "Continuity Checks" tab.
+  //
+  // Codex adversarial-review fix (Round 11): updateSceneMeta is async and
+  // this panel doesn't re-render with a fresh `scene` prop until it resolves
+  // (via refreshManuscriptTree()), so closing over `scene.continuity`
+  // directly would let two quick edits (e.g. storyDate then season) race —
+  // the second call's spread would merge against the first call's *stale*
+  // pre-edit continuity object and silently drop it. continuityRef tracks
+  // the latest intended value synchronously across calls, independent of
+  // when the prop actually catches up; the effect below resyncs it whenever
+  // the authoritative prop changes (e.g. a fresh scene, or another writer
+  // surface editing the same scene's continuity fields).
+  const continuityRef = useRef(scene.continuity)
+  useEffect(() => {
+    continuityRef.current = scene.continuity
+  }, [scene.continuity])
+
   function updateContinuityField(patch: Partial<SceneContinuityMeta>): void {
-    void updateSceneMeta(scene.id, { continuity: { ...scene.continuity, ...patch } })
+    const next = { ...continuityRef.current, ...patch }
+    continuityRef.current = next
+    void updateSceneMeta(scene.id, { continuity: next })
   }
 
   const craftFields = fieldsFor(scene.craft, {

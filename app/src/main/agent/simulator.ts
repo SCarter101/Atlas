@@ -187,6 +187,12 @@ interface RunState {
 
 export class AgentRunManager {
   private runs = new Map<string, RunState>()
+  // Codex adversarial-review fix (Round 11): a synchronous claim set so two
+  // near-simultaneous resume(runId) calls (e.g. a double-click, or a second
+  // IPC message arriving while the first is still awaiting loadAgentRun())
+  // can't both take the disk-reconstruction path and both call
+  // launchExecution() for the same run. See resume()'s comment below.
+  private resuming = new Set<string>()
 
   constructor(
     private readonly projectRoot: string,
@@ -265,42 +271,74 @@ export class AgentRunManager {
   //
   // If the run doesn't exist anywhere (not in memory, and loadAgentRun finds
   // nothing on disk either), that error is left to propagate to the caller.
+  //
+  // Codex adversarial-review fix (Round 11): the original version fell
+  // through to the disk-reconstruction path whenever `existing` was found
+  // but not `'paused'` — which is wrong for the (very reachable) case where
+  // `existing.record.status` is already `'running'`, e.g. a second resume()
+  // call for the same runId arriving after the first has already flipped it.
+  // That fallthrough would re-read the on-disk record (still `'paused'`,
+  // since only finish() persists a status change), reconstruct a *second*
+  // RunState from stale persisted steps, `this.runs.set()` over the actively-
+  // running one, and call launchExecution() again — two concurrent
+  // executions of the same role method interleaving steps into whichever
+  // RunState object emit() happens to find in the map. Found-but-not-paused
+  // now rejects immediately instead of falling through.
+  //
+  // The disk-reconstruction path still has an `await` (loadAgentRun) before
+  // anything is written back to `this.runs`, so two calls that BOTH miss the
+  // in-memory map (only possible before either has completed once — e.g.
+  // right after an app restart) could still both reach that branch. The
+  // `resuming` set closes that window: it's checked and populated
+  // synchronously, before the first `await`, so the second concurrent call
+  // sees the claim immediately and rejects rather than racing the reconstruction.
   async resume(runId: string): Promise<{ runId: string }> {
     const existing = this.runs.get(runId)
-    if (existing && existing.record.status === 'paused') {
+    if (existing) {
+      if (existing.record.status !== 'paused') {
+        throw new Error('Run is not paused and cannot be resumed.')
+      }
       existing.record.status = 'running'
       this.launchExecution(existing.record.goal)
       return { runId }
     }
 
-    const record = await loadAgentRun(this.projectRoot, runId)
-    if (record.status !== 'paused') {
-      throw new Error('Run is not paused and cannot be resumed.')
+    if (this.resuming.has(runId)) {
+      throw new Error('This run is already being resumed.')
     }
-
-    let tokensUsed = 0
-    let costUsdUsed = 0
-    let turnsUsed = 0
-    let toolCallsUsed = 0
-    for (const step of record.steps) {
-      if (step.kind === 'model-call') {
-        const detail = step.detail as ModelCallSummary
-        tokensUsed += detail.inputTokens + detail.outputTokens
-        costUsdUsed += detail.estimatedCostUsd
-        turnsUsed += 1
-      } else if (step.kind === 'tool-call') {
-        toolCallsUsed += 1
+    this.resuming.add(runId)
+    try {
+      const record = await loadAgentRun(this.projectRoot, runId)
+      if (record.status !== 'paused') {
+        throw new Error('Run is not paused and cannot be resumed.')
       }
-    }
 
-    record.status = 'running'
-    this.runs.set(runId, {
-      record,
-      listeners: new Set(),
-      budget: { turnsUsed, toolCallsUsed, tokensUsed, costUsdUsed, startedAtMs: Date.now(), recentSignatures: [] }
-    })
-    this.launchExecution(record.goal)
-    return { runId }
+      let tokensUsed = 0
+      let costUsdUsed = 0
+      let turnsUsed = 0
+      let toolCallsUsed = 0
+      for (const step of record.steps) {
+        if (step.kind === 'model-call') {
+          const detail = step.detail as ModelCallSummary
+          tokensUsed += detail.inputTokens + detail.outputTokens
+          costUsdUsed += detail.estimatedCostUsd
+          turnsUsed += 1
+        } else if (step.kind === 'tool-call') {
+          toolCallsUsed += 1
+        }
+      }
+
+      record.status = 'running'
+      this.runs.set(runId, {
+        record,
+        listeners: new Set(),
+        budget: { turnsUsed, toolCallsUsed, tokensUsed, costUsdUsed, startedAtMs: Date.now(), recentSignatures: [] }
+      })
+      this.launchExecution(record.goal)
+      return { runId }
+    } finally {
+      this.resuming.delete(runId)
+    }
   }
 
   // Extracted from start() (Phase 9 Track 4) so resume() can drive the same

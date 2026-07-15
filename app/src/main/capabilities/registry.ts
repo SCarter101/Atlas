@@ -221,22 +221,35 @@ function checkStructuralInput(manifest: CapabilityManifest, sampleInput: unknown
 // resulting validationStatus via updateCapability so Library.tsx's
 // validation badge reflects the outcome; the caller/UI must display which
 // mode ran rather than implying a full execution test happened in both cases.
+//
+// Codex adversarial-review fix (Round 11): the caller-supplied `manifest`
+// (the renderer's local `selected` state, which can be a render or two
+// behind the real IPC round-trip) is used ONLY to pick a seed tool and check
+// the sample input's shape — never to persist. Persistence re-fetches the
+// current on-disk manifest via getCapability() first, matching every other
+// mutator in this file (updateCapability itself re-fetches `previous` rather
+// than trusting a caller's copy). Persisting the stale `manifest` object
+// directly would silently revert any fields (e.g. lifecycleState) changed
+// since the renderer last fetched, and — since updateCapability appends onto
+// `manifest.history` verbatim — could drop history entries written on disk
+// after the renderer's copy was taken.
 export async function testCapability(
   projectRoot: string,
   manifest: CapabilityManifest,
   sampleInput: unknown
 ): Promise<CapabilityTestResult> {
   const seedTool = getSeedTool(manifest.id)
+  const current = (await getCapability(projectRoot, manifest.id)) ?? manifest
 
   if (seedTool) {
     const result = await runSandboxed(seedTool, sampleInput)
     const ok = !result.error
-    await updateCapability(projectRoot, { ...manifest, validationStatus: ok ? 'passed' : 'failed' })
+    await updateCapability(projectRoot, { ...current, validationStatus: ok ? 'passed' : 'failed' })
     return { ok, output: result.output, error: result.error?.message, mode: 'sandboxed' }
   }
 
   const structural = checkStructuralInput(manifest, sampleInput)
-  await updateCapability(projectRoot, { ...manifest, validationStatus: structural.ok ? 'passed' : 'failed' })
+  await updateCapability(projectRoot, { ...current, validationStatus: structural.ok ? 'passed' : 'failed' })
   return { ...structural, mode: 'structural' }
 }
 

@@ -523,6 +523,15 @@ export function CodexEntryForm({
                     value={link.locationId}
                     onChange={(e) => {
                       const nextId = e.target.value
+                      // Codex adversarial-review fix (Round 11): retargeting
+                      // a row to a location another row already links to
+                      // would leave two rows keyed by the same locationId —
+                      // a React key collision, and updateTravelLink/
+                      // removeTravelLink (both keyed by locationId) would
+                      // then apply to both rows at once. Same duplicate-
+                      // prevention addTravelLink already applies when adding
+                      // a new row.
+                      if (travelLinks.some((l) => l.locationId !== link.locationId && l.locationId === nextId)) return
                       setTravelLinks((links) =>
                         links.map((l) => (l.locationId === link.locationId ? { ...l, locationId: nextId } : l))
                       )

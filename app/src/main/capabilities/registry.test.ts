@@ -295,6 +295,44 @@ describe('capabilities/registry — global vs project scope', () => {
       const stored = await getCapability(projectA, 'project.tools.custom-draft-2')
       expect(stored?.validationStatus).toBe('failed')
     })
+
+    // Codex adversarial-review regression (Round 11): testCapability used to
+    // persist the caller-supplied manifest object verbatim, including its
+    // `history` array as the caller happened to have it — so a stale copy
+    // (e.g. the renderer's cached `selected` state, a render or two behind
+    // a concurrent update) would silently revert fields and drop history
+    // entries written to disk in the meantime.
+    it('persists against the current on-disk manifest, not a stale caller-supplied copy', async () => {
+      const draft = manifest({
+        id: 'project.tools.stale-copy',
+        name: 'Stale Copy Tool',
+        scope: 'project',
+        lifecycleState: 'draft',
+        inputSchema: { type: 'object', properties: { foo: { type: 'string' } }, required: ['foo'] }
+      })
+      await createCapability(projectA, draft)
+
+      // The caller's copy is taken before a concurrent update lands.
+      const staleCopy = { ...draft }
+
+      // A concurrent update enables the capability and appends its own
+      // history entry — simulating another write landing between when the
+      // renderer fetched `staleCopy` and when it calls testCapability.
+      await setLifecycleState(projectA, draft.id, 'enabled')
+      const afterConcurrentUpdate = await getCapability(projectA, draft.id)
+      expect(afterConcurrentUpdate?.history.length).toBe(2)
+
+      await testCapability(projectA, staleCopy, { foo: 'bar' })
+
+      const stored = await getCapability(projectA, draft.id)
+      // The concurrent update's field change must survive, not be reverted
+      // by the stale copy's 'draft' lifecycleState.
+      expect(stored?.lifecycleState).toBe('enabled')
+      // The concurrent update's history entry must survive, not be dropped
+      // by persisting the stale copy's shorter history array.
+      expect(stored?.history.length).toBe(3)
+      expect(stored?.validationStatus).toBe('passed')
+    })
   })
 
   describe('getCapabilityUsageMetrics', () => {

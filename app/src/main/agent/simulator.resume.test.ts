@@ -208,6 +208,71 @@ describe('AgentRunManager.resume()', () => {
     expect(result.warnings ?? []).not.toContain('model-call-failed')
   })
 
+  // Codex adversarial-review regression (Round 11): resume() used to fall
+  // through to the disk-reconstruction path whenever an in-memory run's
+  // status wasn't exactly 'paused' — including 'running', the state a first
+  // resume() call flips it to synchronously. A second call for the same
+  // runId would then reconstruct a *second* RunState from the stale on-disk
+  // record (still 'paused', since only finish() persists a status change)
+  // and launch a duplicate execution. found-but-not-paused now rejects
+  // immediately instead of falling through.
+  it('rejects a second in-memory resume() call for a run the first call already flipped to running', async () => {
+    const runId = 'run-resume-double-inmemory'
+    const goal = makeGoal({ runId, modelRef: { provider: 'anthropic', modelId: 'gpt-4.1', viaOpenRouter: false } })
+    const now = new Date().toISOString()
+    const persistedRecord: AgentRunRecord = {
+      schemaVersion: 1,
+      goal,
+      status: 'paused',
+      startedAt: now,
+      endedAt: now,
+      steps: []
+    }
+    await saveAgentRun(projectRoot, db, persistedRecord)
+
+    const manager = new AgentRunManager(projectRoot, db)
+    // First resume(): loads from disk into `this.runs`, flips status to
+    // 'running' synchronously before returning.
+    await manager.resume(runId)
+
+    // Second resume() for the same runId: must see the in-memory record is
+    // already 'running' and reject, not silently reconstruct a duplicate
+    // from the (still on-disk-'paused') persisted record.
+    await expect(manager.resume(runId)).rejects.toThrow(/not paused/i)
+  })
+
+  // Same underlying bug class, but exercising the disk-reconstruction path's
+  // own race window: two resume() calls for a run neither manager instance
+  // has seen in memory yet, fired concurrently (e.g. a double-click). Before
+  // the fix, both could pass the `this.runs.get(runId)` check (undefined for
+  // both), both await loadAgentRun() (which still reads 'paused' since
+  // neither has written back yet), and both reconstruct + launchExecution().
+  // The `resuming` claim set — checked and populated synchronously, before
+  // the first await — ensures only one wins.
+  it('only lets one of two concurrent disk-path resume() calls for the same run through', async () => {
+    const runId = 'run-resume-double-diskpath'
+    const goal = makeGoal({ runId, modelRef: { provider: 'anthropic', modelId: 'gpt-4.1', viaOpenRouter: false } })
+    const now = new Date().toISOString()
+    const persistedRecord: AgentRunRecord = {
+      schemaVersion: 1,
+      goal,
+      status: 'paused',
+      startedAt: now,
+      endedAt: now,
+      steps: []
+    }
+    await saveAgentRun(projectRoot, db, persistedRecord)
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const results = await Promise.allSettled([manager.resume(runId), manager.resume(runId)])
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+    expect(fulfilled.length).toBe(1)
+    expect(rejected.length).toBe(1)
+    expect((rejected[0] as PromiseRejectedResult).reason.message).toMatch(/already being resumed/i)
+  })
+
   it('throws when asked to resume a run that is not paused', async () => {
     const runId = 'run-resume-not-paused'
     const goal = makeGoal({ runId, modelRef: { provider: 'anthropic', modelId: 'gpt-4.1', viaOpenRouter: false } })
