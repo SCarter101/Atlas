@@ -88,6 +88,30 @@ async function waitForStep(steps: AgentStep[], kind: AgentStep['kind']): Promise
   throw new Error(`Timed out waiting for a '${kind}' step`)
 }
 
+// Round 12: finish() emits the 'result' step *before* its own `await
+// saveAgentRun(...)` call resolves (see finish() in simulator.ts), so
+// observing a 'result' step in `steps` is not a guarantee the record has
+// actually landed on disk yet — a real, narrow race, not a hypothetical one:
+// it reproduces reliably under a full parallel `vitest run` (heavier fs
+// contention slows the write past this poll's discovery window) despite
+// passing every time in isolation. Poll loadAgentRun() itself rather than
+// assuming a single immediate read succeeds.
+async function waitForAgentRun(
+  projectRoot: string,
+  runId: string
+): Promise<Awaited<ReturnType<typeof loadAgentRun>>> {
+  let lastErr: unknown
+  for (let i = 0; i < 200; i++) {
+    try {
+      return await loadAgentRun(projectRoot, runId)
+    } catch (err) {
+      lastErr = err
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+  }
+  throw lastErr
+}
+
 // Round 12: the web-research flow can involve a SECOND permission-request
 // round trip (see maybeResearchForWorldBuilder) after the first one
 // resolves. Every single logical request actually emits TWO
@@ -573,7 +597,7 @@ describe('AgentRunManager — World Builder real web research (Round 12)', () =>
     // confirm the run reached 'completed', not 'cancelled' (a denied research
     // request must only skip research, never cancel the whole run, unlike
     // the top-of-method whole-run gate's denial path).
-    const record = await loadAgentRun(projectRoot, goal.runId)
+    const record = await waitForAgentRun(projectRoot, goal.runId)
     expect(record.status).toBe('completed')
 
     const payload = result.proposedCodexChanges![0].payload as { citations: { reliability: string }[] }
