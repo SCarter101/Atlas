@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, type WebContents } from 'electron'
+import { dialog, ipcMain, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { release } from 'node:os'
@@ -28,7 +28,16 @@ import { deleteCodexEntry, listCodexEntries, upsertCodexEntry } from '../persist
 import { createProjectFromFoundations, slugify } from '../persistence/createProjectFromFoundations'
 import { findSceneLocation } from '../persistence/db'
 import { readManuscriptTree } from '../persistence/manuscriptStore'
-import { createProject, deleteProject, listProjects, openProject, sampleProjectRoot, updateProjectManifest } from '../persistence/projectStore'
+import {
+  createProject,
+  deleteProject,
+  listProjects,
+  openProject,
+  projectsRootDir,
+  sampleProjectRoot,
+  updateProjectManifest
+} from '../persistence/projectStore'
+import { assertWithinProjectsRoot } from './pathGuard'
 import { createSnapshot, diffSnapshots, getSnapshot, listSnapshots } from '../persistence/revisionStore'
 import { readScene, writeScene } from '../persistence/sceneStore'
 import { seedCottonmouthProject } from '../persistence/seedSampleProject'
@@ -68,12 +77,14 @@ const CODEX_EXPORT_FORMATS: CodexExportFormat[] = ['json', 'codex-md', 'series-b
 
 export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(IpcChannel.ProjectOpen, async (_evt, path: string) => {
+    assertWithinProjectsRoot(path)
     setCurrentProjectSession(await ProjectSession.create(path))
     await markProjectSessionOpened(path)
     return openProject(path)
   })
 
   ipcMain.handle(IpcChannel.ProjectCreate, async (_evt, path: string, seed) => {
+    assertWithinProjectsRoot(path)
     const validatedSeed = ProjectManifestSeedSchema.parse(seed)
     const manifest = await createProject(path, validatedSeed)
     setCurrentProjectSession(await ProjectSession.create(path))
@@ -101,6 +112,10 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   })
 
   ipcMain.handle(IpcChannel.ProjectDelete, async (_evt, projectRoot: string) => {
+    // The one genuinely destructive handler here — recursively removes
+    // whatever folder it's given (see deleteProject() below) — so this is
+    // the highest-value place for the containment guard to sit.
+    assertWithinProjectsRoot(projectRoot)
     try {
       const session = getCurrentProjectSession()
       if (session.projectRoot === projectRoot) {
@@ -118,7 +133,7 @@ export function registerIpcHandlers(getWebContents: () => WebContents): void {
   ipcMain.handle(
     IpcChannel.ProjectCreateFromFoundations,
     async (_evt, title: string, genrePrimary: string | undefined, entries: FoundationsCodexDraft[]) => {
-      const projectRoot = join(app.getPath('documents'), 'Atlas Projects', `${slugify(title)}.atlas`)
+      const projectRoot = join(projectsRootDir(), `${slugify(title)}.atlas`)
       const session = await ProjectSession.create(projectRoot)
       setCurrentProjectSession(session)
       const manifest = await createProjectFromFoundations(projectRoot, session.db, title, genrePrimary, entries)
