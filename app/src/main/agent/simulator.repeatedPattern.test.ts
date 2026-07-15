@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -7,6 +7,7 @@ import type { AgentGoal, AgentRunRecord, SuggestionRef } from '@shared/schema/ag
 const { openIndexDb } = await import('../persistence/db')
 const { saveAgentRun } = await import('../persistence/agentRunStore')
 const { detectRepeatedToolPattern, applyContradictionWarnings } = await import('./simulator')
+const { cleanupTestDir } = await import('./simulator.testUtils')
 
 function makeGoal(runId: string): AgentGoal {
   return {
@@ -54,7 +55,7 @@ describe('detectRepeatedToolPattern', () => {
   })
 
   afterEach(() => {
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('returns undefined below the occurrence threshold', async () => {

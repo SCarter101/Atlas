@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,6 +42,7 @@ vi.mock('./providers/openRouterAdapter', () => ({
 }))
 
 const { AgentRunManager, deriveWorldBuilderProposals, parseRealWorldBuilderProposals } = await import('./simulator')
+const { cleanupTestDir } = await import('./simulator.testUtils')
 
 // The simulator emits its `result` step asynchronously after a permission
 // response, so a fixed `setTimeout(0)` occasionally samples `steps` before the
@@ -137,7 +138,7 @@ describe('AgentRunManager — World Builder interview flow', () => {
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   function makeGoal(selectionText: string): AgentGoal {
@@ -261,7 +262,7 @@ describe('AgentRunManager — World Builder real-model-output branch (Phase 8)',
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
     fakeOutputText = ''
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   function makeOpenRouterGoal(selectionText: string, refinesSuggestionId?: string): AgentGoal {

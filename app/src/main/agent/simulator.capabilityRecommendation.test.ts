@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -22,7 +22,7 @@ const { openIndexDb } = await import('../persistence/db')
 const { saveAgentRun } = await import('../persistence/agentRunStore')
 const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
 const { AgentRunManager } = await import('./simulator')
-const { waitForResultStep } = await import('./simulator.testUtils')
+const { cleanupTestDir, waitForResultStep } = await import('./simulator.testUtils')
 
 // This is the end-to-end regression test for the capability-recommendation
 // bug that a Codex review caught: the recorded Dev-Editor tool-call id is the
@@ -48,8 +48,8 @@ describe('AgentRunManager — capability recommendation from repeated tool patte
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(userDataRoot, { recursive: true, force: true })
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(userDataRoot)
+    cleanupTestDir(projectRoot)
   })
 
   function priorDevEditorRun(runId: string): AgentRunRecord {

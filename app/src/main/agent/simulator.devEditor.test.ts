@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,7 +31,7 @@ const { openIndexDb } = await import('../persistence/db')
 const { upsertCodexEntry } = await import('../persistence/codexStore')
 const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
 const { AgentRunManager } = await import('./simulator')
-const { waitForResultStep } = await import('./simulator.testUtils')
+const { cleanupTestDir, waitForResultStep } = await import('./simulator.testUtils')
 
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -53,8 +53,8 @@ describe('AgentRunManager — Dev-Editor real Codex contradiction check', () => 
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(userDataRoot, { recursive: true, force: true })
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(userDataRoot)
+    cleanupTestDir(projectRoot)
   })
 
   function makeGoal(): AgentGoal {
@@ -168,8 +168,8 @@ describe('AgentRunManager — Dev-Editor real structured JSON findings (Phase 8)
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
     vi.unstubAllGlobals()
-    rmSync(userDataRoot, { recursive: true, force: true })
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(userDataRoot)
+    cleanupTestDir(projectRoot)
   })
 
   function makeRealGoal(overrides: Partial<AgentGoal> = {}): AgentGoal {

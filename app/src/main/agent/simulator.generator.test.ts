@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,7 +15,7 @@ import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { writeScene } from '../persistence/sceneStore'
 import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import type { ModelCallInput } from './providers/types'
-import { waitForResultStep } from './simulator.testUtils'
+import { cleanupTestDir, waitForResultStep } from './simulator.testUtils'
 
 // Phase 8 §7.1: capture the ModelCallInput a "real" adapter call receives so
 // the style-guidance test below can assert the writer's generatorControls
@@ -110,7 +110,7 @@ describe('AgentRunManager — Generator opt-in multi-draft mode', () => {
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('produces exactly one draft with no draftGroupId when generateAlternatives is unset', async () => {
@@ -157,7 +157,7 @@ describe('AgentRunManager — Generator control set & clarifying questions (Phas
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('folds generatorControls into the real model call as a Style guidance block', async () => {

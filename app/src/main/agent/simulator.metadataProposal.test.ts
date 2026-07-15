@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -8,7 +8,7 @@ import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { writeScene } from '../persistence/sceneStore'
 import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager, proposeSceneMetadataPatch } from './simulator'
-import { waitForResultStep } from './simulator.testUtils'
+import { cleanupTestDir, waitForResultStep } from './simulator.testUtils'
 
 const BASE_META: SceneMeta = {
   schemaVersion: 2,
@@ -84,7 +84,7 @@ describe('AgentRunManager — Dev-Editor metadata-proposal suggestion', () => {
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   function makeGoal(): AgentGoal {

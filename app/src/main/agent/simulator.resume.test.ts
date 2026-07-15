@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,7 +18,7 @@ const { AgentRunManager } = await import('./simulator')
 const { openIndexDb } = await import('../persistence/db')
 const { saveAgentRun } = await import('../persistence/agentRunStore')
 const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
-const { waitForResultStep } = await import('./simulator.testUtils')
+const { cleanupTestDir, waitForResultStep } = await import('./simulator.testUtils')
 
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -70,7 +70,7 @@ describe('AgentRunManager.resume()', () => {
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
     vi.unstubAllGlobals()
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('reuses the exact prior in-memory budget when resuming a run this manager instance still holds', async () => {

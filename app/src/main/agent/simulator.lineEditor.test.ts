@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -48,7 +48,7 @@ vi.mock('./providers/openRouterAdapter', () => ({
 const { AgentRunManager } = await import('./simulator')
 const { openIndexDb } = await import('../persistence/db')
 const { setPreferredEmbeddingProvider } = await import('../retrieval/embeddings/select')
-const { waitForResultStep } = await import('./simulator.testUtils')
+const { cleanupTestDir, waitForResultStep } = await import('./simulator.testUtils')
 
 function makeGoal(opts: {
   runId: string
@@ -111,7 +111,7 @@ describe('AgentRunManager — Line Editor real JSON-mode multi-finding upgrade (
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('always requests JSON-mode output from a real adapter call', async () => {

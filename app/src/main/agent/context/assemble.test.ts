@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,6 +24,7 @@ const { writeBookMeta, writeChapterMeta, writePartMeta } = await import('../../p
 const { writeScene } = await import('../../persistence/sceneStore')
 const { upsertCodexEntry } = await import('../../persistence/codexStore')
 const { setPreferredEmbeddingProvider } = await import('../../retrieval/embeddings/select')
+const { cleanupTestDir } = await import('../simulator.testUtils')
 
 const LM_STUDIO_CHAT_URL = 'http://localhost:1234/v1/chat/completions'
 
@@ -175,7 +176,7 @@ describe('assembleContext (Phase 7)', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('packs sections in spec §9 priority order and includes the previous chapter summary + relevant Codex entries for a later scene', async () => {
@@ -342,7 +343,7 @@ describe('assembleContext (Phase 7)', () => {
       expect(excerptSection?.included).toBe(true)
       expect(assembled.contextText).toContain('A lone sentence with nothing else configured.')
     } finally {
-      rmSync(emptyProjectRoot, { recursive: true, force: true })
+      cleanupTestDir(emptyProjectRoot)
     }
   })
 })

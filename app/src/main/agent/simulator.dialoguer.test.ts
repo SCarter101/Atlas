@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,6 +44,7 @@ vi.mock('./providers/openRouterAdapter', () => ({
 }))
 
 const { AgentRunManager, parseRealDialogueAlternatives } = await import('./simulator')
+const { cleanupTestDir } = await import('./simulator.testUtils')
 
 describe('parseRealDialogueAlternatives — pure JSON-response validator', () => {
   it('accepts all 3 tiers regardless of the order the JSON lists them in', () => {
@@ -161,7 +162,7 @@ describe('AgentRunManager — Dialoguer voice-profile flow', () => {
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('resolves the scene POV character and generates tension-tiered alternatives from their voice profile', async () => {
@@ -246,7 +247,7 @@ describe('AgentRunManager — Dialoguer real-model-output branch (Phase 8)', () 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
     fakeOutputText = ''
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   it('parses well-formed JSON into a structured dialogue-alternative suggestion, threading refinesSuggestionId through', async () => {

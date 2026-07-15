@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -6,7 +6,7 @@ import type { AgentGoal, AgentStep, ModelCallSummary, PermissionRequest, Suggest
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 import { AgentRunManager } from './simulator'
-import { waitForResultStep } from './simulator.testUtils'
+import { cleanupTestDir, waitForResultStep } from './simulator.testUtils'
 
 describe('AgentRunManager — Line Editor simulated flow', () => {
   let projectRoot: string
@@ -24,7 +24,7 @@ describe('AgentRunManager — Line Editor simulated flow', () => {
 
   afterEach(() => {
     setPreferredEmbeddingProvider(undefined)
-    rmSync(projectRoot, { recursive: true, force: true })
+    cleanupTestDir(projectRoot)
   })
 
   function makeGoal(selectionText: string): AgentGoal {
