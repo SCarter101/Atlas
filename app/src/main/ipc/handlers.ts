@@ -1,4 +1,4 @@
-import { dialog, ipcMain, type WebContents } from 'electron'
+import { app, dialog, ipcMain, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { release } from 'node:os'
