@@ -20,6 +20,7 @@ import type {
   FactStatus,
   ManuscriptLink
 } from './schema/codex'
+import type { OutlineFramework, OutlineFrameworkKind, OutlineBeat } from './schema/outline'
 import type { ProjectManifest } from './schema/project'
 import type { SessionGoal } from './schema/session'
 import type { SceneWritePatch } from './ipc'
@@ -390,3 +391,44 @@ type _BackupScheduleCheck = z.infer<typeof BackupScheduleSchema> extends NonNull
   : never
 const _backupScheduleCheck: _BackupScheduleCheck = true
 void _backupScheduleCheck
+
+// ---------------------------------------------------------------------------
+// Outline frameworks (spec §11)
+// ---------------------------------------------------------------------------
+
+export const OutlineFrameworkKindSchema = z.enum([
+  'three-act',
+  'save-the-cat',
+  'heros-journey',
+  'mystery-clue-grid',
+  'thriller-escalation',
+  'custom'
+])
+
+export const OutlineBeatSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string(),
+  order: z.number(),
+  role: z.string().optional(),
+  targetChapterId: z.string().optional(),
+  targetSceneId: z.string().optional()
+})
+
+export const OutlineFrameworkSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: z.string(),
+  kind: OutlineFrameworkKindSchema,
+  name: z.string(),
+  beats: z.array(OutlineBeatSchema)
+})
+
+type _OutlineFrameworkKindCheck = z.infer<typeof OutlineFrameworkKindSchema> extends OutlineFrameworkKind ? true : never
+type _OutlineBeatCheck = z.infer<typeof OutlineBeatSchema> extends OutlineBeat ? true : never
+type _OutlineFrameworkCheck = z.infer<typeof OutlineFrameworkSchema> extends OutlineFramework ? true : never
+const _outlineFrameworkKindCheck: _OutlineFrameworkKindCheck = true
+const _outlineBeatCheck: _OutlineBeatCheck = true
+const _outlineFrameworkCheck: _OutlineFrameworkCheck = true
+void _outlineFrameworkKindCheck
+void _outlineBeatCheck
+void _outlineFrameworkCheck

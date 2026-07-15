@@ -29,7 +29,10 @@ import type { RetrievalResult } from '@shared/schema/retrieval'
 import type { AtlasDb } from '../persistence/db'
 import { loadAgentRun, listAgentRuns, saveAgentRun } from '../persistence/agentRunStore'
 import { listCodexEntries } from '../persistence/codexStore'
+import { readManuscriptTree } from '../persistence/manuscriptStore'
+import { loadOutlineFramework } from '../persistence/outlineStore'
 import { readScene } from '../persistence/sceneStore'
+import { getGenreExpectationFindings } from '@shared/outlineLogic'
 import { getActivePrompt } from '../persistence/promptStore'
 import { recordUsage } from '../persistence/usageStore'
 import { configuredMcpServers } from '@shared/mcp'
@@ -977,7 +980,35 @@ export class AgentRunManager {
     state.budget.toolCallsUsed += 1
 
     const assembledContext = await assembleContext(this.projectRoot, this.db, goal)
-    const modelCall = await this.runModelCallStep(goal, assembledContext, {
+
+    // Outline frameworks (spec §11): if the project has an active outline
+    // framework, fold any getGenreExpectationFindings() output into this
+    // call's contextText so a real model can incorporate genre-expectation
+    // issues (an unmapped early beat despite a mostly-drafted manuscript, or
+    // a beat mapped out of manuscript order) into its structured findings,
+    // tagged issueCategory: 'genre-expectation' below. Best-effort, same
+    // "augment, never break the fallback" pattern as this method's other
+    // real-tool calls — no framework yet, or any read failure, both degrade
+    // to the unmodified assembledContext.
+    let contextForModel = assembledContext
+    try {
+      const framework = await loadOutlineFramework(this.projectRoot)
+      if (framework) {
+        const manuscriptTree = await readManuscriptTree(this.projectRoot)
+        const genreFindings = getGenreExpectationFindings(framework, manuscriptTree)
+        if (genreFindings.length > 0) {
+          const summary = genreFindings.map((f) => `- [${f.severity}] ${f.label}: ${f.message}`).join('\n')
+          contextForModel = {
+            ...assembledContext,
+            contextText: `${assembledContext.contextText}\n\nOutline framework genre-expectation notes:\n${summary}`
+          }
+        }
+      }
+    } catch {
+      // Best-effort — proceed with the unmodified assembledContext.
+    }
+
+    const modelCall = await this.runModelCallStep(goal, contextForModel, {
       type: 'json',
       instructions: DEV_EDITOR_JSON_INSTRUCTIONS
     })
@@ -2062,7 +2093,7 @@ function simulateStructuralFindings(selection: string, sceneId?: string): Sugges
 // string (not templated per-run) since nothing in it varies by goal; the
 // contextText/userIntent already carry the run-specific material.
 const DEV_EDITOR_JSON_INSTRUCTIONS =
-  'Return ONLY a JSON object of the exact shape {"findings": [{"issueCategory": "continuity"|"pacing"|"pov"|"stakes"|"hooks"|"setup-payoff"|"other", "title": string, "body": string, "severity": "low"|"medium"|"high", "revisionPlan": string, "craftConceptIds": string[]}]} — no prose before or after the JSON. Include 1 to 4 findings, only for developmental-editing issues you actually find in the passage: broken continuity, pacing problems, point-of-view drift, weak or unclear stakes, a missing or weak hook, or a setup that never pays off (or a payoff with no setup). Each finding\'s revisionPlan must be a concrete, actionable next step for the writer — not a restatement of body. Only include craftConceptIds entries from this fixed list, and only when a finding clearly matches: hooks, scene-turns, causality, stakes, setup-and-payoff, point-of-view, pacing. Never rewrite the passage yourself — describe the issue and the fix.'
+  'Return ONLY a JSON object of the exact shape {"findings": [{"issueCategory": "continuity"|"pacing"|"pov"|"stakes"|"hooks"|"setup-payoff"|"genre-expectation"|"other", "title": string, "body": string, "severity": "low"|"medium"|"high", "revisionPlan": string, "craftConceptIds": string[]}]} — no prose before or after the JSON. Include 1 to 4 findings, only for developmental-editing issues you actually find in the passage: broken continuity, pacing problems, point-of-view drift, weak or unclear stakes, a missing or weak hook, a setup that never pays off (or a payoff with no setup), or — when the context includes an "Outline framework genre-expectation notes" section — an unaddressed note from that list, tagged issueCategory: "genre-expectation". Each finding\'s revisionPlan must be a concrete, actionable next step for the writer — not a restatement of body. Only include craftConceptIds entries from this fixed list, and only when a finding clearly matches: hooks, scene-turns, causality, stakes, setup-and-payoff, point-of-view, pacing. Never rewrite the passage yourself — describe the issue and the fix.'
 
 // Phase 8 §7.2: category -> renderer/src/lib/craftReference.ts CRAFT_CONCEPTS
 // id, used only as a fallback when a real finding didn't supply its own
@@ -2078,7 +2109,16 @@ const ISSUE_CATEGORY_CRAFT_CONCEPT: Record<string, string> = {
   'setup-payoff': 'setup-and-payoff'
 }
 
-const VALID_ISSUE_CATEGORIES = new Set(['continuity', 'pacing', 'pov', 'stakes', 'hooks', 'setup-payoff', 'other'])
+const VALID_ISSUE_CATEGORIES = new Set([
+  'continuity',
+  'pacing',
+  'pov',
+  'stakes',
+  'hooks',
+  'setup-payoff',
+  'genre-expectation',
+  'other'
+])
 
 // Phase 8 §7.2: parses a real Dev-Editor model call's JSON-mode output (see
 // runDevEditor's isReal branch) into 1-4 EditorialFindingPayloads. Accepts

@@ -114,6 +114,10 @@ const atlasBridge: AtlasBridge = {
     getEnabled: () => ipcRenderer.invoke(IpcChannel.TelemetryGetEnabled),
     setEnabled: (enabled) => ipcRenderer.invoke(IpcChannel.TelemetrySetEnabled, enabled),
     exportFeedback: () => ipcRenderer.invoke(IpcChannel.TelemetryExportFeedback)
+  },
+  outline: {
+    getFramework: () => ipcRenderer.invoke(IpcChannel.OutlineGetFramework),
+    setFramework: (framework) => ipcRenderer.invoke(IpcChannel.OutlineSetFramework, framework)
   }
 }
 
