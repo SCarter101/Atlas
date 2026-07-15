@@ -1,6 +1,13 @@
 import type { AgentGoal, AgentRole, AgentRunRecord, AgentRunStatus, AgentStep, PermissionDecision } from './schema/agent'
 import type { BackupMeta } from './schema/backup'
-import type { CapabilityManifest, LifecycleState, SessionApproval } from './schema/capability'
+import type {
+  CapabilityManifest,
+  CapabilityScope,
+  CapabilityTestResult,
+  CapabilityUsageMetric,
+  LifecycleState,
+  SessionApproval
+} from './schema/capability'
 import type { CodexEntry, CodexEntryType, FactStatus } from './schema/codex'
 import type { CodexCandidate } from './schema/import'
 import type { OpenRouterCatalogEntry } from './schema/models'
@@ -39,6 +46,17 @@ export const IpcChannel = {
   CapabilitiesCreate: 'capabilities:create',
   CapabilitiesUpdate: 'capabilities:update',
   CapabilitiesSetLifecycleState: 'capabilities:set-lifecycle-state',
+  // Phase 9 Track 3 (§14 capability lifecycle completion) — see
+  // main/capabilities/registry.ts's rollbackCapability/promoteCapability/
+  // forkCapability/testCapability/getCapabilityUsageMetrics.
+  // compareCapabilityVersions is deliberately NOT here: it's a pure diff of
+  // two manifests the renderer already has in hand (shared/capabilityDiff.ts),
+  // no IPC round-trip needed.
+  CapabilitiesRollback: 'capabilities:rollback',
+  CapabilitiesPromote: 'capabilities:promote',
+  CapabilitiesFork: 'capabilities:fork',
+  CapabilitiesTest: 'capabilities:test',
+  CapabilitiesUsageMetrics: 'capabilities:usage-metrics',
   PermissionsList: 'permissions:list',
   PermissionsRevoke: 'permissions:revoke',
   AgentRunStart: 'agent-run:start',
@@ -183,6 +201,21 @@ export interface AtlasBridge {
     create(manifest: CapabilityManifest): Promise<void>
     update(manifest: CapabilityManifest): Promise<void>
     setLifecycleState(id: string, state: LifecycleState): Promise<void>
+    // Phase 9 Track 3: restores a capability to an earlier history entry's
+    // snapshot (main-side rejects clearly if that entry predates snapshot
+    // support rather than crashing).
+    rollback(id: string, versionId: string): Promise<void>
+    // Moves a capability's manifest file to a different scope's directory.
+    promote(id: string, targetScope: CapabilityScope): Promise<void>
+    // Copies a capability under a new id into targetScope as a fresh draft;
+    // does not touch the original.
+    fork(id: string, newId: string, targetScope: CapabilityScope): Promise<void>
+    // Runs sampleInput through the manifest's real SandboxedTool if one is
+    // registered, else falls back to a structural shape check — see
+    // CapabilityTestResult's doc comment for what `mode` means.
+    test(manifest: CapabilityManifest, sampleInput: unknown): Promise<CapabilityTestResult>
+    // ESTIMATE ONLY — see CapabilityUsageMetric's doc comment.
+    usageMetrics(): Promise<CapabilityUsageMetric[]>
   }
   permissions: {
     list(): Promise<SessionApproval[]>

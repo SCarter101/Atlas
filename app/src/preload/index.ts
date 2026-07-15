@@ -36,7 +36,12 @@ const atlasBridge: AtlasBridge = {
     list: () => ipcRenderer.invoke(IpcChannel.CapabilitiesList),
     create: (manifest) => ipcRenderer.invoke(IpcChannel.CapabilitiesCreate, manifest),
     update: (manifest) => ipcRenderer.invoke(IpcChannel.CapabilitiesUpdate, manifest),
-    setLifecycleState: (id, state) => ipcRenderer.invoke(IpcChannel.CapabilitiesSetLifecycleState, id, state)
+    setLifecycleState: (id, state) => ipcRenderer.invoke(IpcChannel.CapabilitiesSetLifecycleState, id, state),
+    rollback: (id, versionId) => ipcRenderer.invoke(IpcChannel.CapabilitiesRollback, id, versionId),
+    promote: (id, targetScope) => ipcRenderer.invoke(IpcChannel.CapabilitiesPromote, id, targetScope),
+    fork: (id, newId, targetScope) => ipcRenderer.invoke(IpcChannel.CapabilitiesFork, id, newId, targetScope),
+    test: (manifest, sampleInput) => ipcRenderer.invoke(IpcChannel.CapabilitiesTest, manifest, sampleInput),
+    usageMetrics: () => ipcRenderer.invoke(IpcChannel.CapabilitiesUsageMetrics)
   },
   permissions: {
     list: () => ipcRenderer.invoke(IpcChannel.PermissionsList),

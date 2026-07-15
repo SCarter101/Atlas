@@ -4,10 +4,14 @@ import type {
   CapabilityManifest,
   CapabilitySideEffects,
   CapabilityScope,
+  CapabilityTestResult,
   CapabilityType,
+  CapabilityUsageMetric,
   JsonSchema,
   LifecycleState
 } from '@shared/schema/capability'
+import { compareCapabilityVersions, type CapabilityFieldDiff } from '@shared/capabilityDiff'
+import { normalizeError } from '@shared/errors'
 import { useAtlasStore } from '../state/store'
 
 type ScopeFilter = 'All' | 'Global' | 'Project'
@@ -63,11 +67,16 @@ function costSummary(cost: CapabilityManifest['costCharacteristics']): string {
 
 export function Library(): JSX.Element {
   const advancedMode = useAtlasStore((s) => s.advancedMode)
+  const pushToast = useAtlasStore((s) => s.pushToast)
   const [manifests, setManifests] = useState<CapabilityManifest[]>([])
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('All')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('All')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [formMode, setFormMode] = useState<'closed' | 'create' | 'edit'>('closed')
+  const [compareState, setCompareState] = useState<{ manifest: CapabilityManifest; versionId: string } | null>(null)
+  const [testManifest, setTestManifest] = useState<CapabilityManifest | null>(null)
+  const [forkManifest, setForkManifest] = useState<CapabilityManifest | null>(null)
+  const [usageMetrics, setUsageMetrics] = useState<CapabilityUsageMetric[]>([])
 
   function refresh(preferId?: string): void {
     void window.atlas.capabilities.list().then((list) => {
@@ -80,9 +89,34 @@ export function Library(): JSX.Element {
     })
   }
 
+  function refreshUsageMetrics(): void {
+    void window.atlas.capabilities.usageMetrics().then(setUsageMetrics)
+  }
+
   useEffect(() => {
     refresh()
+    refreshUsageMetrics()
   }, [])
+
+  async function handleRollback(manifest: CapabilityManifest, versionId: string): Promise<void> {
+    try {
+      await window.atlas.capabilities.rollback(manifest.id, versionId)
+      pushToast('info', `Rolled back "${manifest.name}" to an earlier version.`)
+      refresh(manifest.id)
+    } catch (err) {
+      pushToast('error', normalizeError(err).message)
+    }
+  }
+
+  async function handlePromote(manifest: CapabilityManifest): Promise<void> {
+    try {
+      await window.atlas.capabilities.promote(manifest.id, 'global')
+      pushToast('info', `Promoted "${manifest.name}" to global scope.`)
+      refresh(manifest.id)
+    } catch (err) {
+      pushToast('error', normalizeError(err).message)
+    }
+  }
 
   const filtered = manifests.filter((m) => {
     const scopeMatch = scopeFilter === 'All' || m.scope === (scopeFilter.toLowerCase() as CapabilityScope)
@@ -206,8 +240,44 @@ export function Library(): JSX.Element {
               <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>No dependencies</div>
             )}
 
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--c-ink-faint)', marginTop: 16, marginBottom: 8 }}>
+              Version History
+            </div>
+            {selected.history.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
+                {[...selected.history].reverse().map((entry) => (
+                  <div key={entry.versionId} style={{ padding: 10, borderRadius: 8, border: '1px solid var(--c-border)', background: 'var(--c-surface)' }}>
+                    <div style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', marginBottom: 4 }}>{new Date(entry.changedAt).toLocaleString()}</div>
+                    <div style={{ fontSize: 12, color: 'var(--c-ink-soft)', marginBottom: 8 }}>{entry.note}</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => setCompareState({ manifest: selected, versionId: entry.versionId })}
+                        disabled={!entry.snapshot}
+                        title={!entry.snapshot ? 'This version predates snapshot support and cannot be compared.' : undefined}
+                        style={{ ...smallActionButtonStyle, opacity: entry.snapshot ? 1 : 0.5, cursor: entry.snapshot ? 'pointer' : 'not-allowed' }}
+                      >
+                        Compare vs. current
+                      </button>
+                      {advancedMode && (
+                        <button
+                          onClick={() => void handleRollback(selected, entry.versionId)}
+                          disabled={!entry.snapshot}
+                          title={!entry.snapshot ? 'This version predates snapshot support and cannot be restored.' : undefined}
+                          style={{ ...smallActionButtonStyle, opacity: entry.snapshot ? 1 : 0.5, cursor: entry.snapshot ? 'pointer' : 'not-allowed' }}
+                        >
+                          Rollback to this version
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>No history recorded.</div>
+            )}
+
             {advancedMode && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 20 }}>
                 <button onClick={() => setFormMode('edit')} style={{ flex: 1, padding: '7px 0', borderRadius: 7, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', fontSize: 12.5, cursor: 'pointer' }}>
                   Edit
                 </button>
@@ -220,8 +290,56 @@ export function Library(): JSX.Element {
                 {selected.lifecycleState !== 'deprecated' && (
                   <LifecycleButton label="Deprecate" onClick={() => void setLifecycle(selected, 'deprecated')} />
                 )}
+                <LifecycleButton label="Test with sample input" onClick={() => setTestManifest(selected)} />
+                {selected.scope === 'project' && (
+                  <LifecycleButton label="Promote to Global" onClick={() => void handlePromote(selected)} />
+                )}
+                {selected.scope === 'global' && (
+                  <LifecycleButton label="Fork to Project" onClick={() => setForkManifest(selected)} />
+                )}
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 32 }}>
+        <div style={{ fontFamily: 'Source Serif 4, serif', fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Usage &amp; Efficiency</div>
+        <div style={{ fontSize: 12, color: 'var(--c-ink-faint)', marginBottom: 12 }}>
+          Estimate only — invocation counts from recent agent runs multiplied by each capability&rsquo;s own self-declared
+          cost characteristics. Not a measured comparison against not having the tool.
+        </div>
+        {usageMetrics.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--c-ink-faint)' }}>No recorded tool invocations yet.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--c-ink-faint)' }}>
+                  <th style={thStyle}>Capability</th>
+                  <th style={thStyle}>Invocations</th>
+                  <th style={thStyle}>Succeeded</th>
+                  <th style={thStyle}>Failed</th>
+                  <th style={thStyle}>Est. tokens saved</th>
+                  <th style={thStyle}>Est. cost saved</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usageMetrics.map((metric) => {
+                  const capability = manifests.find((m) => m.id === metric.toolId.split('@')[0])
+                  return (
+                    <tr key={metric.toolId} style={{ borderTop: '1px solid var(--c-border)' }}>
+                      <td style={tdStyle}>{capability ? capability.name : metric.toolId}</td>
+                      <td style={tdStyle}>{metric.invocations}</td>
+                      <td style={tdStyle}>{metric.successCount}</td>
+                      <td style={tdStyle}>{metric.failureCount}</td>
+                      <td style={tdStyle}>{metric.estimatedTokensSaved.toLocaleString()}</td>
+                      <td style={tdStyle}>${metric.estimatedCostSavedUsd.toFixed(2)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -233,6 +351,32 @@ export function Library(): JSX.Element {
           onSaved={(id) => {
             setFormMode('closed')
             refresh(id)
+          }}
+        />
+      )}
+
+      {compareState && (
+        <CompareModal manifest={compareState.manifest} versionId={compareState.versionId} onClose={() => setCompareState(null)} />
+      )}
+
+      {testManifest && (
+        <TestModal
+          manifest={testManifest}
+          onClose={() => setTestManifest(null)}
+          onTested={() => refresh(testManifest.id)}
+        />
+      )}
+
+      {forkManifest && (
+        <ForkModal
+          manifest={forkManifest}
+          onClose={() => setForkManifest(null)}
+          onForked={(newId) => {
+            const forkedFrom = forkManifest.name
+            setForkManifest(null)
+            pushToast('info', `Forked "${forkedFrom}" into a new project capability.`)
+            refresh(newId)
+            refreshUsageMetrics()
           }}
         />
       )}
@@ -397,6 +541,185 @@ function FormField({ label, children }: { label: string; children: ReactNode }):
   )
 }
 
+function stringifyDiffValue(value: unknown): string {
+  if (value === undefined) return '—'
+  if (typeof value === 'string') return value || '—'
+  return JSON.stringify(value)
+}
+
+function CompareModal({
+  manifest,
+  versionId,
+  onClose
+}: {
+  manifest: CapabilityManifest
+  versionId: string
+  onClose: () => void
+}): JSX.Element {
+  let diffs: CapabilityFieldDiff[] = []
+  let errorMessage: string | undefined
+  try {
+    diffs = compareCapabilityVersions(manifest, versionId)
+  } catch (err) {
+    errorMessage = normalizeError(err).message
+  }
+
+  return (
+    <div style={overlayStyle}>
+      <div style={modalStyle}>
+        <div style={modalTitleStyle}>Compare versions</div>
+        {errorMessage ? (
+          <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', marginBottom: 16 }}>{errorMessage}</div>
+        ) : diffs.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', marginBottom: 16 }}>
+            No differences in the compared fields between this version and the current one.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+            {diffs.map((d) => (
+              <div key={d.field} style={{ padding: 10, borderRadius: 8, border: '1px solid var(--c-border)', fontSize: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4, textTransform: 'capitalize' }}>{d.field}</div>
+                <div style={{ color: 'var(--c-ink-faint)' }}>
+                  Before: <span style={{ color: 'var(--c-ink)' }}>{stringifyDiffValue(d.before)}</span>
+                </div>
+                <div style={{ color: 'var(--c-ink-faint)' }}>
+                  After: <span style={{ color: 'var(--c-ink)' }}>{stringifyDiffValue(d.after)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={cancelButtonStyle}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TestModal({
+  manifest,
+  onClose,
+  onTested
+}: {
+  manifest: CapabilityManifest
+  onClose: () => void
+  onTested: () => void
+}): JSX.Element {
+  const [inputText, setInputText] = useState('{}')
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<CapabilityTestResult | null>(null)
+  const [parseError, setParseError] = useState<string | null>(null)
+
+  async function runTest(): Promise<void> {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(inputText)
+    } catch {
+      setParseError('Sample input is not valid JSON.')
+      return
+    }
+    setParseError(null)
+    setRunning(true)
+    try {
+      const testResult = await window.atlas.capabilities.test(manifest, parsed)
+      setResult(testResult)
+      onTested()
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div style={overlayStyle}>
+      <div style={modalStyle}>
+        <div style={modalTitleStyle}>Test &ldquo;{manifest.name}&rdquo;</div>
+        <FormField label="Sample input (JSON)">
+          <textarea
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            rows={6}
+            style={{ ...formInputStyle, fontFamily: 'ui-monospace, monospace', resize: 'vertical' }}
+          />
+        </FormField>
+        {parseError && <div style={{ fontSize: 12, color: '#c0392b', marginBottom: 10 }}>{parseError}</div>}
+        {result && (
+          <div style={{ marginTop: 4, marginBottom: 16, padding: 10, borderRadius: 8, border: '1px solid var(--c-border)', fontSize: 12 }}>
+            <div style={{ marginBottom: 6 }}>
+              Mode: <strong>{result.mode === 'sandboxed' ? 'Sandboxed execution (real)' : 'Structural check (no real execution)'}</strong>
+            </div>
+            <div style={{ marginBottom: 6, color: result.ok ? 'var(--c-green)' : '#c0392b', fontWeight: 600 }}>
+              {result.ok ? 'Passed' : `Failed${result.error ? `: ${result.error}` : ''}`}
+            </div>
+            {result.output !== undefined && (
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace', color: 'var(--c-ink-soft)' }}>
+                {JSON.stringify(result.output, null, 2)}
+              </pre>
+            )}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={cancelButtonStyle}>
+            Close
+          </button>
+          <button onClick={() => void runTest()} disabled={running} style={primaryButtonStyle}>
+            {running ? 'Running…' : 'Run test'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ForkModal({
+  manifest,
+  onClose,
+  onForked
+}: {
+  manifest: CapabilityManifest
+  onClose: () => void
+  onForked: (newId: string) => void
+}): JSX.Element {
+  const [newId, setNewId] = useState(`${manifest.id}.fork`)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleFork(): Promise<void> {
+    if (!newId.trim() || saving) return
+    setSaving(true)
+    setError(null)
+    try {
+      await window.atlas.capabilities.fork(manifest.id, newId.trim(), 'project')
+      onForked(newId.trim())
+    } catch (err) {
+      setError(normalizeError(err).message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={overlayStyle}>
+      <div style={{ ...modalStyle, width: 380 }}>
+        <div style={modalTitleStyle}>Fork &ldquo;{manifest.name}&rdquo; to Project</div>
+        <FormField label="New capability id">
+          <input value={newId} onChange={(e) => setNewId(e.target.value)} style={formInputStyle} />
+        </FormField>
+        {error && <div style={{ fontSize: 12, color: '#c0392b', marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={cancelButtonStyle}>
+            Cancel
+          </button>
+          <button onClick={() => void handleFork()} disabled={saving || !newId.trim()} style={primaryButtonStyle}>
+            {saving ? 'Forking…' : 'Fork'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const formInputStyle: CSSProperties = {
   width: '100%',
   padding: '7px 10px',
@@ -406,6 +729,67 @@ const formInputStyle: CSSProperties = {
   color: 'var(--c-ink)',
   fontSize: 12.5
 }
+
+const overlayStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0,0,0,0.35)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 100
+}
+
+const modalStyle: CSSProperties = {
+  width: 460,
+  maxHeight: '85vh',
+  overflowY: 'auto',
+  padding: 24,
+  borderRadius: 14,
+  background: 'var(--c-surface-raised)',
+  border: '1px solid var(--c-border)'
+}
+
+const modalTitleStyle: CSSProperties = {
+  fontFamily: 'Source Serif 4, serif',
+  fontWeight: 600,
+  fontSize: 18,
+  marginBottom: 18
+}
+
+const cancelButtonStyle: CSSProperties = {
+  padding: '8px 16px',
+  borderRadius: 8,
+  fontSize: 12.5,
+  cursor: 'pointer',
+  border: '1px solid var(--c-border)',
+  background: 'var(--c-surface)',
+  color: 'var(--c-ink)'
+}
+
+const primaryButtonStyle: CSSProperties = {
+  padding: '8px 16px',
+  borderRadius: 8,
+  fontSize: 12.5,
+  fontWeight: 600,
+  cursor: 'pointer',
+  border: 'none',
+  background: 'var(--c-accent)',
+  color: '#fff'
+}
+
+const smallActionButtonStyle: CSSProperties = {
+  padding: '4px 8px',
+  borderRadius: 6,
+  border: '1px solid var(--c-border)',
+  background: 'transparent',
+  color: 'var(--c-ink-soft)',
+  fontSize: 11,
+  cursor: 'pointer'
+}
+
+const thStyle: CSSProperties = { padding: '6px 8px', fontWeight: 600 }
+const tdStyle: CSSProperties = { padding: '6px 8px' }
 
 function SegmentedControl<T extends string>({ options, value, onChange }: { options: T[]; value: T; onChange: (v: T) => void }): JSX.Element {
   return (

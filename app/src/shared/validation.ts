@@ -295,34 +295,47 @@ export const CapabilitySideEffectsSchema = z.enum(['none', 'reads-project', 'wri
 export const ValidationStatusSchema = z.enum(['untested', 'passed', 'failed'])
 export const LifecycleStateSchema = z.enum(['draft', 'enabled', 'disabled', 'deprecated'])
 
-export const CapabilityManifestSchema = z.object({
-  schemaVersion: z.literal(1),
-  id: z.string(),
-  name: z.string(),
-  description: z.string(),
-  type: CapabilityTypeSchema,
-  scope: CapabilityScopeSchema,
-  owner: z.string(),
-  version: z.string(),
-  inputSchema: JsonSchemaSchema,
-  outputSchema: JsonSchemaSchema,
-  requiredContext: z.array(z.string()),
-  dependsOn: z.array(z.string()),
-  compatibleAgentRoles: z.array(AgentRoleSchema),
-  compatibleModelCapabilities: z.array(z.string()),
-  sideEffects: CapabilitySideEffectsSchema,
-  permissionCategory: z.string(),
-  localOnly: z.boolean(),
-  costCharacteristics: z.object({
-    estTokens: z.number().optional(),
-    estTimeMs: z.number().optional(),
-    estCostUsd: z.number().optional()
-  }),
-  validationStatus: ValidationStatusSchema,
-  lifecycleState: LifecycleStateSchema,
-  createdBy: z.enum(['author', 'agent-generated']),
-  history: z.array(z.object({ versionId: z.string(), changedAt: z.string(), note: z.string() }))
-})
+// Self-referential: history[].snapshot is a full CapabilityManifest (see
+// that field's doc comment in schema/capability.ts). z.lazy() + an explicit
+// z.ZodType<CapabilityManifest> annotation is the same recursive-schema
+// pattern JsonSchemaSchema above already uses for its own self-reference.
+export const CapabilityManifestSchema: z.ZodType<CapabilityManifest> = z.lazy(() =>
+  z.object({
+    schemaVersion: z.literal(1),
+    id: z.string(),
+    name: z.string(),
+    description: z.string(),
+    type: CapabilityTypeSchema,
+    scope: CapabilityScopeSchema,
+    owner: z.string(),
+    version: z.string(),
+    inputSchema: JsonSchemaSchema,
+    outputSchema: JsonSchemaSchema,
+    requiredContext: z.array(z.string()),
+    dependsOn: z.array(z.string()),
+    compatibleAgentRoles: z.array(AgentRoleSchema),
+    compatibleModelCapabilities: z.array(z.string()),
+    sideEffects: CapabilitySideEffectsSchema,
+    permissionCategory: z.string(),
+    localOnly: z.boolean(),
+    costCharacteristics: z.object({
+      estTokens: z.number().optional(),
+      estTimeMs: z.number().optional(),
+      estCostUsd: z.number().optional()
+    }),
+    validationStatus: ValidationStatusSchema,
+    lifecycleState: LifecycleStateSchema,
+    createdBy: z.enum(['author', 'agent-generated']),
+    history: z.array(
+      z.object({
+        versionId: z.string(),
+        changedAt: z.string(),
+        note: z.string(),
+        snapshot: CapabilityManifestSchema.optional()
+      })
+    )
+  })
+)
 
 type _CapabilityManifestCheck = z.infer<typeof CapabilityManifestSchema> extends CapabilityManifest ? true : never
 const _capabilityManifestCheck: _CapabilityManifestCheck = true
