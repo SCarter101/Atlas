@@ -140,7 +140,12 @@ describe('performance at ~120k-word manuscript scale', () => {
 
   it('a second ensureIndexed() call on an already-indexed project is a near-instant no-op', async () => {
     const { ms } = await timeAsync('ensureIndexed (second call, already indexed)', () => ensureIndexed(db, projectRoot))
-    expect(ms).toBeLessThan(500)
+    // 88ms locally; a shared/virtualized CI runner (GitHub Actions
+    // windows-latest) measured 598ms for the same no-op pass on its first
+    // real run here — slower, contended hardware, not a regression. 2000ms
+    // keeps this meaningfully distinct from the full-pass ceiling (5000ms,
+    // above) while giving real headroom over the CI value actually observed.
+    expect(ms).toBeLessThan(2000)
   })
 
   it('search() returns ranked results quickly once indexed', async () => {
