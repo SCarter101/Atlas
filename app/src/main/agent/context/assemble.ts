@@ -27,6 +27,20 @@ export interface AssembledContext {
   tokenBudget: number
 }
 
+// Round 12: real Brave Search MCP results for World Builder's opt-in web-
+// research path (see runWorldBuilder() in main/agent/simulator.ts and
+// main/mcp/braveSearchAdapter.ts). Deliberately a separate parameter from
+// `opts` below rather than folded into it: `opts` is the interview flow's
+// *full override* (it replaces normal retrieval entirely), while
+// webResearch is *additive* on top of whichever path runs — the interview
+// override or the normal per-source priority assembly — since real search
+// results are relevant regardless of which context source produced the rest
+// of the call's material.
+export interface WebResearchContext {
+  query: string
+  results: { title: string; url: string; snippet: string }[]
+}
+
 // Rough length-based estimate — same style as the private helper in
 // providers/lmStudioAdapter.ts (kept separate rather than imported/exported
 // from there: this module has no business depending on a specific provider
@@ -371,16 +385,39 @@ export async function assembleContext(
   // recent-excerpt-classed candidate (still subject to the same budget
   // packing as everything else) avoids doing full retrieval that would have
   // nothing real to find.
-  opts?: { overrideText: string; overrideLabel: string }
+  opts?: { overrideText: string; overrideLabel: string },
+  // Round 12: see WebResearchContext's own doc comment above — additive on
+  // top of either branch below, absent (undefined) for every pre-Round-12
+  // caller and for every role/run that doesn't opt in, which keeps this
+  // parameter a complete no-op unless a caller actually passes it.
+  webResearch?: WebResearchContext
 ): Promise<AssembledContext> {
   const tokenBudget = goal.constraints.maxTokens
   const packingBudget = Math.max(1, Math.floor(tokenBudget * CONTEXT_PACKING_FRACTION))
 
+  // Highest priority regardless of which branch runs below: a genuine
+  // external search result is worth surfacing ahead of anything this app
+  // already had on disk. Undefined/empty-results webResearch produces
+  // undefined here, so behavior is byte-for-byte unchanged for every caller
+  // that doesn't pass it.
+  const webResearchItem: Item | undefined =
+    webResearch && webResearch.results.length > 0
+      ? {
+          kind: 'candidate',
+          candidate: {
+            class: 'web-research',
+            label: `Web search results — "${webResearch.query}"`,
+            text: webResearch.results.map((r, i) => `${i + 1}. ${r.title}\n${r.url}\n${r.snippet}`).join('\n\n')
+          }
+        }
+      : undefined
+
   if (opts) {
-    const items: Item[] =
-      opts.overrideText.trim().length > 0
-        ? [{ kind: 'candidate', candidate: { class: 'recent-excerpt', label: opts.overrideLabel, text: opts.overrideText } }]
-        : []
+    const items: Item[] = []
+    if (webResearchItem) items.push(webResearchItem)
+    if (opts.overrideText.trim().length > 0) {
+      items.push({ kind: 'candidate', candidate: { class: 'recent-excerpt', label: opts.overrideLabel, text: opts.overrideText } })
+    }
     const { sections, contextText } = buildSections(items, packingBudget)
     return { contextText, sections, tokenBudget }
   }
@@ -388,6 +425,7 @@ export async function assembleContext(
   const isCloud = isCloudModel(goal.modelRef)
   const sceneId = goal.scope.sceneIds?.[0]
   const items: Item[] = []
+  if (webResearchItem) items.push(webResearchItem)
 
   let allEntries: CodexEntry[] = []
   try {

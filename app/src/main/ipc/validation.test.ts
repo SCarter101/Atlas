@@ -143,6 +143,32 @@ describe('IPC boundary validation schemas', () => {
 
       expect(() => AgentGoalSchema.parse(malformed)).toThrow()
     })
+
+    // Round 12: webResearchEnabled is a new optional field — the zod schema
+    // silently strips any field it doesn't know about (the exact gotcha this
+    // project's own CLAUDE.md documents repeatedly), so this round-trips it
+    // explicitly rather than trusting the compile-time _AgentGoalCheck guard,
+    // which only checks one type-assignability direction and would not have
+    // caught a missed mirror.
+    it('round-trips AgentGoal.webResearchEnabled', () => {
+      const goal: AgentGoal = {
+        runId: 'run-2',
+        agentRole: 'World-Builder',
+        modelRef: { provider: 'openrouter', modelId: 'anthropic/claude-sonnet-5', viaOpenRouter: true },
+        userIntent: 'Propose new Codex entries for this passage',
+        scope: { sceneIds: ['scene-1'], selectionText: 'The Bronco idled outside the old harbor gate.' },
+        constraints: {
+          maxTurns: 4,
+          maxTokens: 4000,
+          maxToolCalls: 3,
+          maxElapsedMs: 30000,
+          allowedCapabilityCategories: ['world-research']
+        },
+        webResearchEnabled: true
+      }
+
+      expect(AgentGoalSchema.parse(goal)).toEqual(goal)
+    })
   })
 
   describe('ProjectManifestSeedSchema', () => {

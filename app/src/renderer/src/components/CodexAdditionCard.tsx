@@ -3,11 +3,15 @@ import type { AgentRole, SuggestionRef } from '@shared/schema/agent'
 import { AssistantIcon, type IconKind } from './AssistantIcon'
 import { useAtlasStore } from '../state/store'
 
-const RELIABILITY_LABEL: Record<'low' | 'medium' | 'high' | 'author-stated', string> = {
+const RELIABILITY_LABEL: Record<'low' | 'medium' | 'high' | 'author-stated' | 'researched', string> = {
   low: 'low reliability',
   medium: 'medium reliability',
   high: 'high reliability',
-  'author-stated': 'from your interview answers'
+  'author-stated': 'from your interview answers',
+  // Round 12: a real Brave Search MCP result folded into this proposal's
+  // context — distinct from the model-confidence tiers above, since this
+  // marks genuine external verification rather than an unverified guess.
+  researched: 'from a real web search'
 }
 
 const STATE_BADGE: Record<SuggestionRef['state'], { bg: string; color: string; label: string }> = {
@@ -58,7 +62,11 @@ export function CodexAdditionCard({ suggestion }: { suggestion: SuggestionRef })
     // main/agent/simulator.ts), never fabricated or web-researched, so it
     // shouldn't be lumped in with (or mistaken for) a "low reliability"
     // guess the way the plain single-selection flow's proposals are.
-    citations?: { note: string; reliability?: 'low' | 'medium' | 'high' | 'author-stated' }[]
+    // 'researched' (Round 12) marks a citation backed by a real Brave Search
+    // MCP result (see maybeResearchForWorldBuilder in main/agent/
+    // simulator.ts) — the first citation kind on this card with a real
+    // sourceUrl to link out to.
+    citations?: { note: string; reliability?: 'low' | 'medium' | 'high' | 'author-stated' | 'researched'; sourceUrl?: string }[]
   }
   const isResolved = suggestion.state === 'accepted' || suggestion.state === 'rejected'
   const badge = STATE_BADGE[suggestion.state]
@@ -113,6 +121,14 @@ export function CodexAdditionCard({ suggestion }: { suggestion: SuggestionRef })
             <div key={i} style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', lineHeight: 1.4 }}>
               {c.note}
               {c.reliability ? ` (${RELIABILITY_LABEL[c.reliability]})` : ''}
+              {c.sourceUrl && (
+                <>
+                  {' — '}
+                  <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--c-accent)' }}>
+                    {c.sourceUrl}
+                  </a>
+                </>
+              )}
             </div>
           ))}
         </div>

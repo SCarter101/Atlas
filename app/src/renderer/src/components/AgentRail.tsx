@@ -60,6 +60,12 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
   // AgentDef, since it's a per-run choice rather than a per-agent setting.
   const [generateAlternatives, setGenerateAlternatives] = useState(false)
 
+  // Round 12: World Builder's opt-in real web-research mode (Brave Search
+  // MCP) — same Advanced-Mode-gated, per-run, local-useState convention as
+  // generateAlternatives above, just scoped to World-Builder instead of
+  // Generator.
+  const [webResearchEnabled, setWebResearchEnabled] = useState(false)
+
   // Phase 8 §7.1: Generator's writer-facing control set — Advanced-Mode-gated
   // the same way generateAlternatives is above, local useState only (no
   // persistence needed since AgentRail doesn't unmount between runs).
@@ -170,7 +176,8 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
       generateAlternatives: agent.role === 'Generator' && advancedMode && generateAlternatives ? true : undefined,
       lmStudioFallback,
       generatorControls,
-      lineEditorControls
+      lineEditorControls,
+      webResearchEnabled: agent.role === 'World-Builder' && advancedMode && webResearchEnabled ? true : undefined
     }
 
     if (!(await authorizeRun(goal))) return
@@ -451,6 +458,26 @@ export function AgentRail({ getSelection, sceneId }: { getSelection: () => strin
                           Flag AI-sounding prose
                         </label>
                       </div>
+                    )}
+                    {agent.role === 'World-Builder' && advancedMode && (
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: 12,
+                          color: 'var(--c-ink-soft)',
+                          marginBottom: 10,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={webResearchEnabled}
+                          onChange={(e) => setWebResearchEnabled(e.target.checked)}
+                        />
+                        Include real web research (Brave Search)
+                      </label>
                     )}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button

@@ -66,6 +66,15 @@ export interface AgentGoal {
   // it (userIntent already carries the refine instruction, scope.selectionText
   // already carries the prior suggestion's own output text).
   refinesSuggestionId?: string
+  // Round 12: opt-in real web research for World-Builder via a Brave Search
+  // MCP connection (main/mcp/braveSearchAdapter.ts). Only consulted when
+  // agentRole === 'World-Builder' and the selected model is a real (non-
+  // simulator) adapter — see runWorldBuilder() in main/agent/simulator.ts.
+  // Gated in the UI behind Advanced Mode (see AgentRail.tsx), same as every
+  // other opt-in flag above; unset/false preserves prior behavior byte-for-
+  // byte (no research attempted). Mirrored into AgentGoalSchema in
+  // shared/validation.ts.
+  webResearchEnabled?: boolean
 }
 
 export interface GeneratorControls {
@@ -144,6 +153,11 @@ export type ContextSectionClass =
   | 'locked-world-rule'
   | 'recent-excerpt'
   | 'full-text'
+  // Round 12: real Brave Search MCP results, opt-in via
+  // AgentGoal.webResearchEnabled, folded in by main/agent/context/assemble.ts
+  // as the highest-priority section when present — see assembleContext's
+  // `webResearch` param.
+  | 'web-research'
 
 export interface ContextSection {
   class: ContextSectionClass
@@ -177,7 +191,14 @@ export interface ModelCallSummary {
 export interface Citation {
   sourceUrl?: string
   note: string
-  reliability?: 'low' | 'medium' | 'high'
+  // 'author-stated': pre-existing World Builder interview citations (see
+  // worldBuilderCitation() in main/agent/simulator.ts) — was already
+  // produced before this union included it, a real pre-existing mirror gap.
+  // 'researched': Round 12 — a citation backed by a real Brave Search MCP
+  // result (see main/mcp/braveSearchAdapter.ts), distinct from 'high' since
+  // it marks genuine external verification rather than a model's own
+  // confidence in an unverified claim.
+  reliability?: 'low' | 'medium' | 'high' | 'author-stated' | 'researched'
 }
 
 // Payload shape for `kind: 'editorial-finding'` suggestions (Story Editor /

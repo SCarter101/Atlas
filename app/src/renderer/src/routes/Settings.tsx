@@ -59,6 +59,13 @@ export function Settings(): JSX.Element {
   const [apiKey, setApiKey] = useState('')
   const [apiKeySaved, setApiKeySaved] = useState(false)
   const [apiKeyMessage, setApiKeyMessage] = useState<string | null>(null)
+  // Round 12: Brave Search API key, for World Builder's opt-in real
+  // web-research path (main/mcp/braveSearchAdapter.ts) — same generic
+  // secrets bridge as the OpenRouter key above, just a different vault
+  // name ('brave-search-api-key'), no new IPC channel needed.
+  const [braveApiKey, setBraveApiKey] = useState('')
+  const [braveApiKeySaved, setBraveApiKeySaved] = useState(false)
+  const [braveApiKeyMessage, setBraveApiKeyMessage] = useState<string | null>(null)
   const [backupLabel, setBackupLabel] = useState('')
   const [backups, setBackups] = useState<BackupMeta[]>([])
   const [backupBusy, setBackupBusy] = useState(false)
@@ -117,6 +124,36 @@ export function Settings(): JSX.Element {
     setApiKeyMessage('Key cleared.')
   }
 
+  async function refreshBraveKeyState(): Promise<void> {
+    setBraveApiKeySaved(await window.atlas.secrets.has('brave-search-api-key'))
+  }
+
+  async function handleSaveBraveKey(): Promise<void> {
+    const trimmed = braveApiKey.trim()
+    if (!trimmed) {
+      setBraveApiKeyMessage('Enter a key before saving.')
+      return
+    }
+
+    const result = await window.atlas.secrets.set('brave-search-api-key', trimmed)
+    if (result.ok) {
+      setBraveApiKey('')
+      setBraveApiKeySaved(true)
+      setBraveApiKeyMessage('Key saved.')
+    } else {
+      setBraveApiKeyMessage(
+        result.error === 'encryption-unavailable' ? 'Encryption unavailable; key was not saved.' : `Save failed: ${result.error}`
+      )
+    }
+  }
+
+  async function handleClearBraveKey(): Promise<void> {
+    await window.atlas.secrets.clear('brave-search-api-key')
+    setBraveApiKey('')
+    setBraveApiKeySaved(false)
+    setBraveApiKeyMessage('Key cleared.')
+  }
+
   async function handleCreateBackup(): Promise<void> {
     setBackupBusy(true)
     setBackupMessage(null)
@@ -146,6 +183,7 @@ export function Settings(): JSX.Element {
     void refreshBackups()
     void refreshBackupSchedule()
     void refreshOpenRouterKeyState()
+    void refreshBraveKeyState()
     void loadModelCatalog()
     // loadModelCatalog is a stable store action reference (zustand), safe to
     // omit from deps — this should only run once on mount.
@@ -433,6 +471,55 @@ export function Settings(): JSX.Element {
             <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', lineHeight: 1.5 }}>
               Stored encrypted through the OS keychain via Electron safeStorage. Never transmitted in this simulated
               build.
+            </div>
+          </Section>
+
+          {/* Round 12: real web research for World Builder, via a Brave
+              Search MCP connection (main/mcp/braveSearchAdapter.ts). Opt-in
+              per run (see AgentRail.tsx's "Include real web research"
+              checkbox) — configuring a key here only makes the option
+              available, it doesn't turn research on by itself. */}
+          <Section title="Brave Search">
+            <div style={{ fontSize: 12.5, color: 'var(--c-ink-soft)', marginBottom: 10 }}>
+              Bring your own Brave Search API key so World Builder can opt into real web research on a run.
+            </div>
+            <div style={{ fontSize: 12.5, color: braveApiKeySaved ? 'var(--c-green)' : 'var(--c-ink-faint)', marginBottom: 8 }}>
+              {braveApiKeySaved ? 'Key saved ✓' : 'Not set'}
+            </div>
+            <input
+              type="password"
+              value={braveApiKey}
+              onChange={(e) => setBraveApiKey(e.target.value)}
+              placeholder="BSA…"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--c-border)',
+                background: 'var(--c-surface-raised)',
+                color: 'var(--c-ink)',
+                fontSize: 13,
+                marginBottom: 6
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <button
+                onClick={() => void handleSaveBraveKey()}
+                style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: 'var(--c-accent)', color: 'var(--c-on-accent)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Save key
+              </button>
+              <button
+                onClick={() => void handleClearBraveKey()}
+                style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink-soft)', fontSize: 12.5, cursor: 'pointer' }}
+              >
+                Clear
+              </button>
+            </div>
+            {braveApiKeyMessage && <div style={{ fontSize: 12, color: 'var(--c-ink-soft)', marginBottom: 6 }}>{braveApiKeyMessage}</div>}
+            <div style={{ fontSize: 11.5, color: 'var(--c-ink-faint)', lineHeight: 1.5 }}>
+              Stored encrypted through the OS keychain via Electron safeStorage, same as the OpenRouter key above. Used
+              only when a World Builder run explicitly opts into web research.
             </div>
           </Section>
 

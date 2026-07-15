@@ -7,6 +7,35 @@ import { emptyWorldBuilderInterviewAnswers, encodeWorldBuilderInterview } from '
 import { openIndexDb, type AtlasDb } from '../persistence/db'
 import { setPreferredEmbeddingProvider } from '../retrieval/embeddings/select'
 
+// Round 12: real web-research tests below mock the Brave adapter + key vault
+// at the module boundary (same technique as the OpenRouterAdapter mock right
+// below), and — since maybeResearchForWorldBuilder's capability lookup goes
+// through the real registry.ts, which calls app.getPath('userData') — mock
+// 'electron' the same way simulator.capabilityRecommendation.test.ts does.
+// Harmless for every pre-existing test in this file: none of them ever set
+// webResearchEnabled, and maybeResearchForWorldBuilder returns undefined
+// before it ever reaches a capability lookup when that flag is unset.
+let userDataDir = ''
+vi.mock('electron', () => ({
+  app: {
+    getPath: (name: string) => {
+      if (name === 'userData') return userDataDir
+      throw new Error(`unexpected app.getPath(${name}) in test`)
+    }
+  }
+}))
+
+const runBraveWebSearchMock = vi.fn()
+vi.mock('../mcp/braveSearchAdapter', () => ({
+  runBraveWebSearch: (query: string) => runBraveWebSearchMock(query)
+}))
+
+const hasSecretMock = vi.fn()
+vi.mock('../security/keyVault', () => ({
+  hasSecret: (name: string) => hasSecretMock(name),
+  getSecret: () => Promise.resolve(null)
+}))
+
 // Phase 8 §7.5: when a real provider adapter actually returns JSON-mode
 // outputText, runWorldBuilder's real branch should parse it into real Codex
 // proposals instead of the deterministic deriveWorldBuilderProposals/
@@ -43,6 +72,8 @@ vi.mock('./providers/openRouterAdapter', () => ({
 
 const { AgentRunManager, deriveWorldBuilderProposals, parseRealWorldBuilderProposals } = await import('./simulator')
 const { cleanupTestDir } = await import('./simulator.testUtils')
+const { installSeedCapabilities } = await import('../capabilities/seedTools')
+const { loadAgentRun } = await import('../persistence/agentRunStore')
 
 // The simulator emits its `result` step asynchronously after a permission
 // response, so a fixed `setTimeout(0)` occasionally samples `steps` before the
@@ -55,6 +86,28 @@ async function waitForStep(steps: AgentStep[], kind: AgentStep['kind']): Promise
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
   throw new Error(`Timed out waiting for a '${kind}' step`)
+}
+
+// Round 12: the web-research flow can involve a SECOND permission-request
+// round trip (see maybeResearchForWorldBuilder) after the first one
+// resolves. Every single logical request actually emits TWO
+// 'permission-request' steps (see requestPermission in simulator.ts: one
+// with decision: 'pending' when first asked, one echoing the final decision
+// once respondToPermission resolves it) — so indexing by position doesn't
+// reliably distinguish "the second request" from "the first request's own
+// resolved echo". Waiting for the next step whose decision is still
+// 'pending' AND whose requestId hasn't already been responded to is robust
+// regardless of that double-emit.
+async function waitForNextPendingPermission(steps: AgentStep[], respondedRequestIds: Set<string>): Promise<PermissionRequest> {
+  for (let i = 0; i < 200; i++) {
+    const pending = steps
+      .filter((s): s is AgentStep & { kind: 'permission-request' } => s.kind === 'permission-request')
+      .map((s) => s.detail as PermissionRequest)
+      .find((detail) => detail.decision === 'pending' && !respondedRequestIds.has(detail.requestId))
+    if (pending) return pending
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error('Timed out waiting for a new pending permission request')
 }
 
 describe('deriveWorldBuilderProposals — pure interview-to-Codex-proposals derivation', () => {
@@ -361,5 +414,190 @@ describe('AgentRunManager — World Builder real-model-output branch (Phase 8)',
     expect(result.proposedCodexChanges).toHaveLength(1)
     const payload = result.proposedCodexChanges![0].payload as { citations: { reliability: string }[] }
     expect(payload.citations[0].reliability).toBe('low')
+  })
+})
+
+describe('AgentRunManager — World Builder real web research (Round 12)', () => {
+  let userDataRoot: string
+  let projectRoot: string
+  let db: AtlasDb
+
+  beforeEach(async () => {
+    userDataRoot = mkdtempSync(join(tmpdir(), 'atlas-userdata-'))
+    userDataDir = userDataRoot
+    projectRoot = mkdtempSync(join(tmpdir(), 'atlas-worldbuilder-research-'))
+    db = await openIndexDb(projectRoot)
+    await installSeedCapabilities()
+    setPreferredEmbeddingProvider('hashing')
+    runBraveWebSearchMock.mockReset()
+    hasSecretMock.mockReset()
+    fakeOutputText = ''
+  })
+
+  afterEach(() => {
+    setPreferredEmbeddingProvider(undefined)
+    cleanupTestDir(userDataRoot)
+    cleanupTestDir(projectRoot)
+  })
+
+  function makeResearchGoal(
+    selectionText: string,
+    webResearchEnabled: boolean,
+    provider: 'openrouter' | 'simulator' = 'openrouter'
+  ): AgentGoal {
+    return {
+      runId: `run-world-builder-research-${provider}`,
+      agentRole: 'World-Builder',
+      modelRef:
+        provider === 'openrouter'
+          ? { provider: 'openrouter', modelId: 'anthropic/claude-sonnet-5', viaOpenRouter: true }
+          : { provider: 'simulator', modelId: 'simulator', viaOpenRouter: false },
+      userIntent: 'Propose new Codex entries for this passage',
+      scope: { sceneIds: ['scene-002'], selectionText },
+      constraints: {
+        maxTurns: 4,
+        maxTokens: 4000,
+        maxToolCalls: 3,
+        maxElapsedMs: 30000,
+        allowedCapabilityCategories: ['world-research']
+      },
+      webResearchEnabled
+    }
+  }
+
+  it('folds real web research into the assembled context and adds researched citations with sourceUrl', async () => {
+    fakeOutputText = JSON.stringify({
+      proposals: [{ entryType: 'location', name: 'Harborgate', summary: 'A weathered port town on the strait.' }]
+    })
+    hasSecretMock.mockResolvedValue(true)
+    runBraveWebSearchMock.mockResolvedValue([
+      { title: 'Harborgate history', url: 'https://example.com/harborgate', snippet: 'A real historical port town.' }
+    ])
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeResearchGoal('The Bronco idled outside the old harbor gate.', true)
+    const steps: AgentStep[] = []
+    manager.start(goal)
+    manager.onStep(goal.runId, (step) => steps.push(step))
+
+    // Two permission round trips in sequence: the whole-run gate, then the
+    // additive web-research gate from maybeResearchForWorldBuilder.
+    const responded = new Set<string>()
+    const firstRequest = await waitForNextPendingPermission(steps, responded)
+    manager.respondToPermission(goal.runId, firstRequest.requestId, 'approved-once')
+    responded.add(firstRequest.requestId)
+
+    const secondRequest = await waitForNextPendingPermission(steps, responded)
+    expect(secondRequest.capabilityId).toBe('global.tools.web-search-brave@1.0.0')
+    manager.respondToPermission(goal.runId, secondRequest.requestId, 'approved-once')
+    responded.add(secondRequest.requestId)
+
+    const resultStep = await waitForStep(steps, 'result')
+    const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[]; summary: string }
+    expect(result.proposedCodexChanges).toHaveLength(1)
+    expect(runBraveWebSearchMock).toHaveBeenCalledWith('The Bronco idled outside the old harbor gate.'.slice(0, 300))
+
+    const payload = result.proposedCodexChanges![0].payload as {
+      citations: { note: string; reliability: string; sourceUrl?: string }[]
+    }
+    expect(payload.citations).toHaveLength(2)
+    expect(payload.citations[0].reliability).toBe('low')
+    expect(payload.citations[1]).toEqual({
+      note: 'From a real web search for "The Bronco idled outside the old harbor gate.": Harborgate history',
+      reliability: 'researched',
+      sourceUrl: 'https://example.com/harborgate'
+    })
+    expect(result.summary).toContain('real web search')
+  })
+
+  it('falls back cleanly with no second permission request when no Brave API key is configured', async () => {
+    fakeOutputText = JSON.stringify({
+      proposals: [{ entryType: 'location', name: 'Harborgate', summary: 'A weathered port town on the strait.' }]
+    })
+    hasSecretMock.mockResolvedValue(false)
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeResearchGoal('The Bronco idled outside the old harbor gate.', true)
+    const steps: AgentStep[] = []
+    manager.start(goal)
+    manager.onStep(goal.runId, (step) => steps.push(step))
+
+    const responded = new Set<string>()
+    const firstRequest = await waitForNextPendingPermission(steps, responded)
+    manager.respondToPermission(goal.runId, firstRequest.requestId, 'approved-once')
+    responded.add(firstRequest.requestId)
+
+    const resultStep = await waitForStep(steps, 'result')
+    const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[]; summary: string }
+    expect(result.proposedCodexChanges).toHaveLength(1)
+    expect(runBraveWebSearchMock).not.toHaveBeenCalled()
+    // Exactly one logical permission request (pending + its resolved echo) —
+    // no second one was ever asked, since no key means an immediate,
+    // silent skip before maybeResearchForWorldBuilder ever reaches the
+    // permission-request call.
+    expect(steps.filter((s) => s.kind === 'permission-request')).toHaveLength(2)
+
+    const payload = result.proposedCodexChanges![0].payload as { citations: { reliability: string }[] }
+    expect(payload.citations).toHaveLength(1)
+    expect(payload.citations[0].reliability).toBe('low')
+    expect(result.summary).not.toContain('real web search')
+  })
+
+  it('denying the second (research) permission request skips research but the run still completes', async () => {
+    fakeOutputText = JSON.stringify({
+      proposals: [{ entryType: 'location', name: 'Harborgate', summary: 'A weathered port town on the strait.' }]
+    })
+    hasSecretMock.mockResolvedValue(true)
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeResearchGoal('The Bronco idled outside the old harbor gate.', true)
+    const steps: AgentStep[] = []
+    manager.start(goal)
+    manager.onStep(goal.runId, (step) => steps.push(step))
+
+    const responded = new Set<string>()
+    const firstRequest = await waitForNextPendingPermission(steps, responded)
+    manager.respondToPermission(goal.runId, firstRequest.requestId, 'approved-once')
+    responded.add(firstRequest.requestId)
+
+    const secondRequest = await waitForNextPendingPermission(steps, responded)
+    manager.respondToPermission(goal.runId, secondRequest.requestId, 'denied')
+    responded.add(secondRequest.requestId)
+
+    const resultStep = await waitForStep(steps, 'result')
+    const result = resultStep!.detail as { proposedCodexChanges?: SuggestionRef[] }
+    expect(result.proposedCodexChanges).toHaveLength(1)
+    expect(runBraveWebSearchMock).not.toHaveBeenCalled()
+
+    // finish() persists the record via saveAgentRun — reload it from disk to
+    // confirm the run reached 'completed', not 'cancelled' (a denied research
+    // request must only skip research, never cancel the whole run, unlike
+    // the top-of-method whole-run gate's denial path).
+    const record = await loadAgentRun(projectRoot, goal.runId)
+    expect(record.status).toBe('completed')
+
+    const payload = result.proposedCodexChanges![0].payload as { citations: { reliability: string }[] }
+    expect(payload.citations).toHaveLength(1)
+    expect(payload.citations[0].reliability).toBe('low')
+  })
+
+  it('webResearchEnabled has no effect when the model adapter is the simulator — no second permission request', async () => {
+    hasSecretMock.mockResolvedValue(true)
+
+    const manager = new AgentRunManager(projectRoot, db)
+    const goal = makeResearchGoal('The Bronco idled outside the old harbor gate.', true, 'simulator')
+    const steps: AgentStep[] = []
+    manager.start(goal)
+    manager.onStep(goal.runId, (step) => steps.push(step))
+
+    const responded = new Set<string>()
+    const firstRequest = await waitForNextPendingPermission(steps, responded)
+    manager.respondToPermission(goal.runId, firstRequest.requestId, 'approved-once')
+    responded.add(firstRequest.requestId)
+
+    const resultStep = await waitForStep(steps, 'result')
+    expect(resultStep).toBeDefined()
+    expect(runBraveWebSearchMock).not.toHaveBeenCalled()
+    expect(steps.filter((s) => s.kind === 'permission-request')).toHaveLength(2)
   })
 })

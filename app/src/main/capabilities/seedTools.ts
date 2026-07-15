@@ -89,7 +89,13 @@ function buildSeedManifests(now: string): CapabilityManifest[] {
     partial: Pick<
       CapabilityManifest,
       'id' | 'name' | 'description' | 'sideEffects' | 'compatibleAgentRoles' | 'inputSchema' | 'outputSchema'
-    >
+    > & {
+      // Round 12: additive overrides for a real network tool (Brave Search)
+      // whose defaults genuinely differ from every prior seed tool's — every
+      // pre-Round-12 caller omits both, preserving the exact defaults below.
+      localOnly?: boolean
+      permissionCategory?: string
+    }
   ): CapabilityManifest => ({
     schemaVersion: 1,
     id: partial.id,
@@ -106,8 +112,8 @@ function buildSeedManifests(now: string): CapabilityManifest[] {
     compatibleAgentRoles: partial.compatibleAgentRoles,
     compatibleModelCapabilities: ['tool-calling'],
     sideEffects: partial.sideEffects,
-    permissionCategory: partial.sideEffects === 'none' ? 'none' : 'read-manuscript',
-    localOnly: true,
+    permissionCategory: partial.permissionCategory ?? (partial.sideEffects === 'none' ? 'none' : 'read-manuscript'),
+    localOnly: partial.localOnly ?? true,
     costCharacteristics: { estTimeMs: 50 },
     validationStatus: 'passed',
     lifecycleState: 'enabled',
@@ -151,6 +157,31 @@ function buildSeedManifests(now: string): CapabilityManifest[] {
       compatibleAgentRoles: ['Generator', 'Dev-Editor', 'Line-Editor', 'Dialoguer', 'World-Builder'],
       inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       outputSchema: { type: 'object', properties: { results: { type: 'array', items: { type: 'object' } } } }
+    }),
+    // Round 12: World Builder's real web-research tool, backed by
+    // main/mcp/braveSearchAdapter.ts's real Brave Search MCP connection. Not
+    // sandboxed — same reasoning as codex-search above (a real network call
+    // and a spawned child process aren't something the vm.Script(toString())
+    // sandbox model can safely accept); the caller (runWorldBuilder) invokes
+    // runBraveWebSearch() directly rather than going through runSandboxed().
+    // A distinct id from seedSampleProject.ts's illustrative, never-executed
+    // 'global.tools.web-search' demo manifest (project-scoped, never
+    // installed as a real capability) — colliding ids would risk a real/
+    // illustrative mixup since lookups match by id without distinguishing
+    // scope.
+    base({
+      id: 'global.tools.web-search-brave',
+      name: 'Web Search (Brave)',
+      description: 'Real web search via a Brave Search MCP server, for World Builder research.',
+      sideEffects: 'network',
+      compatibleAgentRoles: ['World-Builder'],
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      outputSchema: {
+        type: 'object',
+        properties: { results: { type: 'array', items: { type: 'object' } } }
+      },
+      localOnly: false,
+      permissionCategory: 'external-network-access'
     })
   ]
 }
