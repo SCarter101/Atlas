@@ -11,6 +11,7 @@ import type {
 } from '@shared/schema/agent'
 import type { AgentRunSummary } from '@shared/ipc'
 import { ComingSoon } from '../components/ComingSoon'
+import { useAtlasStore } from '../state/store'
 
 const STATUS_COLOR: Record<AgentRunStatus, string> = {
   running: 'var(--c-accent-text)',
@@ -37,6 +38,9 @@ export function AgentRunsView(): JSX.Element {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedRun, setSelectedRun] = useState<AgentRunRecord | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [resumingId, setResumingId] = useState<string | null>(null)
+  const resumeAgentRun = useAtlasStore((s) => s.resumeAgentRun)
+  const pushToast = useAtlasStore((s) => s.pushToast)
 
   useEffect(() => {
     void window.atlas.agentRuns.list().then(setRuns)
@@ -53,6 +57,34 @@ export function AgentRunsView(): JSX.Element {
       .then(setSelectedRun)
       .finally(() => setLoadingDetail(false))
   }, [selectedRunId])
+
+  // Phase 9 (Track 4): dispatches the resume via the store (which handles the
+  // real IPC call + global run-state subscription the same way starting a
+  // fresh run does, see AgentRail.tsx's runAgent), then keeps THIS view's own
+  // fetched copies (the list row's status badge, and the open detail's step
+  // list) fresh by watching for the run's next 'result' step and re-fetching
+  // the full record at that point — simpler than re-deriving status/endedAt
+  // from a stream of raw AgentStep events this view doesn't otherwise track.
+  function handleResume(run: AgentRunRecord): void {
+    const runId = run.goal.runId
+    setResumingId(runId)
+    resumeAgentRun(runId, run.goal)
+
+    const unsubscribe = window.atlas.agentRuns.onStep(runId, (step) => {
+      if (step.kind !== 'result') return
+      void window.atlas.agentRuns
+        .get(runId)
+        .then((record) => {
+          setRuns((prev) => prev?.map((r) => (r.runId === runId ? { ...r, status: record.status, endedAt: record.endedAt } : r)) ?? prev)
+          setSelectedRun((prev) => (prev && prev.goal.runId === runId ? record : prev))
+        })
+        .catch((err) => pushToast('error', err instanceof Error ? err.message : 'Failed to refresh the resumed run.'))
+        .finally(() => {
+          setResumingId(null)
+          unsubscribe()
+        })
+    })
+  }
 
   if (runs === null) {
     return (
@@ -92,7 +124,7 @@ export function AgentRunsView(): JSX.Element {
         {loadingDetail || !selectedRun ? (
           <div style={{ fontSize: 13, color: 'var(--c-ink-faint)' }}>Loading run…</div>
         ) : (
-          <RunDetail run={selectedRun} />
+          <RunDetail run={selectedRun} resuming={resumingId === selectedRun.goal.runId} onResume={() => handleResume(selectedRun)} />
         )}
       </div>
     )
@@ -154,25 +186,54 @@ export function AgentRunsView(): JSX.Element {
   )
 }
 
-function RunDetail({ run }: { run: AgentRunRecord }): JSX.Element {
+function RunDetail({
+  run,
+  resuming,
+  onResume
+}: {
+  run: AgentRunRecord
+  resuming: boolean
+  onResume: () => void
+}): JSX.Element {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
         <div style={{ fontFamily: 'Source Serif 4, serif', fontSize: 22, fontWeight: 600 }}>{run.goal.agentRole}</div>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '3px 9px',
-            borderRadius: 10,
-            background: 'var(--c-surface)',
-            color: STATUS_COLOR[run.status],
-            textTransform: 'capitalize',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          {run.status}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {run.status === 'paused' && (
+            <button
+              onClick={onResume}
+              disabled={resuming}
+              style={{
+                fontSize: 11.5,
+                fontWeight: 600,
+                padding: '5px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--c-accent-text)',
+                background: 'transparent',
+                color: 'var(--c-accent-text)',
+                cursor: resuming ? 'default' : 'pointer',
+                opacity: resuming ? 0.6 : 1
+              }}
+            >
+              {resuming ? 'Resuming…' : 'Resume'}
+            </button>
+          )}
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: '3px 9px',
+              borderRadius: 10,
+              background: 'var(--c-surface)',
+              color: STATUS_COLOR[run.status],
+              textTransform: 'capitalize',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {run.status}
+          </span>
+        </div>
       </div>
       <div style={{ fontSize: 13, color: 'var(--c-ink-soft)', marginBottom: 4 }}>{run.goal.userIntent}</div>
       <div style={{ fontSize: 12, color: 'var(--c-ink-faint)', marginBottom: 24 }}>

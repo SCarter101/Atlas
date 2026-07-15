@@ -199,6 +199,13 @@ interface AtlasState {
   setPendingImportCandidates: (candidates: CodexCandidate[]) => void
   clearPendingImportCandidates: () => void
   startAgentRun: (goal: AgentGoal) => void
+  // Phase 9 (Track 4): resumes a run previously ended with the recoverable
+  // 'paused' status. Mirrors startAgentRun/agentRuns.start's dispatch
+  // plumbing exactly (see AgentRail.tsx's runAgent) — the caller must supply
+  // the run's own persisted goal (AgentRunsView.tsx already has it via
+  // agentRuns.get()) since a resumed run re-executes the whole role method
+  // from the top, not from a mid-flight checkpoint.
+  resumeAgentRun: (runId: string, goal: AgentGoal) => void
   handleAgentStep: (runId: string, step: AgentStep) => void
   resolvePermission: (decision: 'approved-once' | 'approved-session' | 'denied') => void
   revokeSessionApproval: (id: string) => void
@@ -602,6 +609,12 @@ export const useAtlasStore = create<AtlasState>((set, get) => ({
   },
 
   startAgentRun: (goal) => set({ currentRunGoal: goal, currentRunSteps: [] }),
+
+  resumeAgentRun: (runId, goal) => {
+    get().startAgentRun(goal)
+    void window.atlas.agentRuns.resume(runId)
+    window.atlas.agentRuns.onStep(runId, (step) => get().handleAgentStep(runId, step))
+  },
 
   handleAgentStep: (_runId, step) => {
     set((s) => ({ currentRunSteps: [...s.currentRunSteps, step] }))
