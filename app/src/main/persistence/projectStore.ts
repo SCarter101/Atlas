@@ -74,7 +74,16 @@ export async function listProjects(): Promise<{ projectRoot: string; manifest: P
 }
 
 export async function deleteProject(projectRoot: string): Promise<void> {
-  await rm(projectRoot, { recursive: true, force: true })
+  // maxRetries/retryDelay are fs.rm's own documented mechanism for exactly
+  // this class of error: on Windows, a sync client for a cloud-backed
+  // folder (OneDrive, in particular — Documents is commonly redirected
+  // there) can hold a brief, transient lock on a just-written file while it
+  // syncs, which surfaces here as EPERM/EBUSY/ENOTEMPTY on the recursive
+  // rm. Nothing in this app itself holds an open handle into a project
+  // folder at delete time (agent-run/scene writes are one-shot writeFile
+  // calls, not streams or watchers) — retrying with backoff is the correct
+  // fix for a lock that clears itself, not a bug to work around elsewhere.
+  await rm(projectRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
 }
 
 export async function createProject(

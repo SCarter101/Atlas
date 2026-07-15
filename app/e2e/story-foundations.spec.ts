@@ -16,8 +16,32 @@ import { launchAtlas } from './support/launchApp'
 test.describe('Atlas Story Foundations wizard', () => {
   let app: ElectronApplication
   let window: Page
+  let createdProjectTitle: string | undefined
 
   test.afterEach(async () => {
+    // This spec creates a brand-new, uniquely-timestamped project on every
+    // run via the real createProjectFromFoundations() IPC path (the whole
+    // point of the test), and — unlike the golden-path spec, which reuses
+    // the idempotent, already-seeded sample project — nothing ever cleaned
+    // that project up. Every local/CI run of this suite was silently
+    // accumulating another orphaned "E2E Smoke Test <timestamp>.atlas"
+    // folder in the real writer's Documents/Atlas Projects folder forever.
+    // Delete it here via the app's own real project.list/delete bridge
+    // (not a guessed filesystem path from this Node test process — Documents
+    // can be OS-redirected, e.g. onto OneDrive, so `os.homedir() + '/Documents'`
+    // would not reliably match app.getPath('documents')'s real resolution).
+    if (window && createdProjectTitle) {
+      await window
+        .evaluate(async (title) => {
+          const projects = await window.atlas.project.list()
+          const match = projects.find((p) => p.manifest.title === title)
+          if (match) await window.atlas.project.delete(match.projectRoot)
+        }, createdProjectTitle)
+        .catch(() => {
+          // Best-effort — a window that's already gone (e.g. the test itself
+          // crashed before creating the project) shouldn't fail the cleanup step.
+        })
+    }
     await app?.close()
   })
 
@@ -38,6 +62,7 @@ test.describe('Atlas Story Foundations wizard', () => {
     const titleInput = window.getByPlaceholder('Working title…')
     await expect(titleInput).toBeVisible({ timeout: 10_000 })
     const projectTitle = `E2E Smoke Test ${Date.now()}`
+    createdProjectTitle = projectTitle
     await titleInput.fill(projectTitle)
     await window.getByRole('button', { name: 'Continue', exact: true }).click()
 
