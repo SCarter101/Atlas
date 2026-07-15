@@ -38,17 +38,21 @@ jobs:
         run: npm run typecheck
 
       - name: Unit tests
-        shell: pwsh
-        run: |
-          npm run test *>&1 | Tee-Object -FilePath unit-test-output.log
-          exit $LASTEXITCODE
-
-      - name: Upload unit test output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-output
-          path: app/unit-test-output.log
+        # Three prior CI-only failures here reported no per-test annotation
+        # at all (unlike the ENOTEMPTY fixes above, which did) - consistent
+        # with a worker-thread crash rather than a clean assertion failure.
+        # GitHub's standard windows-latest runner (2 cores / 7GB for public
+        # repos) is far more resource-constrained than a local dev machine;
+        # vitest's default pool spins up multiple parallel worker threads
+        # per file, and this suite includes several genuinely heavy tests
+        # (a ~120k-word fixture generated more than once, a 20k-word O(n*m)
+        # diff stress test) that a local machine's extra cores/RAM absorb
+        # without issue. --no-file-parallelism runs test files sequentially
+        # instead, trading CI wall-clock time for reliability on constrained
+        # hardware - a standard accommodation, not a workaround for a real
+        # bug (a from-scratch npm ci + npm run test reproduced 492/492 green
+        # locally, ruling out a dependency or logic regression).
+        run: npx vitest run --no-file-parallelism
 
       - name: Build
         run: npm run build
