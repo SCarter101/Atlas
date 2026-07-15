@@ -22,7 +22,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Matches the Node version this whole test suite has actually been
+          # verified against locally throughout this project (v24) - Node 20
+          # was an arbitrary LTS pick with no real verification behind it and
+          # is a likely suspect for a CI-only failure with no per-test
+          # annotation (i.e. a crash, not a clean assertion failure).
+          node-version: 24
           cache: npm
           cache-dependency-path: app/package-lock.json
 
@@ -33,7 +38,17 @@ jobs:
         run: npm run typecheck
 
       - name: Unit tests
-        run: npm run test
+        shell: pwsh
+        run: |
+          npm run test *>&1 | Tee-Object -FilePath unit-test-output.log
+          exit $LASTEXITCODE
+
+      - name: Upload unit test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-output
+          path: app/unit-test-output.log
 
       - name: Build
         run: npm run build
