@@ -527,7 +527,9 @@ describe('AgentRunManager — World Builder real web research (Round 12)', () =>
     expect(payload.citations).toHaveLength(2)
     expect(payload.citations[0].reliability).toBe('low')
     expect(payload.citations[1]).toEqual({
-      note: 'From a real web search for "The Bronco idled outside the old harbor gate.": Harborgate history',
+      note:
+        'A real web search for "The Bronco idled outside the old harbor gate." returned this result, available in ' +
+        "context for this batch of proposals (not necessarily this entry's specific source): Harborgate history",
       reliability: 'researched',
       sourceUrl: 'https://example.com/harborgate'
     })

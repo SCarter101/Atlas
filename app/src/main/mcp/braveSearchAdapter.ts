@@ -31,9 +31,20 @@ const require = createRequire(import.meta.url)
 interface ActiveConnection {
   client: Client
   transport: StdioClientTransport
+  // Codex review (Round 12): the key the child process was actually spawned
+  // with — connect() compares this against the currently-saved secret on
+  // every call so a writer who rotates/clears their key in Settings doesn't
+  // silently keep talking to a process spawned under the old one (Settings'
+  // save/clear handlers are renderer-side and have no way to reach into the
+  // main process to kill it directly).
+  apiKey: string
 }
 
 let active: ActiveConnection | undefined
+// Dedupes concurrent connect() calls (e.g. two World Builder runs racing)
+// onto a single in-flight attempt, so they can't each spawn their own child
+// process and only the last one gets tracked for cleanup.
+let connecting: Promise<ActiveConnection | undefined> | undefined
 
 // The installed package has no "main"/"exports" field pointing at its bin
 // script (only "module", which Node's own require resolver ignores) — read
@@ -68,10 +79,27 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
 // killActiveBraveSearchProcess() (called from main/index.ts's before-quit
 // handler) guarantees it never outlives the Electron app.
 async function connect(): Promise<ActiveConnection | undefined> {
-  if (active) return active
+  if (connecting) return connecting
+  connecting = doConnect()
+  try {
+    return await connecting
+  } finally {
+    connecting = undefined
+  }
+}
 
+async function doConnect(): Promise<ActiveConnection | undefined> {
   const apiKey = await getSecret(SECRET_NAME)
-  if (!apiKey) return undefined
+  if (!apiKey) {
+    // Key was cleared since the last connection (or never set) — drop any
+    // stale connection rather than silently keep using it.
+    if (active) await killActiveBraveSearchProcess()
+    return undefined
+  }
+  if (active) {
+    if (active.apiKey === apiKey) return active
+    await killActiveBraveSearchProcess()
+  }
 
   const scriptPath = resolveBraveSearchServerScript()
   // Electron's own binary (process.execPath) run with ELECTRON_RUN_AS_NODE
@@ -100,7 +128,7 @@ async function connect(): Promise<ActiveConnection | undefined> {
     throw err
   }
 
-  active = { client, transport }
+  active = { client, transport, apiKey }
   return active
 }
 

@@ -1744,10 +1744,24 @@ export class AgentRunManager {
       })
       if (decision === 'denied') return undefined
 
+      // Codex review (Round 12): this real network call was previously
+      // ungated by the run's own tool-call/time budget — a goal with
+      // maxToolCalls: 1 (already spent on the world-research tool-call step
+      // above) or one already past maxElapsedMs could still spawn the Brave
+      // MCP child process. Checked directly (not via guardToolCall, which
+      // calls stopForBudget and would wrongly cancel the whole run) since a
+      // budget-exhausted research step must only skip research, same as
+      // every other gate in this method.
+      const state = this.runs.get(goal.runId)
+      if (!state) return undefined
+      if (state.budget.toolCallsUsed + 1 > goal.constraints.maxToolCalls) return undefined
+      if (Date.now() - state.budget.startedAtMs > goal.constraints.maxElapsedMs) return undefined
+
       const query = buildWorldBuilderResearchQuery(interview, selection)
       const results = await runBraveWebSearch(query)
       if (!results || results.length === 0) return undefined
 
+      state.budget.toolCallsUsed += 1
       return { query, results }
     } catch {
       return undefined
@@ -1863,6 +1877,16 @@ export class AgentRunManager {
         )
       : await assembleContext(this.projectRoot, this.db, goal, undefined, webResearch)
 
+    // Codex review (Round 12): assembleContext() can exclude the web-research
+    // candidate for being over the token budget (see buildSections in
+    // context/assemble.ts) while `webResearch` itself stays a truthy object —
+    // checking `webResearch` alone here would tell the model a "Web search
+    // results" section exists (and attach 'researched' citations) even when
+    // that section never actually reached the model's context. Derive actual
+    // inclusion from the real packed sections instead.
+    const webResearchIncluded =
+      !!webResearch && assembledContext.sections.some((s) => s.class === 'web-research' && s.included)
+
     // Phase 8 §7.5 real branch: request JSON-mode output describing 1-4
     // proposed Codex entries reasoned over the selection or the decoded
     // interview answers, covering both entry paths with one shared request.
@@ -1870,8 +1894,8 @@ export class AgentRunManager {
     // without it, there is no internet access here, so a real proposal's
     // content generation is upgraded from template to real reasoning, but
     // every citation still stays honestly labeled as model inference, never
-    // research (see the citation construction below). When webResearch *is*
-    // present, the instructions are adjusted accordingly — telling the model
+    // research (see the citation construction below). When webResearchIncluded
+    // is true, the instructions are adjusted accordingly — telling the model
     // it has no internet access while a real "Web search results" section
     // sits in its own context would be actively wrong, not just conservative.
     const modelCall = await this.runModelCallStep(goal, assembledContext, {
@@ -1883,7 +1907,7 @@ export class AgentRunManager {
         'plot-thread, relationship, theme, motif, research-note, historical-reference, scene-note, private-author-note. ' +
         'Propose new Codex entries worth tracking, reasoned over the manuscript selection or the World Builder interview ' +
         'answers given in the context above.' +
-        (webResearch
+        (webResearchIncluded
           ? ' A "Web search results" section in the context above contains real external search results you may treat ' +
             'as genuine research and cite accordingly.'
           : ' You have no access to external research or the internet — every proposal must be your own inference from ' +
@@ -1922,15 +1946,20 @@ export class AgentRunManager {
                 reliability: 'low'
               }
             ]
-      // Round 12: when real Brave Search results actually made it into this
-      // call's context, every real proposal gets an additional 'researched'
-      // citation per result (capped the same way webResearch's own results
-      // already are by the adapter/query) — appended, not substituted, so
-      // the pre-existing interview/low-reliability citation is preserved
-      // exactly as before whenever webResearch is undefined.
-      const researchCitations: Array<{ note: string; reliability: 'researched'; sourceUrl: string }> = webResearch
-        ? webResearch.results.map((r) => ({
-            note: `From a real web search for "${webResearch.query}": ${r.title}`,
+      // Round 12: when real Brave Search results actually reached this call's
+      // context (webResearchIncluded — see above), every real proposal gets
+      // an additional 'researched' citation per result — appended, not
+      // substituted, so the pre-existing interview/low-reliability citation
+      // is preserved exactly as before whenever research wasn't included.
+      // Codex review: the model's JSON schema has no per-proposal source
+      // field, so there is no real way to know which (if any) specific
+      // result actually informed a given entry — attaching every result to
+      // every proposal as if each one were individually confirmed would
+      // overclaim a source relationship the code cannot verify. The note is
+      // worded as "available in context," not "the source of this entry."
+      const researchCitations: Array<{ note: string; reliability: 'researched'; sourceUrl: string }> = webResearchIncluded
+        ? (webResearch as WebResearchContext).results.map((r) => ({
+            note: `A real web search for "${(webResearch as WebResearchContext).query}" returned this result, available in context for this batch of proposals (not necessarily this entry's specific source): ${r.title}`,
             reliability: 'researched',
             sourceUrl: r.url
           }))
@@ -1968,7 +1997,7 @@ export class AgentRunManager {
       // handleAgentStep() in state/store.ts. The suggestion's own `kind`
       // ('codex-addition') is what the UI actually branches on.
       summary: `World Builder proposed ${finalSuggestions.length} Codex addition${finalSuggestions.length === 1 ? '' : 's'}.${
-        webResearch ? ' Includes findings from a real web search.' : ''
+        webResearchIncluded ? ' Includes findings from a real web search.' : ''
       }${finalContradictionNote ? ` ${finalContradictionNote.summary}` : ''}`,
       proposedManuscriptChanges: finalSuggestions,
       proposedCodexChanges: finalSuggestions,

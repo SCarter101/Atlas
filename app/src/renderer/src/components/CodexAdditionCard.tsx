@@ -121,7 +121,7 @@ export function CodexAdditionCard({ suggestion }: { suggestion: SuggestionRef })
             <div key={i} style={{ fontSize: 10.5, color: 'var(--c-ink-faint)', lineHeight: 1.4 }}>
               {c.note}
               {c.reliability ? ` (${RELIABILITY_LABEL[c.reliability]})` : ''}
-              {c.sourceUrl && (
+              {c.sourceUrl && /^https?:\/\//i.test(c.sourceUrl) && (
                 <>
                   {' — '}
                   <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--c-accent)' }}>
