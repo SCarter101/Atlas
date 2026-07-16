@@ -1148,28 +1148,188 @@ capability-lifecycle completion, pause/resume) has shipped. Only Phase 9's own e
 items (macOS, real signing, real CI, a real external telemetry backend) remain open across
 Phases 6-9.
 
-## Current verified state (as of Round 11 / Phase 8 completion)
+**Round 12 — Phase 9 remainder ("Beta Hardening & Distribution," closing the loop) + World
+Builder MCP web research**
+
+Closed out three of Phase 9's four explicitly-deferred items (real code-signing certificate,
+real CI execution, GUI installer click-through) plus one new item the user requested after an
+exploratory question about MCP: World Builder's long-standing zero-internet-access gap, closed
+via a real Model Context Protocol connection to Brave Search. **macOS build/verification stays
+deferred, now explicitly as a post-beta item** (confirmed scope decision) rather than an
+open Phase 9 loose end; the fourth Phase 9 deferral (a real external telemetry/crash-reporting
+backend) stays local-only by design, per a confirmed scope decision — no work needed there.
+Scope confirmed via `AskUserQuestion` before planning: self-signed test certificate (not a
+real CA-trusted one — nothing to buy/verify against in this environment), Brave Search API
+(the user's own original framing), genuine MCP protocol (not a raw REST call to Brave's API).
+
+*Planning note:* a `Plan`-agent validation pass over the draft design caught a significant,
+previously-undetected, unrelated packaging bug before any Track D code was written:
+`app/package.json`'s `build.files` was exactly `["out/**/*", "package.json"]` — **no
+`node_modules` glob at all** — directly contradicting Round 10's CLAUDE.md claim that "all
+production `node_modules` dependencies bundle correctly into the asar." That claim was never
+actually exercised against a real packaged `.exe` (Round 10's own E2E suite launches
+`out/main/index.js` directly, before packaging, never the electron-builder output) — every
+real dependency (`zod`, `sql.js`, `docx`, `pdfkit`, `jszip`, `mammoth`, ...) would have failed
+to resolve in a real installed copy of every prior round's build. Fixed first, since Track D's
+own packaging-verification step depended on it anyway.
+
+*Track A — Packaging fix + self-signed code signing (orchestrator-direct):* added
+`"node_modules/**/*"` to `build.files`. New `app/scripts/create-self-signed-cert.ps1`
+(committed, reusable — generates a fresh untrusted-chain test certificate via
+`New-SelfSignedCertificate`/`Export-PfxCertificate` on demand; the actual `.pfx`/password stay
+in a gitignored `app/certs/`, never committed even for a test-only cert). Verified end-to-end:
+a real `npm run dist` build now has thousands of real `node_modules` entries in its asar
+(previously near-zero), the installer and `win-unpacked/Atlas.exe` are genuinely signed
+(self-signed, untrusted chain — confirmed via `Get-AuthenticodeSignature`), and the packaged
+exe boots to a real window when launched directly (not `npm run dev`, not `out/`).
+
+*Track B — Real GitHub Actions CI (orchestrator-direct):* new `.github/workflows/ci.yml`,
+`windows-latest`, running typecheck/unit tests/build/E2E on every push/PR to `master`. Getting
+this green took real debugging, not just adding the workflow file:
+- The first two CI runs failed 11 tests across 7 files with `ENOTEMPTY: directory not empty,
+  rmdir ...` during test cleanup — the Round 11 CLAUDE.md entry had already documented this as
+  an occasional *local* flake isolated to one file (`simulator.lineEditor.test.ts`'s
+  `afterEach`), but a slower/more-contended CI Windows runner hit the same underlying race (a
+  fire-and-forget `recordUsage()`/similar write still in flight when a test's `rmSync(dir,
+  {recursive:true})` cleanup runs) far more reliably, and it turned out to affect **34 call
+  sites across 21 files**, not just one. Fixed with a shared `cleanupTestDir()` retry-with-backoff
+  helper, moved to a new top-level `app/src/main/testUtils.ts` (re-exported from
+  `agent/simulator.testUtils.ts` so already-migrated callers needed no changes) and applied
+  everywhere `rmSync` did directory-recursive test cleanup.
+- The next run failed with no per-test annotation at all (just a generic "exit code 1") — a
+  from-scratch `npm ci` + `npm run test` reproduced 492/492 green locally, ruling out a
+  dependency-resolution or logic regression. Root cause: vitest's default parallel worker-thread
+  pool, fine on a local dev machine's extra cores/RAM, doesn't reliably survive this suite's
+  heavier tests (a ~120k-word fixture built more than once, a 20k-word O(n·m) diff stress test)
+  on GitHub's more resource-constrained shared runner — a worker crash, not a clean assertion
+  failure, hence no annotation. Fixed with `--no-file-parallelism` in the CI step specifically
+  (kept `npm run test`'s default parallel behavior for local iteration speed).
+- One further genuine flake: a perf-test wall-clock assertion (`ensureIndexed()` second-call
+  "near-instant no-op," previously `<500ms`) measured 598ms on CI vs. 88ms locally — loosened to
+  `<2000ms`, still well below the full-pass assertion's `5000ms` a few lines above.
+- CI is now fully green end-to-end (checkout → typecheck → unit tests → build → E2E) on
+  `master`.
+
+*Track D — World Builder real web research via Brave Search MCP (one worktree agent, resumed
+once after a transient API auth error mid-task — substantial work was already committed;
+resumed via `SendMessage` naming exactly what was done and what remained, per the standing
+pattern):* the first real external MCP connection anywhere in this app — `shared/mcp.ts`'s
+`StdioMcpAdapter`/`configuredMcpServers` scaffolding (illustrative since Round 3) finally has a
+genuine implementation behind one of its entries. New `main/mcp/braveSearchAdapter.ts`: a real
+`@modelcontextprotocol/sdk` `Client`/`StdioClientTransport` connection to the installed
+`@brave/brave-search-mcp-server`, spawned via `process.execPath` + `ELECTRON_RUN_AS_NODE=1`
+(one code path, no dev/packaged branching), discovering the actual search tool via a real
+`tools/list` call rather than a hardcoded guess, parsing each result's per-block JSON-stringified
+`{url, title, description}` defensively, and never throwing (every failure — no key, spawn
+failure, protocol error, unparseable response — degrades to `undefined`, matching this file's
+established "augment, never block" contract for every other real-tool call). New real
+`dependencies` (not dev): `@brave/brave-search-mcp-server`, `@modelcontextprotocol/sdk`, with
+`build.asarUnpack` entries for both (asar is read-only; a spawned child process needs real files
+on disk). `Citation.reliability` widened to add `'researched'` **and** `'author-stated'` (the
+latter closing a real pre-existing gap — `worldBuilderCitation()` has returned a literal
+`'author-stated'` since Round 5, never in the old union). `AgentGoal.webResearchEnabled?`
+(mirrored into `AgentGoalSchema` by hand, per the standing zod-silently-strips-unmirrored-fields
+gotcha). `assembleContext()` gained an additive, opt-in `webResearch` parameter — a genuinely
+new, independent, highest-priority context source, a complete no-op for every pre-Round-12
+caller and every run that doesn't opt in. New `global.tools.web-search-brave` capability
+manifest (`seedTools.ts`, `sideEffects: 'network'`, `localOnly: false`,
+`permissionCategory: 'external-network-access'` — a distinct id from `seedSampleProject.ts`'s
+illustrative, never-executed `global.tools.web-search` demo manifest, to avoid a real/demo id
+collision). `runWorldBuilder()`'s new `maybeResearchForWorldBuilder()`: gated on
+`webResearchEnabled` + a real (non-simulator) model + the capability being enabled + a key
+being configured; a **second, additive** permission request (distinct from the whole-run gate)
+whose denial skips research only, never cancels the run — the fallback-preservation guarantee
+this whole feature was built against (every existing behavior byte-for-byte unchanged when
+research isn't enabled/available/denied) held up against the full pre-existing test suite
+unmodified. Settings gained a Brave Search API key section (exact mirror of the OpenRouter key
+UI, same generic `secrets:set/has/clear` bridge, no new IPC channel). `AgentRail.tsx` gained a
+World-Builder-only, Advanced-Mode-gated "Include real web research" checkbox. `CodexAdditionCard`
+now renders a `'researched'` reliability label and a clickable `sourceUrl` link.
+
+*Track C — Real GUI installer click-through (orchestrator-direct, via computer-use, last):*
+directly closes Round 10's accepted limitation ("an unattended background job couldn't
+interactively click through"). Rebuilt the signed installer from the fully-merged `master`
+(Track A's own build predated Track D). Computer-use access required the user to explicitly
+approve each app-access request live (an unattended/auto-mode session can't click "Allow" on
+its own) — granted once by the user, then reused. Clicked through the real NSIS wizard
+("Only for me," matching `perMachine: false` — no UAC elevation involved, confirmed by the
+installer's own process running at "full" tier rather than being blocked as elevated); no
+SmartScreen prompt appeared. Confirmed the installed app (a) auto-launched after setup and
+opened the real Cottonmouth sample project correctly, including the first-launch onboarding
+tour firing as expected on a fresh profile with no `localStorage`; (b) resolves cleanly via its
+registered Start Menu entry (`open_application` found it by display name); (c) uninstalls
+cleanly via `Uninstall Atlas.exe` in the install directory — confirmed both the install
+directory and the desktop shortcut are fully gone afterward, leaving the machine clean.
+
+*Codex adversarial-review (closing step, retained):* the full Track D diff surfaced 4 findings,
+all confirmed against the actual code and fixed:
+- **HIGH — every real-model proposal in a run got the identical set of `'researched'` citations
+  for every Brave result**, regardless of whether that specific proposal had any real
+  relationship to a given result — the model's JSON schema has no per-proposal source field, so
+  there was no way to verify a claimed 1:1 source relationship. Reworded citation notes to say a
+  result was "available in context for this batch of proposals," not the specific source of an
+  entry — honest about what the code can actually confirm, matching this project's long-standing
+  citation-honesty convention (`'author-stated'` vs. `'low'` vs. now `'researched'`).
+- **HIGH — `assembleContext()`'s own budget packing can exclude the web-research candidate**
+  (over the writer's configured token budget) while the caller's `webResearch` object stays
+  truthy — `runWorldBuilder()` was checking that raw truthiness, not actual inclusion, when
+  deciding whether to tell the model a "Web search results" section exists and whether to
+  attach `'researched'` citations, so a budget-excluded run could still claim research it never
+  actually gave the model. Now derives real inclusion from `assembledContext.sections` (class
+  `'web-research'`, `included: true`) and uses that everywhere instead.
+- **MEDIUM — the real Brave network call was ungated by the run's own tool-call/time budget**
+  (`goal.constraints.maxToolCalls`/`maxElapsedMs`), unlike every other real-tool call in this
+  file — a goal with `maxToolCalls: 1` (already spent on the world-research tool-call step)
+  could still spawn the Brave MCP child process. Added a direct budget check inside
+  `maybeResearchForWorldBuilder` (not `guardToolCall`, which calls `stopForBudget` and would
+  wrongly cancel the whole run over an optional research step) and counts a successful search
+  against `toolCallsUsed`.
+- **MEDIUM — clearing/rotating the Brave API key in Settings had no way to reach the main
+  process's already-spawned MCP connection.** `connect()`'s `if (active) return active` never
+  re-checked the vault, so a live connection kept using the old key until an unrelated failure
+  or app restart. Now re-checks the current secret against the key the active connection was
+  spawned with on every call, reconnecting (or tearing down, if the key was cleared) when it
+  changed.
+
+Also hardened two lower-severity items the same review raised (unconfirmed but cheap to
+address): `connect()` now dedupes concurrent connection attempts onto one in-flight promise
+(previously two racing calls could each spawn their own child process), and
+`CodexAdditionCard` only renders a citation's `sourceUrl` as a clickable link when it's
+genuinely `http(s)://`. Left one item explicitly unfixed (documented, not silently dropped): the
+Brave MCP server's `isError` responses are treated uniformly as zero results — whether that
+also silently swallows a rate-limit or auth error rather than a genuine "no results" case
+couldn't be confirmed without live server access in this environment.
+
+**Explicitly deferred from Round 12** (confirmed scope, not oversight): macOS build/
+verification is now an explicit **post-beta** item (not just "no Mac available this round," per
+prior rounds' framing) — a real product decision, not an oversight; a real CA-trusted signing
+certificate (the seam is fully wired and proven with a self-signed test cert; nothing to buy in
+this environment); a real external telemetry/crash-reporting backend (stays local-only by
+design, per this round's own confirmed scope). Carried-over Phase 3-9 deferrals still stand,
+except the two this round explicitly closed: World Builder web research (§7.5) and real MCP
+connectivity (§8) are no longer gaps.
+
+## Current verified state (as of Round 12 completion)
 
 - `npx tsc --noEmit` clean on both `tsconfig.web.json` and `tsconfig.node.json`.
-- `npx vitest run` — 492/492 tests passing across 67 files (was 443/63 at Round 10), stable
-  across multiple consecutive full-suite runs performed after each of the 4 Wave-1 track merges
-  and after the Codex-review fixes. One known pre-existing flake (unrelated to this round):
-  `simulator.lineEditor.test.ts`'s `afterEach` occasionally hits an `ENOTEMPTY`/`ENOENT` Windows
-  temp-directory cleanup race against its own fire-and-forget usage-log write; passes reliably
-  in isolation and on most full-suite runs — not chased down further this round.
-- `npm run test:e2e` — 2/2 Playwright specs still passing against the rebuilt `out/` (golden
-  path; Story Foundations wizard fast path), run both before and after the Codex-review fixes.
-- A real `npm run dev`/`npm run build` smoke pass drove all 4 of this round's new UI surfaces via
-  a one-off Playwright-for-Electron script (not committed — no renderer-component test
-  infrastructure exists in this repo to extend): the Outline framework picker + beat list, the
-  Timeline "Continuity Checks" tab, Library's capability-lifecycle controls (confirmed real data
-  in the "Usage & Efficiency" table, Advanced-Mode gating behaving identically to the
-  pre-existing Enable/Disable/Deprecate buttons), and Agent Runs — no console errors beyond 3
-  pre-existing, unrelated `ERR_FILE_NOT_FOUND` resource warnings present on every route.
-- GitHub remote is live at `https://github.com/SCarter101/Atlas.git` (`origin`, `master`
-  tracking). No GitHub Actions workflow exists yet — the E2E suite runs locally only.
-- No real OpenRouter/LM Studio credentials or macOS hardware were available in this
-  environment, same caveat as every prior round for the model-call paths; this round's own new
-  surfaces (outline frameworks, continuity checks, capability lifecycle, pause/resume) were all
-  verified for real, directly, in-environment — not simulated or mocked — since none of them
-  depend on a live model credential.
+- `npx vitest run` — 506/506 tests passing across 68 files (was 492/67 at Round 11), stable
+  across multiple consecutive full-suite runs both locally and via the new CI workflow. The
+  Round 11 entry's documented `simulator.lineEditor.test.ts` ENOTEMPTY flake is resolved as part
+  of this round's broader `cleanupTestDir()` fix (applied to all 21 affected files, including
+  that one).
+- GitHub Actions CI (`.github/workflows/ci.yml`) is green end-to-end on `master`: checkout →
+  typecheck → unit tests → build → E2E, confirmed via the GitHub API across several real runs
+  during this round's own debugging.
+- `npm run dist` produces a genuinely signed (self-signed test cert) installer whose asar
+  contains real `node_modules` (the Round 10 CLAUDE.md claim to the contrary is now corrected);
+  a full real GUI click-through (install → launch → open the sample project → uninstall) was
+  performed via computer-use with the user's live approval, not just verified via `win-unpacked`
+  inspection.
+- No real OpenRouter/LM Studio/Brave Search credentials were available in this environment for
+  a live end-to-end World Builder research call — verified via the mocked test suite instead
+  (`braveSearchAdapter.test.ts`'s 9 cases, `simulator.worldBuilder.test.ts`'s extended real/
+  fallback/denied-permission/budget cases) plus a manual smoke check that a missing/no key
+  degrades gracefully rather than crashing. Same caveat as every prior round's real-model-call
+  paths.
+- No macOS hardware was available in this environment, same as every prior round — now an
+  explicit post-beta item rather than a recurring "still not done this round" note.
